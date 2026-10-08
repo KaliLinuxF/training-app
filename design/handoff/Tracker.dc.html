@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Lora:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#ECE6DD;font-family:'Onest',system-ui,sans-serif;color:#2B2521;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+a{color:#2B2521;text-decoration:underline}a:hover{color:oklch(0.50 0.11 38)}
+input,textarea,button{font-family:inherit}
+input::placeholder,textarea::placeholder{color:#A99D93}
+</style>
+</helmet>
+<div style="max-width:{{ rootMax }};margin:0 auto;min-height:var(--appH,100vh);background:var(--paper,#F6F2EC);position:relative;box-shadow:0 0 0 1px var(--line,#EAE3D9);font-variant-numeric:tabular-nums;font-family:var(--font,'Onest',system-ui,sans-serif);color:var(--ink,#2B2521);display:flex;align-items:stretch">
+<sc-if value="{{ isDesktop }}" hint-placeholder-val="{{ false }}">
+<div style="width:248px;flex-shrink:0;border-right:1px solid var(--line,#EAE3D9);padding:28px 16px;box-sizing:border-box;display:flex;flex-direction:column;gap:6px;position:sticky;top:0;align-self:flex-start;min-height:var(--appH,100vh)">
+  <div style="display:flex;align-items:center;gap:10px;padding:0 10px 22px"><div style="width:36px;height:36px;border-radius:var(--r12,12px);background:var(--solid,#2B2521);color:var(--onSolid,#fff);display:flex;align-items:center;justify-content:center;font-weight:700">Л</div><span style="font-family:var(--display,inherit);font-size:20px;font-weight:700;letter-spacing:-0.02em">Легко</span></div>
+  <sc-for list="{{ sideTabs }}" as="t" hint-placeholder-count="4">
+    <button onClick="{{ t.onClick }}" style="border:0;background:{{ t.bg }};color:{{ t.color }};text-align:left;font-size:15px;font-weight:600;padding:12px 14px;border-radius:var(--r14,14px);cursor:pointer;display:flex;align-items:center;gap:10px"><span style="width:8px;height:8px;border-radius:50%;background:{{ t.dot }}"></span>{{ t.label }}</button>
+  </sc-for>
+  <button onClick="{{ openToday }}" style="margin-top:18px;border:0;background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-weight:700;font-size:15px;border-radius:var(--r14,14px);min-height:48px;cursor:pointer">+ Записати день</button>
+</div>
+</sc-if>
+<div style="flex:1;min-width:0;padding:{{ mainPad }};display:flex;flex-direction:column;gap:14px">
+
+<sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+<div style="display:grid;grid-template-columns:{{ cols }};gap:14px;align-items:start">
+  <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:flex-end;padding:8px 4px 4px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:14px;color:var(--muted,#786C63)">{{ todayLabel }}</div>
+      <div style="font-family:var(--display,inherit);font-size:30px;font-weight:700;letter-spacing:-0.025em;line-height:1.1">{{ greeting }}</div>
+    </div>
+    <div style="width:44px;height:44px;border-radius:50%;background:var(--accT,oklch(0.94 0.03 38));display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accD,oklch(0.50 0.11 38))">Л</div>
+  </div>
+
+  <sc-for list="{{ banners }}" as="b" hint-placeholder-count="1">
+    <div style="grid-column:1/-1;display:flex;align-items:center;gap:12px;background:var(--accT,oklch(0.94 0.03 38));border-radius:var(--r20,20px);padding:14px 14px 14px 16px">
+      <div style="width:10px;height:10px;border-radius:50%;background:var(--acc,oklch(0.70 0.11 38));flex-shrink:0"></div>
+      <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+        <div style="font-weight:600;font-size:15px">{{ b.title }}</div>
+        <div style="font-size:13px;color:var(--ink2,#5E534B)">{{ b.sub }}</div>
+      </div>
+      <button onClick="{{ b.onClick }}" style="border:0;background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-weight:600;font-size:14px;padding:10px 14px;border-radius:var(--r12,12px);cursor:pointer;min-height:40px">{{ b.cta }}</button>
+    </div>
+  </sc-for>
+
+  <div style="background:var(--solid,#2B2521);color:var(--onSolid,#FBF8F4);border-radius:var(--r28,28px);padding:22px 22px 20px;display:flex;flex-direction:column;gap:18px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start">
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:14px;color:var(--onSolidMuted,#C9BEB4)">Поточна вага</div>
+        <div style="display:flex;align-items:baseline;gap:6px"><span style="font-family:var(--display,inherit);font-size:58px;font-weight:700;letter-spacing:-0.04em;line-height:1">{{ curW }}</span><span style="font-size:18px;color:var(--onSolidMuted,#C9BEB4)">кг</span></div>
+      </div>
+      <div style="background:var(--acc,oklch(0.70 0.11 38));color:var(--onAcc,#2B2521);font-weight:700;font-size:15px;padding:8px 12px;border-radius:999px">{{ lostSigned }} кг</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="height:8px;border-radius:99px;background:var(--solidSub2,rgba(255,255,255,0.14));overflow:hidden"><div style="height:100%;border-radius:99px;background:var(--acc,oklch(0.70 0.11 38));width:{{ pctW }}"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--onSolidMuted,#C9BEB4)"><span>Старт {{ startW }}</span><span>{{ pctLabel }} шляху</span><span>Ціль {{ goalW }}</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div style="background:var(--solidSub,rgba(255,255,255,0.08));border-radius:var(--r16,16px);padding:12px 14px;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:var(--onSolidMuted,#C9BEB4)">Втрачено</span><span style="font-size:20px;font-weight:600">{{ lostW }} кг</span></div>
+      <div style="background:var(--solidSub,rgba(255,255,255,0.08));border-radius:var(--r16,16px);padding:12px 14px;display:flex;flex-direction:column;gap:2px"><span style="font-size:13px;color:var(--onSolidMuted,#C9BEB4)">До цілі</span><span style="font-size:20px;font-weight:600">{{ leftW }} кг</span></div>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--line,#EAE3D9)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Сьогодні</div>
+      <button onClick="{{ openToday }}" style="border:0;background:transparent;color:var(--muted,#786C63);font-size:14px;font-weight:500;cursor:pointer;padding:8px 0">Відкрити день →</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div onClick="{{ openToday }}" style="background:var(--paper,#F6F2EC);border-radius:var(--r16,16px);padding:12px 14px;display:flex;flex-direction:column;gap:3px;cursor:pointer"><span style="font-size:13px;color:var(--muted,#786C63)">Харчування</span><span style="font-size:16px;font-weight:600">{{ todayFood }}</span></div>
+      <div onClick="{{ openToday }}" style="background:var(--paper,#F6F2EC);border-radius:var(--r16,16px);padding:12px 14px;display:flex;flex-direction:column;gap:3px;cursor:pointer"><span style="font-size:13px;color:var(--muted,#786C63)">Калорії</span><span style="font-size:16px;font-weight:600">{{ todayKcal }}</span></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:13px;color:var(--muted,#786C63)">Тренування · <span style="color:var(--ink,#2B2521);font-weight:600">{{ todayTrain }}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <button onClick="{{ trainYes }}" style="border:1.5px solid {{ yesBorder }};background:{{ yesBg }};color:var(--ink,#2B2521);font-weight:600;font-size:15px;border-radius:var(--r14,14px);min-height:50px;cursor:pointer">✓ Було</button>
+        <button onClick="{{ trainNo }}" style="border:1.5px solid {{ noBorder }};background:{{ noBg }};color:{{ noFg }};font-weight:600;font-size:15px;border-radius:var(--r14,14px);min-height:50px;cursor:pointer">✕ Не було</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="grid-column:1/-1;display:grid;grid-template-columns:{{ quickCols }};gap:10px">
+    <sc-for list="{{ quick }}" as="q" hint-placeholder-count="4">
+      <button onClick="{{ q.onClick }}" style="border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);border-radius:var(--r20,20px);padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;text-align:left;min-height:64px">
+        <span style="width:36px;height:36px;border-radius:var(--r12,12px);background:{{ q.bg }};display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:500;color:var(--ink,#2B2521);flex-shrink:0">+</span>
+        <span style="display:flex;flex-direction:column;gap:1px"><span style="font-size:12px;color:var(--muted,#786C63)">Додати</span><span style="font-size:15px;font-weight:600;color:var(--ink,#2B2521)">{{ q.label }}</span></span>
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em;padding:6px 4px 0">Цей тиждень</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <sc-for list="{{ weekTiles }}" as="t" hint-placeholder-count="4">
+        <div style="background:var(--card,#FFFDF9);border:1px solid var(--line,#EAE3D9);border-radius:var(--r20,20px);padding:14px 16px;display:flex;flex-direction:column;gap:4px">
+          <span style="font-size:13px;color:var(--muted,#786C63)">{{ t.label }}</span>
+          <span style="font-size:24px;font-weight:700;letter-spacing:-0.02em;color:{{ t.color }}">{{ t.value }}<span style="font-size:14px;font-weight:500;color:var(--muted,#786C63)"> {{ t.unit }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--line,#EAE3D9)">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Поточні заміри</div>
+      <span style="font-size:13px;color:var(--muted,#786C63)">{{ lastMeasureDate }}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+      <sc-for list="{{ measuresNow }}" as="m" hint-placeholder-count="3">
+        <div style="background:var(--paper,#F6F2EC);border-radius:var(--r16,16px);padding:12px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:13px;color:var(--muted,#786C63)">{{ m.label }}</span>
+          <span style="font-size:22px;font-weight:700;letter-spacing:-0.02em">{{ m.value }}</span>
+          <span style="font-size:13px;font-weight:600;color:var(--acc2D,oklch(0.47 0.09 150))">{{ m.delta }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:6px 18px;display:flex;flex-direction:column;border:1px solid var(--line,#EAE3D9)">
+    <sc-for list="{{ control }}" as="c" hint-placeholder-count="3">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 0;border-bottom:1px solid {{ c.line }}">
+        <span style="font-size:14px;color:var(--muted,#786C63)">{{ c.label }}</span>
+        <span style="font-size:15px;font-weight:600;text-align:right">{{ c.value }}</span>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isCal }}" hint-placeholder-val="{{ false }}">
+<div style="display:grid;grid-template-columns:{{ cols }};gap:14px;align-items:start">
+  <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:flex-end;padding:8px 4px 4px">
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:14px;color:var(--muted,#786C63)">Історія по днях</div>
+      <div style="font-family:var(--display,inherit);font-size:30px;font-weight:700;letter-spacing:-0.025em;line-height:1.1">Календар</div>
+    </div>
+  </div>
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:16px 14px 14px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px">
+      <button onClick="{{ prevMonth }}" style="width:44px;height:44px;border-radius:var(--r14,14px);border:1px solid var(--line,#EAE3D9);background:var(--paper,#F6F2EC);font-size:18px;cursor:pointer;color:var(--ink,#2B2521)">‹</button>
+      <div style="font-family:var(--display,inherit);font-size:17px;font-weight:700">{{ monthTitle }}</div>
+      <button onClick="{{ nextMonth }}" style="width:44px;height:44px;border-radius:var(--r14,14px);border:1px solid var(--line,#EAE3D9);background:var(--paper,#F6F2EC);font-size:18px;cursor:pointer;color:{{ nextMonthColor }}">›</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px">
+      <sc-for list="{{ dowHead }}" as="h" hint-placeholder-count="7">
+        <div style="text-align:center;font-size:12px;color:var(--muted,#786C63);font-weight:500;padding:4px 0">{{ h }}</div>
+      </sc-for>
+      <sc-for list="{{ cells }}" as="c" hint-placeholder-count="35">
+        <div onClick="{{ c.onClick }}" style="aspect-ratio:1/1.05;border-radius:var(--r14,14px);background:{{ c.bg }};color:{{ c.color }};border:1.5px solid {{ c.border }};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:{{ c.cursor }};box-sizing:border-box">
+          <span style="font-size:15px;font-weight:600">{{ c.num }}</span>
+          <span style="display:flex;gap:3px;height:5px">
+            <sc-if value="{{ c.dFood }}" hint-placeholder-val="{{ false }}"><span style="width:5px;height:5px;border-radius:50%;background:var(--acc2,oklch(0.70 0.11 150))"></span></sc-if>
+            <sc-if value="{{ c.dTrain }}" hint-placeholder-val="{{ false }}"><span style="width:5px;height:5px;border-radius:50%;background:var(--acc,oklch(0.70 0.11 38))"></span></sc-if>
+            <sc-if value="{{ c.dWeigh }}" hint-placeholder-val="{{ false }}"><span style="width:5px;height:5px;border-radius:50%;background:{{ c.weighDot }}"></span></sc-if>
+          </span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;justify-content:center;font-size:12px;color:var(--muted,#786C63);padding-top:4px">
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--acc2,oklch(0.70 0.11 150))"></span>Харчування</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--acc,oklch(0.70 0.11 38))"></span>Тренування</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:8px;height:8px;border-radius:50%;background:var(--solid,#2B2521)"></span>Вага / заміри</span>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding-bottom:6px">
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <div style="font-family:var(--display,inherit);font-size:20px;font-weight:700;letter-spacing:-0.015em">{{ selTitle }}</div>
+        <div style="font-size:14px;color:var(--muted,#786C63)">{{ selDow }}</div>
+      </div>
+      <span style="font-size:12px;font-weight:600;padding:6px 10px;border-radius:999px;background:{{ selStatusBg }};color:{{ selStatusFg }}">{{ selStatus }}</span>
+    </div>
+    <sc-for list="{{ selRows }}" as="r" hint-placeholder-count="6">
+      <div style="display:grid;grid-template-columns:104px minmax(0,1fr);gap:12px;padding:11px 0;border-top:1px solid var(--line2,#F0EAE1)">
+        <span style="font-size:14px;color:var(--muted,#786C63)">{{ r.l }}</span>
+        <span style="font-size:15px;font-weight:500;line-height:1.4;text-wrap:pretty;color:{{ r.c }}">{{ r.v }}</span>
+      </div>
+    </sc-for>
+    <button onClick="{{ editSel }}" style="margin-top:8px;border:0;background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-weight:600;font-size:15px;border-radius:var(--r14,14px);min-height:50px;cursor:pointer">{{ editSelLabel }}</button>
+  </div>
+
+  <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:8px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em;padding:6px 4px 0">Останні записи</div>
+    <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:4px 16px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column">
+      <sc-for list="{{ history }}" as="h" hint-placeholder-count="6">
+        <div onClick="{{ h.onClick }}" style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid {{ h.line }};cursor:pointer">
+          <div style="width:44px;height:44px;border-radius:var(--r14,14px);background:var(--paper,#F6F2EC);display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0"><span style="font-size:16px;font-weight:700;line-height:1">{{ h.day }}</span><span style="font-size:10px;color:var(--muted,#786C63)">{{ h.mon }}</span></div>
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px">
+            <span style="font-size:15px;font-weight:600">{{ h.kcal }}</span>
+            <span style="font-size:13px;color:var(--muted,#786C63);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ h.food }}</span>
+          </div>
+          <span style="font-size:12px;font-weight:600;padding:5px 9px;border-radius:999px;background:{{ h.trainBg }};color:{{ h.trainFg }};white-space:nowrap">{{ h.train }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isProg }}" hint-placeholder-val="{{ false }}">
+<div style="display:grid;grid-template-columns:{{ cols }};gap:14px;align-items:start">
+  <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:4px;padding:8px 4px 4px">
+    <div style="font-size:14px;color:var(--muted,#786C63)">Автоматична статистика</div>
+    <div style="font-family:var(--display,inherit);font-size:30px;font-weight:700;letter-spacing:-0.025em;line-height:1.1">Мій прогрес</div>
+  </div>
+  <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;background:var(--line,#EAE3D9);padding:4px;border-radius:var(--r16,16px);position:sticky;top:8px;z-index:5">
+    <sc-for list="{{ periods }}" as="p" hint-placeholder-count="4">
+      <button onClick="{{ p.onClick }}" style="border:0;border-radius:var(--r12,12px);min-height:40px;font-size:13px;font-weight:600;cursor:pointer;background:{{ p.bg }};color:{{ p.fg }};box-shadow:{{ p.shadow }}">{{ p.label }}</button>
+    </sc-for>
+  </div>
+
+  <div style="background:var(--accT,oklch(0.94 0.03 38));border-radius:var(--r24,24px);padding:18px;display:flex;flex-direction:column;gap:4px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em;padding-bottom:6px">{{ periodLabel }}</div>
+    <sc-for list="{{ summary }}" as="s" hint-placeholder-count="6">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--accLine,oklch(0.89 0.04 38))">
+        <span style="font-size:15px;color:var(--ink2,#5E534B)">{{ s.label }}</span>
+        <span style="font-size:16px;font-weight:700;color:{{ s.color }}">{{ s.value }}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:14px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Вага</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+      <sc-for list="{{ weightTiles }}" as="t" hint-placeholder-count="6">
+        <div style="background:var(--paper,#F6F2EC);border-radius:var(--r14,14px);padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:12px;color:var(--muted,#786C63)">{{ t.label }}</span>
+          <span style="font-size:18px;font-weight:700;color:{{ t.color }}">{{ t.value }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="position:relative;height:150px">
+        <svg viewBox="0 0 320 120" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">
+          <defs><linearGradient id="wg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--acc,oklch(0.70 0.11 38))" stop-opacity="0.28"></stop><stop offset="1" stop-color="var(--acc,oklch(0.70 0.11 38))" stop-opacity="0"></stop></linearGradient></defs>
+          <path d="{{ wChart.area }}" fill="url(#wg)"></path>
+          <path d="{{ wChart.line }}" fill="none" stroke="var(--acc,oklch(0.62 0.12 38))" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <sc-for list="{{ wChart.dots }}" as="p" hint-placeholder-count="0">
+          <div style="position:absolute;left:{{ p.left }};top:{{ p.top }};width:{{ p.size }};height:{{ p.size }};transform:translate(-50%,-50%);border-radius:50%;background:var(--acc,oklch(0.62 0.12 38));border:2px solid var(--card,#FFFDF9)"></div>
+        </sc-for>
+        <sc-for list="{{ wChart.tags }}" as="g" hint-placeholder-count="0">
+          <div style="position:absolute;left:{{ g.left }};top:{{ g.top }};transform:translate(-50%,-150%);font-size:12px;font-weight:700;background:var(--solid,#2B2521);color:var(--onSolid,#fff);padding:3px 7px;border-radius:8px;white-space:nowrap">{{ g.text }}</div>
+        </sc-for>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted,#786C63)"><span>{{ wChart.from }}</span><span>{{ wChart.to }}</span></div>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:12px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Заміри тіла</div>
+    <div style="display:flex;flex-direction:column">
+      <sc-for list="{{ measureRows }}" as="m" hint-placeholder-count="3">
+        <div onClick="{{ m.onClick }}" style="display:flex;justify-content:space-between;align-items:center;padding:11px 12px;border-radius:var(--r14,14px);background:{{ m.bg }};cursor:pointer">
+          <span style="font-size:15px;font-weight:600">{{ m.label }}</span>
+          <span style="display:flex;align-items:center;gap:10px;font-size:15px"><span style="color:var(--muted,#786C63)">{{ m.from }} → {{ m.to }} см</span><span style="font-weight:700;color:var(--acc2D,oklch(0.47 0.09 150));min-width:56px;text-align:right">{{ m.delta }}</span></span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="position:relative;height:120px">
+        <svg viewBox="0 0 320 120" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;overflow:visible">
+          <defs><linearGradient id="mg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--acc2,oklch(0.70 0.11 150))" stop-opacity="0.28"></stop><stop offset="1" stop-color="var(--acc2,oklch(0.70 0.11 150))" stop-opacity="0"></stop></linearGradient></defs>
+          <path d="{{ mChart.area }}" fill="url(#mg)"></path>
+          <path d="{{ mChart.line }}" fill="none" stroke="var(--acc2,oklch(0.58 0.11 150))" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"></path>
+        </svg>
+        <sc-for list="{{ mChart.dots }}" as="p" hint-placeholder-count="0">
+          <div style="position:absolute;left:{{ p.left }};top:{{ p.top }};width:{{ p.size }};height:{{ p.size }};transform:translate(-50%,-50%);border-radius:50%;background:var(--acc2,oklch(0.58 0.11 150));border:2px solid var(--card,#FFFDF9)"></div>
+        </sc-for>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted,#786C63)"><span>{{ mChart.from }}</span><span>{{ mParamLabel }}, см</span><span>{{ mChart.to }}</span></div>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:14px">
+    <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Тренування</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <sc-for list="{{ workTiles }}" as="t" hint-placeholder-count="4">
+        <div style="background:var(--paper,#F6F2EC);border-radius:var(--r14,14px);padding:12px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:12px;color:var(--muted,#786C63)">{{ t.label }}</span>
+          <span style="font-size:22px;font-weight:700">{{ t.value }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;color:var(--muted,#786C63)">Найчастіше · {{ periodShort }}</div>
+      <sc-for list="{{ typeBars }}" as="t" hint-placeholder-count="4">
+        <div style="display:grid;grid-template-columns:92px minmax(0,1fr) 28px;align-items:center;gap:10px">
+          <span style="font-size:14px;font-weight:500">{{ t.label }}</span>
+          <div style="height:10px;border-radius:99px;background:var(--line2,#F0EAE1);overflow:hidden"><div style="height:100%;border-radius:99px;background:var(--acc,oklch(0.70 0.11 38));width:{{ t.pct }}"></div></div>
+          <span style="font-size:14px;font-weight:700;text-align:right">{{ t.n }}</span>
+        </div>
+      </sc-for>
+      <sc-if value="{{ noTypes }}" hint-placeholder-val="{{ false }}"><div style="font-size:14px;color:var(--muted,#786C63)">За цей період тренувань ще немає</div></sc-if>
+    </div>
+  </div>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <div style="font-family:var(--display,inherit);font-size:18px;font-weight:700;letter-spacing:-0.01em">Харчування</div>
+      <span style="font-size:13px;color:var(--muted,#786C63)">ціль {{ kcalGoal }} ккал</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+      <sc-for list="{{ kcalTiles }}" as="t" hint-placeholder-count="3">
+        <div style="background:var(--paper,#F6F2EC);border-radius:var(--r14,14px);padding:10px 12px;display:flex;flex-direction:column;gap:2px">
+          <span style="font-size:12px;color:var(--muted,#786C63)">{{ t.label }}</span>
+          <span style="font-size:18px;font-weight:700">{{ t.value }}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="position:relative;height:130px;display:flex;align-items:flex-end;gap:{{ barGap }}">
+      <div style="position:absolute;left:0;right:0;bottom:{{ goalPos }};border-top:1.5px dashed var(--faint,#B9AEA3)"></div>
+      <sc-for list="{{ bars }}" as="b" hint-placeholder-count="7">
+        <div style="flex:1;min-width:0;height:{{ b.h }};background:{{ b.bg }};border-radius:6px 6px 3px 3px"></div>
+      </sc-for>
+    </div>
+    <sc-if value="{{ barsLabeled }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;gap:8px;margin-top:-6px">
+        <sc-for list="{{ bars }}" as="b" hint-placeholder-count="7"><span style="flex:1;text-align:center;font-size:12px;color:var(--muted,#786C63)">{{ b.label }}</span></sc-for>
+      </div>
+    </sc-if>
+    <div style="display:flex;gap:14px;font-size:12px;color:var(--muted,#786C63);flex-wrap:wrap">
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--acc2,oklch(0.70 0.11 150))"></span>У межах цілі</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:3px;background:var(--acc,oklch(0.70 0.11 38))"></span>Більше цілі</span>
+      <span>{{ barsNote }}</span>
+    </div>
+    <div style="display:flex;flex-direction:column">
+      <div style="font-size:13px;color:var(--muted,#786C63);padding-bottom:4px">Історія калорій</div>
+      <sc-for list="{{ kcalHistory }}" as="k" hint-placeholder-count="7">
+        <div onClick="{{ k.onClick }}" style="display:grid;grid-template-columns:96px minmax(0,1fr) 78px;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line2,#F0EAE1);cursor:pointer">
+          <span style="font-size:14px">{{ k.date }}</span>
+          <div style="height:6px;border-radius:99px;background:var(--line2,#F0EAE1);overflow:hidden"><div style="height:100%;background:{{ k.bg }};width:{{ k.pct }};border-radius:99px"></div></div>
+          <span style="font-size:14px;font-weight:600;text-align:right">{{ k.kcal }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ isRem }}" hint-placeholder-val="{{ false }}">
+<div style="display:grid;grid-template-columns:{{ cols }};gap:14px;align-items:start">
+  <div style="grid-column:1/-1;display:flex;flex-direction:column;gap:4px;padding:8px 4px 4px">
+    <div style="font-size:14px;color:var(--muted,#786C63)">Дні, час і цілі</div>
+    <div style="font-family:var(--display,inherit);font-size:30px;font-weight:700;letter-spacing:-0.025em;line-height:1.1">Нагадування</div>
+  </div>
+  <div style="grid-column:1/-1;background:var(--solid,#2B2521);color:var(--onSolid,#FBF8F4);border-radius:var(--r24,24px);padding:18px;display:flex;align-items:center;gap:14px">
+    <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+      <span style="font-size:16px;font-weight:600">Сповіщення на телефон</span>
+      <span style="font-size:13px;color:var(--onSolidMuted,#C9BEB4);line-height:1.4">{{ notifSub }}</span>
+    </div>
+    <button onClick="{{ askNotif }}" style="border:0;background:var(--acc,oklch(0.70 0.11 38));color:var(--onAcc,#2B2521);font-weight:700;font-size:14px;border-radius:var(--r12,12px);padding:10px 14px;min-height:44px;cursor:pointer;white-space:nowrap">{{ notifCta }}</button>
+  </div>
+
+  <sc-for list="{{ remCards }}" as="r" hint-placeholder-count="3">
+    <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <span style="font-family:var(--display,inherit);font-size:17px;font-weight:700">{{ r.title }}</span>
+          <span style="font-size:13px;color:var(--muted,#786C63)">{{ r.sub }}</span>
+        </div>
+        <div onClick="{{ r.toggle }}" style="width:52px;height:32px;border-radius:99px;background:{{ r.swBg }};display:flex;justify-content:{{ r.swJust }};align-items:center;padding:3px;box-sizing:border-box;cursor:pointer;flex-shrink:0"><div style="width:26px;height:26px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2)"></div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;opacity:{{ r.op }}">
+        <sc-for list="{{ r.days }}" as="d" hint-placeholder-count="7">
+          <button onClick="{{ d.onClick }}" style="border:1.5px solid {{ d.border }};background:{{ d.bg }};color:{{ d.fg }};border-radius:var(--r12,12px);min-height:44px;font-size:13px;font-weight:600;cursor:pointer;padding:0">{{ d.label }}</button>
+        </sc-for>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;opacity:{{ r.op }}">
+        <span style="font-size:14px;color:var(--muted,#786C63)">Час</span>
+        <input type="time" value="{{ r.time }}" onChange="{{ r.setTime }}" style="font-size:17px;font-weight:600;border:1px solid var(--line,#EAE3D9);background:var(--paper,#F6F2EC);border-radius:var(--r12,12px);padding:10px 12px;color:var(--ink,#2B2521);min-height:44px;box-sizing:border-box">
+      </div>
+    </div>
+  </sc-for>
+
+  <div style="background:var(--card,#FFFDF9);border-radius:var(--r24,24px);padding:18px;border:1px solid var(--line,#EAE3D9);display:flex;flex-direction:column;gap:12px">
+    <span style="font-family:var(--display,inherit);font-size:17px;font-weight:700">Мої цілі</span>
+    <sc-for list="{{ goalRows }}" as="g" hint-placeholder-count="2">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+        <span style="font-size:15px;color:var(--ink2,#5E534B)">{{ g.label }}</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button onClick="{{ g.minus }}" style="width:44px;height:44px;border-radius:var(--r12,12px);border:1px solid var(--line,#EAE3D9);background:var(--paper,#F6F2EC);font-size:20px;cursor:pointer;color:var(--ink,#2B2521)">−</button>
+          <span style="min-width:96px;text-align:center;font-family:var(--display,inherit);font-size:17px;font-weight:700">{{ g.value }}</span>
+          <button onClick="{{ g.plus }}" style="width:44px;height:44px;border-radius:var(--r12,12px);border:1px solid var(--line,#EAE3D9);background:var(--paper,#F6F2EC);font-size:20px;cursor:pointer;color:var(--ink,#2B2521)">+</button>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+</div>
+
+<sc-if value="{{ isMobile }}" hint-placeholder-val="{{ true }}">
+<div style="position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:440px;z-index:20;padding:0 12px 14px;box-sizing:border-box">
+  <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:center;background:var(--glass,rgba(255,253,249,0.92));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border:1px solid var(--line,#EAE3D9);border-radius:var(--r24,24px);padding:8px 6px;box-shadow:0 10px 30px rgba(43,37,33,0.10)">
+    <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="5">
+      <button onClick="{{ t.onClick }}" style="border:0;background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:52px;cursor:pointer;padding:0">
+        <sc-if value="{{ t.isPlus }}" hint-placeholder-val="{{ false }}">
+          <span style="width:52px;height:52px;border-radius:var(--r18,18px);background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-size:28px;font-weight:400;display:flex;align-items:center;justify-content:center;line-height:1">+</span>
+        </sc-if>
+        <sc-if value="{{ t.isTab }}" hint-placeholder-val="{{ true }}">
+          <span style="width:20px;height:4px;border-radius:99px;background:{{ t.dot }}"></span>
+          <span style="font-size:11px;font-weight:600;color:{{ t.color }}">{{ t.label }}</span>
+        </sc-if>
+      </button>
+    </sc-for>
+  </div>
+</div>
+</sc-if>
+
+<sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+  <div style="position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:80;background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-weight:600;font-size:14px;padding:12px 18px;border-radius:999px;box-shadow:0 10px 30px rgba(0,0,0,.2)">{{ toast }}</div>
+</sc-if>
+
+<sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ closeSheet }}" style="position:fixed;inset:0;z-index:60;background:rgba(43,37,33,0.42);display:flex;justify-content:center;align-items:{{ sheetAlign }}">
+  <div onClick="{{ stop }}" style="width:100%;max-width:{{ sheetMax }};max-height:var(--sheetMax,92vh);overflow:auto;background:var(--paper,#F6F2EC);border-radius:{{ sheetRadius }};box-sizing:border-box;display:flex;flex-direction:column">
+    <div style="padding:10px 18px 0;display:flex;flex-direction:column;gap:12px;position:sticky;top:0;background:var(--paper,#F6F2EC);z-index:2">
+      <div style="width:40px;height:5px;border-radius:99px;background:var(--line3,#D8D0C5);align-self:center"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:14px;color:var(--muted,#786C63);font-weight:500">{{ sheetHeading }}</span>
+        <button onClick="{{ closeSheet }}" style="width:40px;height:40px;border-radius:50%;border:0;background:var(--line,#EAE3D9);font-size:16px;cursor:pointer;color:var(--ink,#2B2521)">✕</button>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding-bottom:10px">
+        <button onClick="{{ prevDay }}" style="width:44px;height:44px;border-radius:var(--r14,14px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:18px;cursor:pointer;color:var(--ink,#2B2521)">‹</button>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:1px"><span style="font-family:var(--display,inherit);font-size:22px;font-weight:700;letter-spacing:-0.02em">{{ sheetDate }}</span><span style="font-size:13px;color:var(--muted,#786C63)">{{ sheetDow }}</span></div>
+        <button onClick="{{ nextDay }}" style="width:44px;height:44px;border-radius:var(--r14,14px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:18px;cursor:pointer;color:{{ nextDayColor }}">›</button>
+      </div>
+    </div>
+    <div style="padding:4px 18px 18px;display:flex;flex-direction:column;gap:18px">
+      <sc-if value="{{ showDay }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">Тренування</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <button onClick="{{ dYes }}" style="border:1.5px solid {{ dYesBorder }};background:{{ dYesBg }};color:var(--ink,#2B2521);font-weight:600;font-size:16px;border-radius:var(--r16,16px);min-height:54px;cursor:pointer">✓ Було</button>
+              <button onClick="{{ dNo }}" style="border:1.5px solid {{ dNoBorder }};background:{{ dNoBg }};color:{{ dNoFg }};font-weight:600;font-size:16px;border-radius:var(--r16,16px);min-height:54px;cursor:pointer">✕ Не було</button>
+            </div>
+            <sc-if value="{{ draftTrained }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{ typeChips }}" as="c" hint-placeholder-count="6">
+                  <button onClick="{{ c.onClick }}" style="border:1.5px solid {{ c.border }};background:{{ c.bg }};color:{{ c.fg }};font-weight:600;font-size:14px;border-radius:999px;padding:0 16px;min-height:44px;cursor:pointer">{{ c.label }}</button>
+                </sc-for>
+              </div>
+            </sc-if>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">Що я їла</span>
+            <textarea value="{{ draft.food }}" onChange="{{ onFood }}" rows="3" placeholder="Сніданок, обід, вечеря, перекуси…" style="font-size:16px;line-height:1.45;border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);border-radius:var(--r16,16px);padding:14px;resize:none;outline:none;color:var(--ink,#2B2521);box-sizing:border-box;width:100%"></textarea>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">Калорії за день</span>
+            <div style="display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:8px;align-items:center">
+              <button onClick="{{ kcalMinus }}" style="height:54px;border-radius:var(--r16,16px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink,#2B2521)">−50</button>
+              <div style="position:relative"><input inputmode="numeric" value="{{ draft.kcal }}" onChange="{{ onKcal }}" placeholder="0" style="width:100%;box-sizing:border-box;height:54px;text-align:center;font-size:24px;font-weight:700;border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);border-radius:var(--r16,16px);outline:none;color:var(--ink,#2B2521);padding:0 50px 0 12px"><span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);font-size:14px;color:var(--muted,#786C63)">ккал</span></div>
+              <button onClick="{{ kcalPlus }}" style="height:54px;border-radius:var(--r16,16px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink,#2B2521)">+50</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showWeight }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">{{ weightLabel }}</span>
+          <div style="display:grid;grid-template-columns:54px minmax(0,1fr) 54px;gap:8px;align-items:center">
+            <button onClick="{{ wMinus }}" style="height:64px;border-radius:var(--r16,16px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink,#2B2521)">−0,1</button>
+            <div style="position:relative"><input inputmode="decimal" value="{{ draft.weight }}" onChange="{{ onWeight }}" placeholder="—" style="width:100%;box-sizing:border-box;height:64px;text-align:center;font-family:var(--display,inherit);font-size:30px;font-weight:700;border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);border-radius:var(--r16,16px);outline:none;color:var(--ink,#2B2521);padding:0 40px 0 12px"><span style="position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:15px;color:var(--muted,#786C63)">кг</span></div>
+            <button onClick="{{ wPlus }}" style="height:64px;border-radius:var(--r16,16px);border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);font-size:15px;font-weight:600;cursor:pointer;color:var(--ink,#2B2521)">+0,1</button>
+          </div>
+          <span style="font-size:13px;color:var(--muted,#786C63)">{{ weightHint }}</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showMeasure }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">{{ measureLabel }}</span>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px">
+            <sc-for list="{{ measureInputs }}" as="m" hint-placeholder-count="3">
+              <label style="display:flex;flex-direction:column;gap:6px;background:var(--card,#FFFDF9);border:1px solid var(--line,#EAE3D9);border-radius:var(--r16,16px);padding:10px 12px">
+                <span style="font-size:13px;color:var(--muted,#786C63)">{{ m.label }}</span>
+                <span style="display:flex;align-items:baseline;gap:4px"><input inputmode="decimal" value="{{ m.value }}" onChange="{{ m.onChange }}" placeholder="{{ m.ph }}" style="width:100%;min-width:0;border:0;background:transparent;font-size:22px;font-weight:700;outline:none;color:var(--ink,#2B2521);padding:0"><span style="font-size:13px;color:var(--muted,#786C63)">см</span></span>
+              </label>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showDay }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:13px;font-weight:600;color:var(--muted,#786C63)">Нотатки</span>
+          <textarea value="{{ draft.notes }}" onChange="{{ onNotes }}" rows="2" placeholder="Самопочуття, вода, сон…" style="font-size:16px;line-height:1.45;border:1px solid var(--line,#EAE3D9);background:var(--card,#FFFDF9);border-radius:var(--r16,16px);padding:14px;resize:none;outline:none;color:var(--ink,#2B2521);box-sizing:border-box;width:100%"></textarea>
+        </div>
+      </sc-if>
+    </div>
+    <div style="position:sticky;bottom:0;padding:12px 18px 20px;background:var(--paper,#F6F2EC);border-top:1px solid var(--line,#EAE3D9)">
+      <button onClick="{{ save }}" style="width:100%;border:0;background:var(--solid,#2B2521);color:var(--onSolid,#fff);font-weight:700;font-size:16px;border-radius:var(--r16,16px);min-height:56px;cursor:pointer">Зберегти</button>
+    </div>
+  </div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;demoData&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Дані&quot;},&quot;calendarMarks&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Крапки&quot;,&quot;Заливка&quot;],&quot;default&quot;:&quot;Крапки&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Календар&quot;},&quot;layout&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Мобільний&quot;,&quot;Десктоп&quot;],&quot;default&quot;:&quot;Мобільний&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Вигляд&quot;},&quot;startTab&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Головна&quot;,&quot;Календар&quot;,&quot;Прогрес&quot;,&quot;Нагадування&quot;],&quot;default&quot;:&quot;Головна&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Вигляд&quot;},&quot;startSheet&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Немає&quot;,&quot;День&quot;,&quot;Вага&quot;,&quot;Заміри&quot;],&quot;default&quot;:&quot;Немає&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Вигляд&quot;}}">
+const MN=['січня','лютого','березня','квітня','травня','червня','липня','серпня','вересня','жовтня','листопада','грудня'];
+const MNOM=['Січень','Лютий','Березень','Квітень','Травень','Червень','Липень','Серпень','Вересень','Жовтень','Листопад','Грудень'];
+const MSH=['січ','лют','бер','кві','тра','чер','лип','сер','вер','жов','лис','гру'];
+const DOW=['Нд','Пн','Вт','Ср','Чт','Пт','Сб'];
+const DOWL=['неділя','понеділок','вівторок','середа','четвер','пʼятниця','субота'];
+const TYPES=['Верх тіла','Низ тіла','Кардіо','Прес','Все тіло','Розтяжка','Прогулянка'];
+const SOLID='var(--solid,#2B2521)',ONSOLID='var(--onSolid,#fff)',FAINT='var(--faint,#BDB2A7)',LINE3='var(--line3,#D8D0C5)';
+const INK='var(--ink,#2B2521)',MUTED='var(--muted,#786C63)',CARD='var(--card,#FFFDF9)',PAPER='var(--paper,#F6F2EC)',LINE='var(--line,#EAE3D9)';
+const CORAL='var(--acc,oklch(0.70 0.11 38))',CORAL_T='var(--accT,oklch(0.94 0.03 38))',SAGE='var(--acc2,oklch(0.70 0.11 150))',SAGE_T='var(--acc2T,oklch(0.94 0.03 150))',SAGE_D='var(--acc2D,oklch(0.47 0.09 150))',CORAL_D='var(--accD,oklch(0.50 0.11 38))';
+const pad=n=>String(n).padStart(2,'0');
+const iso=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parse=s=>{const[a,b,c]=s.split('-').map(Number);return new Date(a,b-1,c)};
+const add=(s,n)=>{const d=parse(s);d.setDate(d.getDate()+n);return iso(d)};
+const ok=n=>n!=null&&n!==''&&!isNaN(n);
+const f1=n=>ok(n)?(Math.round(n*10)/10).toFixed(1).replace('.',','):'—';
+const fN=n=>{if(!ok(n))return '—';const r=Math.round(n*10)/10;return Number.isInteger(r)?String(r):r.toFixed(1).replace('.',',')};
+const f0=n=>ok(n)?Math.round(n).toLocaleString('uk-UA'):'—';
+const sgn=(n,f=fN)=>!ok(n)?'—':(n>0.04?'+':n<-0.04?'−':'')+f(Math.abs(n));
+const dLong=s=>{const d=parse(s);return `${d.getDate()} ${MN[d.getMonth()]}`};
+const dShort=s=>{const d=parse(s);return `${pad(d.getDate())}.${pad(d.getMonth()+1)}`};
+const num=v=>{if(v===''||v==null)return null;const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?null:n};
+const str=v=>v==null||v===''?'':String(v).replace('.',',');
+const defaults=()=>({goal:60,kcalGoal:1700,rem:{workout:{on:true,days:[1,3,5],time:'18:00'},weigh:{on:true,day:1,time:'08:00'},measure:{on:true,day:1,time:'08:30'}}});
+
+function seed(today){
+  let r=11;const rnd=()=>{r=(r*16807)%2147483647;return r/2147483647};
+  let s=add(today,-68);while(parse(s).getDay()!==1)s=add(s,-1);
+  const days={},weights=[],measures=[];
+  const foods=['Вівсянка з ягодами, омлет, салат з тунцем, гречка з куркою','Сирники, суп, запечена риба з овочами','Йогурт з гранолою, паста з овочами, сир, яблуко','Омлет, борщ, курка з рисом, кефір','Тост з авокадо, салат з куркою, індичка з броколі'];
+  const plan={1:'Верх тіла',2:'Кардіо',3:'Низ тіла',5:'Все тіло',6:'Прес'};
+  let k=0;
+  for(let d=s;d<=today;d=add(d,1)){
+    const dow=parse(d).getDay(),isT=d===today;
+    if(dow===1){weights.push({date:d,kg:Math.round((68.4-k*0.3+(rnd()-0.5)*0.3)*10)/10});measures.push({date:d,chest:Math.round((93-k*0.3+(rnd()-.5)*.4)*2)/2,waist:Math.round((74.5-k*0.45+(rnd()-.5)*.4)*2)/2,hips:Math.round((101-k*0.3+(rnd()-.5)*.4)*2)/2});k++;}
+    if(rnd()<0.07&&!isT)continue;
+    const e={food:foods[Math.floor(rnd()*foods.length)],kcal:Math.round((1480+rnd()*420)/10)*10,trained:false,types:[],notes:''};
+    if(plan[dow]&&rnd()<0.82){e.trained=true;e.types=[plan[dow]];if(rnd()<0.3)e.types.push(plan[dow]==='Прес'?'Кардіо':'Прес');}
+    if(rnd()<0.12)e.notes='Гарне самопочуття, випила 2 л води';
+    if(isT){e.food='Вівсянка з бананом, кава';e.kcal=null;e.trained=null;e.types=[];e.notes='';}
+    days[d]=e;
+  }
+  return {days,weights,measures,settings:defaults()};
+}
+
+function chart(pts,key,h=120){
+  const W=320;if(!pts.length)return{line:'',area:'',dots:[],tags:[],from:'',to:''};
+  const vals=pts.map(p=>p[key]);let mn=Math.min(...vals),mx=Math.max(...vals);
+  if(mx-mn<1){mx+=0.5;mn-=0.5}const pv=(mx-mn)*0.18;mn-=pv;mx+=pv;
+  const x=i=>pts.length===1?W/2:6+i*(W-12)/(pts.length-1);const y=v=>10+(h-20)*(1-(v-mn)/(mx-mn));
+  const P=pts.map((p,i)=>[x(i),y(p[key])]);
+  const line='M'+P.map(p=>p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' L');
+  const area=line+` L${P[P.length-1][0].toFixed(1)} ${h} L${P[0][0].toFixed(1)} ${h} Z`;
+  const dots=P.map((p,i)=>({left:(p[0]/W*100)+'%',top:(p[1]/h*100)+'%',size:i===P.length-1?'12px':(pts.length>16?'0px':'7px')}));
+  const L=P[P.length-1];
+  return{line,area,dots,tags:[{left:(L[0]/W*100)+'%',top:(L[1]/h*100)+'%',text:fN(pts[pts.length-1][key])}],from:dShort(pts[0].date),to:dShort(pts[pts.length-1].date)};
+}
+
+class Component extends DCLogic {
+  state={tab:'home',calY:null,calM:null,selected:null,period:'week',mparam:'waist',sheet:null,draft:null,toast:null,notif:(typeof Notification!=='undefined'?Notification.permission:'unsupported')};
+  today(){return iso(new Date())}
+  key(){return (this.props.demoData??true)?'legko.demo.v1':'legko.v1'}
+  data(){
+    const k=this.key();
+    if(this._k!==k){
+      this._k=k;let d=null;try{d=JSON.parse(localStorage.getItem(k))}catch(e){}
+      if(!d){d=(this.props.demoData??true)?seed(this.today()):{days:{},weights:[],measures:[],settings:defaults()};try{localStorage.setItem(k,JSON.stringify(d))}catch(e){}}
+      const df=defaults();d.settings={...df,...(d.settings||{}),rem:{...df.rem,...((d.settings||{}).rem||{})}};
+      this._d=d;
+    }
+    return this._d;
+  }
+  commit(fn){
+    const d=JSON.parse(JSON.stringify(this.data()));fn(d);
+    const by=(a,b)=>a.date<b.date?-1:1;d.weights.sort(by);d.measures.sort(by);
+    this._d=d;try{localStorage.setItem(this._k,JSON.stringify(d))}catch(e){}
+    this.forceUpdate();
+  }
+  flash(t){clearTimeout(this._t);this.setState({toast:t});this._t=setTimeout(()=>this.setState({toast:null}),1800)}
+  componentDidMount(){
+    this._iv=setInterval(()=>this.tick(),30000);
+    const tm={'Календар':'cal','Прогрес':'prog','Нагадування':'rem'}[this.props.startTab];if(tm)this.setState({tab:tm});
+    const sm={'День':'day','Вага':'weight','Заміри':'measure'}[this.props.startSheet];if(sm)this.openSheet(this.today(),sm);
+  }
+  componentWillUnmount(){clearInterval(this._iv);clearTimeout(this._t)}
+  tick(){
+    if(typeof Notification==='undefined'||Notification.permission!=='granted')return;
+    const n=new Date(),hm=pad(n.getHours())+':'+pad(n.getMinutes()),dw=n.getDay(),R=this.data().settings.rem,stamp=iso(n)+hm;
+    if(this._last===stamp)return;
+    const fire=t=>{this._last=stamp;try{new Notification('Легко',{body:t})}catch(e){}};
+    if(R.weigh.on&&R.weigh.day===dw&&R.weigh.time===hm)fire('Час контрольного зважування');
+    else if(R.measure.on&&R.measure.day===dw&&R.measure.time===hm)fire('Час зробити заміри тіла');
+    else if(R.workout.on&&R.workout.days.includes(dw)&&R.workout.time===hm)fire('Сьогодні тренування — не забудь відмітити');
+  }
+  go(tab){this.setState({tab});try{window.scrollTo(0,0)}catch(e){}}
+  openSheet(date,mode,patch){
+    const d=this.data(),e=d.days[date]||{},w=d.weights.find(x=>x.date===date),m=d.measures.find(x=>x.date===date)||{};
+    const lastW=d.weights.length?d.weights[d.weights.length-1].kg:null;
+    this.setState({sheet:mode,draft:{date,food:e.food||'',kcal:str(e.kcal),trained:e.trained===undefined?null:e.trained,types:e.types||[],notes:e.notes||'',weight:w?str(w.kg):(mode==='weight'&&lastW!=null?str(lastW):''),chest:str(m.chest),waist:str(m.waist),hips:str(m.hips),...(patch||{})}});
+  }
+  setD(p){this.setState(s=>({draft:{...s.draft,...p}}))}
+  save(){
+    const dr=this.state.draft,mode=this.state.sheet;
+    this.commit(d=>{
+      if(mode==='day'){const e={food:dr.food.trim(),kcal:num(dr.kcal),trained:dr.trained,types:dr.trained?dr.types:[],notes:dr.notes.trim()};
+        if(e.food||e.kcal!=null||e.trained!==null||e.notes)d.days[dr.date]=e;else delete d.days[dr.date];}
+      if(mode==='day'||mode==='weight'){const kg=num(dr.weight);d.weights=d.weights.filter(x=>x.date!==dr.date);if(kg!=null)d.weights.push({date:dr.date,kg});}
+      if(mode==='day'||mode==='measure'){const c=num(dr.chest),w=num(dr.waist),h=num(dr.hips);d.measures=d.measures.filter(x=>x.date!==dr.date);if(c!=null||w!=null||h!=null)d.measures.push({date:dr.date,chest:c,waist:w,hips:h});}
+    });
+    this.setState({sheet:null,draft:null});this.flash('Збережено');
+  }
+  renderVals(){
+    const D=this.data(),S=D.settings,R=S.rem,T=this.today(),st=this.state,W=D.weights,M=D.measures;
+    const marks=this.props.calendarMarks??'Крапки';
+    const tD=parse(T),dowT=tD.getDay(),ws=add(T,-((dowT+6)%7));
+    const firstW=W[0],lastW=W[W.length-1],goal=S.goal;
+    const lost=firstW&&lastW?firstW.kg-lastW.kg:null,left=lastW?lastW.kg-goal:null;
+    const pct=firstW&&lastW&&firstW.kg>goal?Math.max(0,Math.min(100,(firstW.kg-lastW.kg)/(firstW.kg-goal)*100)):0;
+    const PARAMS=[['chest','Груди'],['waist','Талія'],['hips','Стегна']];
+    const mFirst=k=>{const x=M.find(m=>ok(m[k]));return x?x[k]:null};
+    const mLast=k=>{for(let i=M.length-1;i>=0;i--)if(ok(M[i][k]))return M[i][k];return null};
+    const allKeys=Object.keys(D.days).sort();
+    const earliest=[allKeys[0],W[0]&&W[0].date,M[0]&&M[0].date,T].filter(Boolean).sort()[0];
+    const P=st.period,psMap={week:ws,month:add(T,-29),q:add(T,-89),all:earliest},ps=psMap[P];
+    const statsFor=ps=>{
+      const es=Object.entries(D.days).filter(([d])=>d>=ps&&d<=T);
+      const tr=es.filter(([,e])=>e.trained===true).length;
+      const kc=es.map(([,e])=>e.kcal).filter(ok);const avg=kc.length?kc.reduce((a,b)=>a+b,0)/kc.length:null;
+      const chg=(arr,k)=>{const a=arr.filter(x=>ok(x[k]));const inR=a.filter(x=>x.date>=ps&&x.date<=T);if(!inR.length)return null;const bf=a.filter(x=>x.date<ps);const base=bf.length?bf[bf.length-1]:inR[0];const last=inR[inR.length-1];if(base===last)return null;return last[k]-base[k]};
+      return{es,tr,avg,w:chg(W,'kg'),chest:chg(M,'chest'),waist:chg(M,'waist'),hips:chg(M,'hips')};
+    };
+    const wk=statsFor(ws),pr=statsFor(ps);
+    const tone=n=>!ok(n)?INK:n<-0.04?SAGE_D:n>0.04?CORAL_D:INK;
+    const h=new Date().getHours();
+    const nextOf=(day,done)=>{for(let i=0;i<8;i++){const d=add(T,i);if(parse(d).getDay()===day&&!(i===0&&done))return i===0?'Сьогодні':i===1?'Завтра':`${DOW[day]}, ${dLong(d)}`}return '—'};
+    const weighedT=W.some(x=>x.date===T),measuredT=M.some(x=>x.date===T),todayE=D.days[T]||{};
+    const banners=[];
+    if(R.weigh.on&&R.weigh.day===dowT&&!weighedT)banners.push({title:'Контрольне зважування',sub:'Сьогодні о '+R.weigh.time,cta:'Записати',onClick:()=>this.openSheet(T,'weight')});
+    if(R.measure.on&&R.measure.day===dowT&&!measuredT)banners.push({title:'Заміри тіла',sub:'Сьогодні о '+R.measure.time,cta:'Записати',onClick:()=>this.openSheet(T,'measure')});
+    if(R.workout.on&&R.workout.days.includes(dowT)&&todayE.trained==null)banners.push({title:'Тренування за планом',sub:'Сьогодні о '+R.workout.time+' — відміть, як пройде',cta:'Відмітити',onClick:()=>this.openSheet(T,'day',{trained:true})});
+    const tr=todayE.trained;
+    const lastM=M[M.length-1];
+
+    // calendar
+    const cy=st.calY??tD.getFullYear(),cm=st.calM??tD.getMonth(),sel=st.selected||T;
+    const lead=(new Date(cy,cm,1).getDay()+6)%7,dim=new Date(cy,cm+1,0).getDate();
+    const cells=[];
+    for(let i=0;i<lead;i++)cells.push({num:'',bg:'transparent',color:INK,border:'transparent',cursor:'default',onClick:()=>{},dFood:false,dTrain:false,dWeigh:false});
+    for(let d=1;d<=dim;d++){
+      const s=iso(new Date(cy,cm,d)),e=D.days[s],food=!!(e&&(e.food||ok(e.kcal))),trn=!!(e&&e.trained===true),wm=W.some(x=>x.date===s)||M.some(x=>x.date===s);
+      const isSel=s===sel,isT=s===T,fut=s>T,dots=marks==='Крапки';
+      cells.push({num:d,bg:isSel?SOLID:(dots?(e?CARD:'transparent'):(trn?CORAL_T:food?SAGE_T:'transparent')),color:isSel?ONSOLID:fut?FAINT:INK,border:isT&&!isSel?INK:'transparent',cursor:fut?'default':'pointer',
+        onClick:fut?()=>{}:()=>this.setState({selected:s}),dFood:dots&&food,dTrain:dots&&trn,dWeigh:wm,weighDot:isSel?ONSOLID:INK});
+    }
+    const isCur=cy===tD.getFullYear()&&cm===tD.getMonth();
+    const se=D.days[sel],sw=W.find(x=>x.date===sel),sm=M.find(x=>x.date===sel);
+    const selRows=[
+      {l:'Харчування',v:se&&se.food||'—'},
+      {l:'Калорії',v:se&&ok(se.kcal)?f0(se.kcal)+' ккал':'—'},
+      {l:'Тренування',v:se&&se.trained===true?'✓ '+(se.types.join(', ')||'Було'):se&&se.trained===false?'Не було':'—'},
+      {l:'Вага',v:sw?f1(sw.kg)+' кг':'—'},
+      {l:'Заміри',v:sm?`Груди ${fN(sm.chest)} · Талія ${fN(sm.waist)} · Стегна ${fN(sm.hips)}`:'—'},
+      {l:'Нотатки',v:se&&se.notes||'—'}
+    ].map(r=>({...r,c:r.v==='—'?FAINT:INK}));
+    const full=se&&se.food&&ok(se.kcal)&&se.trained!=null;
+    const selStatus=full?'Заповнено':se?'Частково':'Порожньо';
+    const history=allKeys.slice().reverse().slice(0,8).map((k,i,a)=>{const e=D.days[k],d=parse(k);return{day:d.getDate(),mon:MSH[d.getMonth()],kcal:ok(e.kcal)?f0(e.kcal)+' ккал':'Калорії не вказані',food:e.food||'Харчування не записане',
+      train:e.trained===true?(e.types[0]||'Тренування'):e.trained===false?'Відпочинок':'—',trainBg:e.trained===true?CORAL_T:PAPER,trainFg:e.trained===true?CORAL_D:MUTED,line:i===a.length-1?'transparent':'var(--line2,#F0EAE1)',
+      onClick:()=>{this.setState({selected:k,calY:d.getFullYear(),calM:d.getMonth()});try{window.scrollTo({top:0,behavior:'smooth'})}catch(x){}}}});
+
+    // progress
+    const periods=[['week','Тиждень'],['month','Місяць'],['q','3 міс.'],['all','Весь час']].map(([id,label])=>({label,bg:P===id?CARD:'transparent',fg:P===id?INK:MUTED,shadow:P===id?'0 1px 3px rgba(43,37,33,.12)':'none',onClick:()=>this.setState({period:id})}));
+    const periodLabel={week:'Цього тижня',month:'За останні 30 днів',q:'За 3 місяці',all:'За весь період'}[P];
+    const summary=[
+      {label:'Тренувань',value:String(pr.tr),color:INK},
+      {label:'Середня калорійність',value:pr.avg!=null?f0(pr.avg)+' ккал':'—',color:INK},
+      {label:'Зміна ваги',value:pr.w!=null?sgn(pr.w,f1)+' кг':'—',color:tone(pr.w)},
+      {label:'Талія',value:pr.waist!=null?sgn(pr.waist)+' см':'—',color:tone(pr.waist)},
+      {label:'Стегна',value:pr.hips!=null?sgn(pr.hips)+' см':'—',color:tone(pr.hips)},
+      {label:'Груди',value:pr.chest!=null?sgn(pr.chest)+' см':'—',color:tone(pr.chest)}
+    ];
+    const inRange=(arr,k)=>{const a=arr.filter(x=>ok(x[k]));let p=a.filter(x=>x.date>=ps);if(p.length<4)p=a.slice(-4);return p};
+    const wChart=chart(inRange(W,'kg'),'kg',120);
+    const mp=st.mparam,mChart=chart(inRange(M,mp),mp,120);
+    const weightTiles=[
+      {label:'Початкова',value:firstW?f1(firstW.kg):'—',color:INK},{label:'Поточна',value:lastW?f1(lastW.kg):'—',color:INK},{label:'Цільова',value:f1(goal),color:INK},
+      {label:'Втрачено',value:lost!=null?f1(lost)+' кг':'—',color:SAGE_D},{label:'Залишилось',value:left!=null?f1(Math.max(0,left))+' кг':'—',color:INK},{label:'Шлях',value:Math.round(pct)+'%',color:CORAL_D}];
+    const measureRows=PARAMS.map(([k,l])=>{const a=mFirst(k),b=mLast(k);return{label:l,from:fN(a),to:fN(b),delta:ok(a)&&ok(b)?sgn(b-a)+' см':'—',bg:mp===k?PAPER:'transparent',onClick:()=>this.setState({mparam:k})}});
+    const allTr=allKeys.filter(k=>D.days[k].trained===true);
+    const monthKey=T.slice(0,7),weeksSpan=Math.max(1,(parse(T)-parse(earliest))/(7*864e5));
+    const workTiles=[{label:'Всього',value:String(allTr.length)},{label:'Цього тижня',value:String(wk.tr)},{label:'Цього місяця',value:String(allTr.filter(k=>k.startsWith(monthKey)).length)},{label:'В середньому / тиж.',value:fN(allTr.length/weeksSpan)}];
+    const tc={};pr.es.forEach(([,e])=>{if(e.trained)(e.types||[]).forEach(t=>tc[t]=(tc[t]||0)+1)});
+    const tcs=Object.entries(tc).sort((a,b)=>b[1]-a[1]),tmax=tcs.length?tcs[0][1]:1;
+    const typeBars=tcs.map(([label,n])=>({label,n,pct:(n/tmax*100)+'%'}));
+    let bars=[];
+    const kOf=d=>{const e=D.days[d];return e&&ok(e.kcal)?e.kcal:null};
+    if(P==='week'){for(let i=0;i<7;i++){const d=add(ws,i);bars.push({v:kOf(d),label:DOW[(i+1)%7]})}}
+    else if(P==='month'){for(let i=29;i>=0;i--)bars.push({v:kOf(add(T,-i)),label:''})}
+    else{let s=ps;while(parse(s).getDay()!==1)s=add(s,-1);for(;s<=T;s=add(s,7)){const v=[];for(let i=0;i<7;i++){const x=kOf(add(s,i));if(x!=null)v.push(x)}bars.push({v:v.length?v.reduce((a,b)=>a+b,0)/v.length:null,label:''})}}
+    const maxV=Math.max(S.kcalGoal*1.25,...bars.map(b=>b.v||0));
+    bars=bars.map(b=>({...b,h:b.v?(b.v/maxV*100).toFixed(1)+'%':'3%',bg:b.v==null?LINE:b.v>S.kcalGoal?CORAL:SAGE}));
+    const mAvg=statsFor(monthKey+'-01').avg;
+    const kcalHistory=allKeys.filter(k=>ok(D.days[k].kcal)).reverse().slice(0,7).map(k=>{const v=D.days[k].kcal;return{date:dLong(k),kcal:f0(v)+' ккал',pct:Math.min(100,v/maxV*100)+'%',bg:v>S.kcalGoal?CORAL:SAGE,onClick:()=>{const d=parse(k);this.setState({tab:'cal',selected:k,calY:d.getFullYear(),calM:d.getMonth()});try{window.scrollTo(0,0)}catch(x){}}}});
+
+    // reminders
+    const order=[1,2,3,4,5,6,0];
+    const remCard=(key,title,sub,multi)=>{const r=R[key];return{title,sub,swBg:r.on?SAGE:LINE3,swJust:r.on?'flex-end':'flex-start',op:r.on?1:0.45,time:r.time,
+      toggle:()=>this.commit(d=>{d.settings.rem[key].on=!r.on}),
+      setTime:e=>{const v=e.target.value;this.commit(d=>{d.settings.rem[key].time=v})},
+      days:order.map(n=>{const on=multi?r.days.includes(n):r.day===n;return{label:DOW[n],bg:on?SOLID:CARD,fg:on?ONSOLID:INK,border:on?INK:LINE,
+        onClick:()=>this.commit(d=>{const x=d.settings.rem[key];if(multi)x.days=on?x.days.filter(v=>v!==n):[...x.days,n];else x.day=n})}})}};
+    const wDaysTxt=R.workout.days.length?order.filter(n=>R.workout.days.includes(n)).map(n=>DOW[n]).join(', '):'Дні не вибрані';
+    const remCards=[remCard('workout','Тренування',wDaysTxt+' · '+R.workout.time,true),remCard('weigh','Контрольне зважування','Раз на тиждень · '+DOWL[R.weigh.day],false),remCard('measure','Заміри тіла','Раз на тиждень · '+DOWL[R.measure.day],false)];
+    const nf=st.notif;
+    const notifCta={granted:'Увімкнено',denied:'Заблоковано',default:'Увімкнути',unsupported:'Недоступно'}[nf]||'Увімкнути';
+    const notifSub=nf==='granted'?'Нагадування прийдуть, поки сайт відкритий у браузері':nf==='denied'?'Дозволь сповіщення в налаштуваннях браузера':'Дозволь сайту надсилати нагадування';
+    const goalRows=[
+      {label:'Цільова вага',value:f1(S.goal)+' кг',minus:()=>this.commit(d=>{d.settings.goal=Math.round((d.settings.goal-0.5)*10)/10}),plus:()=>this.commit(d=>{d.settings.goal=Math.round((d.settings.goal+0.5)*10)/10})},
+      {label:'Калорії на день',value:f0(S.kcalGoal)+' ккал',minus:()=>this.commit(d=>{d.settings.kcalGoal-=50}),plus:()=>this.commit(d=>{d.settings.kcalGoal+=50})}];
+
+    // sheet
+    const dr=st.draft||{date:T,types:[]},mode=st.sheet;
+    const typeChips=TYPES.map(t=>{const on=(dr.types||[]).includes(t);return{label:t,bg:on?CORAL_T:CARD,fg:on?CORAL_D:INK,border:on?CORAL:LINE,onClick:()=>this.setD({types:on?dr.types.filter(x=>x!==t):[...dr.types,t]})}});
+    const lastBefore=W.filter(x=>x.date<dr.date).slice(-1)[0];
+    const measureInputs=PARAMS.map(([k,l])=>{const prev=M.filter(x=>x.date<dr.date&&ok(x[k])).slice(-1)[0];return{label:l,value:dr[k]||'',ph:prev?fN(prev[k]):'—',onChange:e=>this.setD({[k]:e.target.value})}});
+    const canNext=dr.date<T;
+    const tabs=[['home','Головна'],['cal','Календар'],['+',''],['prog','Прогрес'],['rem','Нагадування']].map(([id,label])=>id==='+'?{isPlus:true,isTab:false,onClick:()=>this.openSheet(T,'day')}:{isPlus:false,isTab:true,label,color:st.tab===id?INK:MUTED,dot:st.tab===id?CORAL:'transparent',onClick:()=>this.go(id)});
+
+    const isDesktop=(this.props.layout??'Мобільний')==='Десктоп';
+    const sideTabs=tabs.filter(t=>t.isTab).map(t=>({...t,bg:t.color===INK?CARD:'transparent'}));
+    return {
+      isDesktop,isMobile:!isDesktop,rootMax:isDesktop?'1280px':'440px',mainPad:isDesktop?'32px 36px 48px':'20px 18px 120px',
+      cols:isDesktop?'repeat(2,minmax(0,1fr))':'minmax(0,1fr)',quickCols:isDesktop?'repeat(4,minmax(0,1fr))':'1fr 1fr',sideTabs,
+      sheetAlign:isDesktop?'center':'flex-end',sheetMax:isDesktop?'560px':'440px',sheetRadius:isDesktop?'var(--r28,28px)':'var(--r28,28px) var(--r28,28px) 0 0',
+      isHome:st.tab==='home',isCal:st.tab==='cal',isProg:st.tab==='prog',isRem:st.tab==='rem',tabs,toast:st.toast,
+      todayLabel:`${DOWL[dowT][0].toUpperCase()+DOWL[dowT].slice(1)}, ${dLong(T)}`,
+      greeting:h<12?'Доброго ранку':h<18?'Доброго дня':'Доброго вечора',banners,
+      curW:lastW?f1(lastW.kg):'—',lostSigned:lost!=null?sgn(-lost,f1):'—',lostW:lost!=null?f1(lost):'—',leftW:left!=null?f1(Math.max(0,left)):'—',
+      startW:firstW?f1(firstW.kg):'—',goalW:f1(goal),pctW:pct+'%',pctLabel:Math.round(pct)+'%',
+      openToday:()=>this.openSheet(T,'day'),
+      todayFood:todayE.food?'Записано':'Не записано',todayKcal:ok(todayE.kcal)?f0(todayE.kcal)+' ккал':'—',
+      todayTrain:tr===true?(todayE.types.join(', ')||'Було'):tr===false?'Не було':'ще не відмічено',
+      yesBg:tr===true?CORAL_T:CARD,yesBorder:tr===true?CORAL:LINE,noBg:tr===false?SOLID:CARD,noFg:tr===false?ONSOLID:INK,noBorder:tr===false?INK:LINE,
+      trainYes:()=>this.openSheet(T,'day',{trained:true}),
+      trainNo:()=>{this.commit(d=>{const e=d.days[T]||{food:'',kcal:null,notes:''};d.days[T]={...e,trained:false,types:[]}});this.flash('Відмічено: без тренування')},
+      quick:[{label:'Харчування',bg:SAGE_T,onClick:()=>this.openSheet(T,'day')},{label:'Тренування',bg:CORAL_T,onClick:()=>this.openSheet(T,'day',{trained:true})},{label:'Вага',bg:'var(--line2,#EFE9E1)',onClick:()=>this.openSheet(T,'weight')},{label:'Заміри',bg:'var(--line2,#EFE9E1)',onClick:()=>this.openSheet(T,'measure')}],
+      weekTiles:[{label:'Тренувань',value:String(wk.tr),unit:'з '+R.workout.days.length,color:INK},{label:'Сер. калорії',value:f0(wk.avg),unit:'ккал',color:INK},{label:'Зміна ваги',value:sgn(wk.w,f1),unit:'кг',color:tone(wk.w)},{label:'Талія',value:sgn(wk.waist),unit:'см',color:tone(wk.waist)}],
+      measuresNow:PARAMS.map(([k,l])=>{const a=mFirst(k),b=mLast(k);return{label:l,value:fN(b),delta:ok(a)&&ok(b)?sgn(b-a)+' см':'—'}}),
+      lastMeasureDate:lastM?dLong(lastM.date):'ще немає',
+      control:[{label:'Останнє зважування',value:lastW?`${dLong(lastW.date)} — ${f1(lastW.kg)} кг`:'—'},{label:'Наступне зважування',value:R.weigh.on?nextOf(R.weigh.day,weighedT)+' · '+R.weigh.time:'вимкнено'},{label:'Наступні заміри',value:R.measure.on?nextOf(R.measure.day,measuredT)+' · '+R.measure.time:'вимкнено'}].map((c,i)=>({...c,line:i===2?'transparent':'var(--line2,#F0EAE1)'})),
+      monthTitle:MNOM[cm]+' '+cy,dowHead:['Пн','Вт','Ср','Чт','Пт','Сб','Нд'],cells,
+      prevMonth:()=>this.setState({calY:cm===0?cy-1:cy,calM:cm===0?11:cm-1}),
+      nextMonth:()=>{if(!isCur)this.setState({calY:cm===11?cy+1:cy,calM:cm===11?0:cm+1})},nextMonthColor:isCur?FAINT:INK,
+      selTitle:`${dLong(sel)} ${parse(sel).getFullYear()}`,selDow:DOWL[parse(sel).getDay()]+(sel===T?' · сьогодні':''),selRows,selStatus,
+      selStatusBg:full?SAGE_T:se?CORAL_T:PAPER,selStatusFg:full?SAGE_D:se?CORAL_D:MUTED,
+      editSel:()=>this.openSheet(sel,'day'),editSelLabel:se?'Редагувати день':'Заповнити день',history,
+      periods,periodLabel,periodShort:periodLabel.toLowerCase(),summary,weightTiles,wChart,mChart,measureRows,mParamLabel:PARAMS.find(p=>p[0]===mp)[1],
+      workTiles,typeBars,noTypes:!typeBars.length,kcalGoal:f0(S.kcalGoal),
+      kcalTiles:[{label:'Цей тиждень',value:f0(wk.avg)},{label:'Цей місяць',value:f0(mAvg)},{label:'Період',value:f0(pr.avg)}],
+      bars,barGap:P==='week'?'8px':'3px',goalPos:(S.kcalGoal/maxV*100)+'%',barsLabeled:P==='week',barsNote:P==='q'||P==='all'?'· середнє за тиждень':'',kcalHistory,
+      remCards,notifCta,notifSub,goalRows,
+      askNotif:()=>{if(typeof Notification==='undefined')return;Notification.requestPermission().then(p=>{this.setState({notif:p});if(p==='granted')this.flash('Сповіщення увімкнено')})},
+      sheetOpen:!!mode,draft:dr,closeSheet:()=>this.setState({sheet:null,draft:null}),stop:e=>e.stopPropagation(),
+      sheetHeading:{day:'Запис дня',weight:'Контрольне зважування',measure:'Заміри тіла'}[mode]||'',
+      sheetDate:`${dLong(dr.date)} ${parse(dr.date).getFullYear()}`,sheetDow:DOWL[parse(dr.date).getDay()]+(dr.date===T?' · сьогодні':''),
+      prevDay:()=>this.openSheet(add(dr.date,-1),mode),nextDay:()=>{if(canNext)this.openSheet(add(dr.date,1),mode)},nextDayColor:canNext?INK:FAINT,
+      showDay:mode==='day',showWeight:mode==='day'||mode==='weight',showMeasure:mode==='day'||mode==='measure',
+      weightLabel:mode==='day'?'Вага (за бажанням)':'Вага',measureLabel:mode==='day'?'Заміри (за бажанням)':'Груди · талія · стегна',
+      weightHint:lastBefore?`Попереднє: ${dLong(lastBefore.date)} — ${f1(lastBefore.kg)} кг`:'Найточніше — зранку, натщесерце',
+      draftTrained:dr.trained===true,typeChips,measureInputs,
+      dYes:()=>this.setD({trained:true}),dNo:()=>this.setD({trained:false,types:[]}),
+      dYesBg:dr.trained===true?CORAL_T:CARD,dYesBorder:dr.trained===true?CORAL:LINE,dNoBg:dr.trained===false?SOLID:CARD,dNoFg:dr.trained===false?ONSOLID:INK,dNoBorder:dr.trained===false?INK:LINE,
+      onFood:e=>this.setD({food:e.target.value}),onNotes:e=>this.setD({notes:e.target.value}),onKcal:e=>this.setD({kcal:e.target.value.replace(/[^\d]/g,'')}),onWeight:e=>this.setD({weight:e.target.value}),
+      kcalMinus:()=>this.setD({kcal:String(Math.max(0,(num(dr.kcal)||0)-50))}),kcalPlus:()=>this.setD({kcal:String((num(dr.kcal)||0)+50)}),
+      wMinus:()=>this.setD({weight:f1((num(dr.weight)??(lastW?lastW.kg:60))-0.1)}),wPlus:()=>this.setD({weight:f1((num(dr.weight)??(lastW?lastW.kg:60))+0.1)}),
+      save:()=>this.save()
+    };
+  }
+}
+</script>
+</body>
+</html>

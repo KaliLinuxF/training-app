@@ -1,0 +1,119 @@
+/*
+ * Design tokens — variant 1b «Свіжість» (design/handoff/Design Options.dc.html, #1b).
+ * Cool whites, lavender accent (hue 290) and mint secondary (hue 175), Manrope, round shapes.
+ * Token names mirror the prototype's CSS variables so the design source maps 1:1.
+ */
+:root {
+  --font: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --display: var(--font);
+
+  /* Radii: 1b overrides the base scale (r28→32, r24→28, r20→24, r16→18, r14→16). */
+  --r28: 32px;
+  --r24: 28px;
+  --r20: 24px;
+  --r18: 18px;
+  --r16: 18px;
+  --r14: 16px;
+  --r12: 12px;
+
+  --ink: #1e2229;
+  --ink2: #4a5160;
+  --muted: #687080;
+  --faint: #a6adb9;
+  --paper: #f3f5f8;
+  --card: #ffffff;
+  --line: #e3e7ed;
+  --line2: #edf0f4;
+  --line3: #cdd3dc;
+  --solid: #1e2229;
+  --onSolid: #f7f9fb;
+  --onSolidMuted: #a9b0bc;
+  --solidSub: rgba(255, 255, 255, 0.08);
+  --solidSub2: rgba(255, 255, 255, 0.14);
+  --glass: rgba(255, 255, 255, 0.9);
+  --onAcc: #1e2229;
+  --acc: oklch(0.72 0.11 290);
+  --accT: oklch(0.95 0.03 290);
+  --accD: oklch(0.48 0.12 290);
+  --accLine: oklch(0.9 0.04 290);
+  --acc2: oklch(0.72 0.11 175);
+  --acc2T: oklch(0.95 0.03 175);
+  --acc2D: oklch(0.45 0.08 175);
+
+  /* Elevation & overlays (prototype values, tinted with the 1b ink). */
+  --shadow-bar: 0 10px 30px rgba(30, 34, 41, 0.1);
+  --shadow-seg: 0 1px 3px rgba(30, 34, 41, 0.12);
+  --shadow-toast: 0 10px 30px rgba(0, 0, 0, 0.2);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --backdrop: rgba(30, 34, 41, 0.42);
+  --knob: #ffffff;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  color-scheme: light;
+}
+
+/* Dark theme: follows the system unless the user picked a theme explicitly. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --ink: #e9edf2;
+    --ink2: #c3cad4;
+    --muted: #8d96a4;
+    --faint: #5a6270;
+    --paper: #12151a;
+    --card: #1b1f26;
+    --line: #2a303a;
+    --line2: #222731;
+    --line3: #3a414d;
+    --solid: #e9edf2;
+    --onSolid: #12151a;
+    --onSolidMuted: #5a6270;
+    --solidSub: rgba(0, 0, 0, 0.06);
+    --solidSub2: rgba(0, 0, 0, 0.1);
+    --glass: rgba(27, 31, 38, 0.9);
+    --onAcc: #12151a;
+    --acc: oklch(0.74 0.11 290);
+    --accT: oklch(0.3 0.05 290);
+    --accD: oklch(0.84 0.08 290);
+    --accLine: oklch(0.36 0.05 290);
+    --acc2: oklch(0.74 0.11 175);
+    --acc2T: oklch(0.3 0.04 175);
+    --acc2D: oklch(0.84 0.08 175);
+    --shadow-bar: 0 10px 30px rgba(0, 0, 0, 0.35);
+    --shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --backdrop: rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --ink: #e9edf2;
+  --ink2: #c3cad4;
+  --muted: #8d96a4;
+  --faint: #5a6270;
+  --paper: #12151a;
+  --card: #1b1f26;
+  --line: #2a303a;
+  --line2: #222731;
+  --line3: #3a414d;
+  --solid: #e9edf2;
+  --onSolid: #12151a;
+  --onSolidMuted: #5a6270;
+  --solidSub: rgba(0, 0, 0, 0.06);
+  --solidSub2: rgba(0, 0, 0, 0.1);
+  --glass: rgba(27, 31, 38, 0.9);
+  --onAcc: #12151a;
+  --acc: oklch(0.74 0.11 290);
+  --accT: oklch(0.3 0.05 290);
+  --accD: oklch(0.84 0.08 290);
+  --accLine: oklch(0.36 0.05 290);
+  --acc2: oklch(0.74 0.11 175);
+  --acc2T: oklch(0.3 0.04 175);
+  --acc2D: oklch(0.84 0.08 175);
+  --shadow-bar: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --backdrop: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
