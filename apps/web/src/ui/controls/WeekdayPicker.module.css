@@ -1,0 +1,35 @@
+.picker {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.day {
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: var(--r12);
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.day:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.day:disabled {
+  cursor: default;
+}
+
+.on {
+  background: var(--solid);
+  color: var(--onSolid);
+  border-color: var(--ink);
+}

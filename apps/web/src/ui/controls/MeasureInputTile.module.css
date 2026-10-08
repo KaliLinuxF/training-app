@@ -1,0 +1,48 @@
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  padding: 10px 12px;
+  cursor: text;
+  transition: border-color 150ms ease;
+}
+
+.tile:focus-within {
+  border-color: var(--acc);
+}
+
+.label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font-size: 22px;
+  font-weight: 700;
+  outline: none;
+  color: var(--ink);
+  padding: 0;
+}
+
+.input:focus-visible {
+  outline: none;
+}
+
+.unit {
+  font-size: 13px;
+  color: var(--muted);
+}

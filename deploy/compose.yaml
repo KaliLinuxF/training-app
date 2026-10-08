@@ -1,0 +1,63 @@
+# Production stack for https://fit.triple-a.dev — lives at /opt/training-app/compose.yaml.
+# deploy/deploy.sh uploads the repository to ./src and copies this file and the Caddyfile next to it.
+#
+#   /opt/training-app/
+#     compose.yaml  Caddyfile  .env (optional)  src/ (build context)  data/ (SQLite + backups, uid 1000)
+#
+# The project name and the caddy_data / caddy_config volume keys must not change:
+# the TLS certificate and ACME account live in caddy_data.
+name: training-app
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+services:
+  app:
+    build:
+      context: ./src
+    image: training-app:latest
+    restart: unless-stopped
+    init: true
+    # Optional overrides (VAPID_*, LOG_LEVEL, …); the password lives in the database, not here.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PUBLIC_ORIGIN: https://fit.triple-a.dev
+    volumes:
+      - ./data:/data
+    # Not published: only Caddy is reachable from outside (published ports bypass ufw).
+    expose:
+      - '3000'
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Healthcheck comes from the image (GET /api/health).
+    logging: *logging
+
+  caddy:
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

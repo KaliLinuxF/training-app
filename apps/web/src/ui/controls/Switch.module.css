@@ -1,0 +1,43 @@
+.switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 52px;
+  height: 32px;
+  padding: 3px;
+  border: 0;
+  border-radius: 99px;
+  background: var(--line3);
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 200ms ease;
+}
+
+/* 44px tall tap target without changing the layout. */
+.switch::before {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
+}
+
+.switch:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.on {
+  background: var(--acc2);
+}
+
+.knob {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--knob);
+  box-shadow: var(--shadow-knob);
+  transition: transform 200ms var(--ease-out);
+}
+
+.on .knob {
+  transform: translateX(20px);
+}

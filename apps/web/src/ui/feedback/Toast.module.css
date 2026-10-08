@@ -1,0 +1,38 @@
+.region {
+  position: fixed;
+  top: calc(18px + var(--safe-top));
+  left: 0;
+  right: 0;
+  z-index: 80;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.toast {
+  max-width: calc(100% - 36px);
+  background: var(--solid);
+  color: var(--onSolid);
+  font-weight: 600;
+  font-size: 14px;
+  text-align: center;
+  padding: 12px 18px;
+  border-radius: 999px;
+  box-shadow: var(--shadow-toast);
+  animation: toast-in 220ms var(--ease-out);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.leaving {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}

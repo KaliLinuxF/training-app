@@ -1,0 +1,56 @@
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.centered {
+  justify-content: center;
+  padding-top: 4px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.square {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.acc {
+  background: var(--acc);
+}
+.acc2 {
+  background: var(--acc2);
+}
+.accT {
+  background: var(--accT);
+}
+.acc2T {
+  background: var(--acc2T);
+}
+.solid {
+  background: var(--solid);
+}
+.line {
+  background: var(--line);
+}
+.faint {
+  background: var(--faint);
+}

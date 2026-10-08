@@ -4,53 +4,20 @@
  * Contract (keep these exports stable, screens depend on them):
  * - `useAppData()` / `useSettings()` / `useSyncState()` — React hooks.
  * - `dataActions.*` — every change goes through here: it is applied optimistically,
- *   persisted on the device and queued for the server (works offline).
- * - `startSync()` — called once after login; loads the device cache, then the server copy,
- *   and keeps flushing the queue. Returns a cleanup function.
+ *   persisted on the device (IndexedDB) and queued for the server (works offline).
+ * - `startSync()` — called by `AuthGate` after login; loads the device cache, then the server
+ *   copy, and keeps flushing the queue. Returns a cleanup function.
+ * - `flushNow()`, `resetLocal()`, `onUnauthorized()`, `hasDeviceCache()`, `clearSyncError()` —
+ *   used by the auth layer and settings screens.
  *
- * NOTE: this is the Phase-0 in-memory implementation; persistence + outbox + server sync
- * are filled in by the data-layer task without changing the exported API.
+ * Implementation: `state.ts` (zustand), `cache.ts` (IndexedDB), `sync.ts` (outbox + server).
  */
-import {
-  applyOp,
-  emptyData,
-  type AppData,
-  type DayEntry,
-  type ISODate,
-  type MeasureValues,
-  type Op,
-  type Settings,
-} from '@legko/shared';
-import { create } from 'zustand';
+import type { AppData, DayEntry, ISODate, MeasureValues, Op, Settings } from '@legko/shared';
+import { useDataStore, type SyncState } from './state';
+import { commitOps, importAll } from './sync';
 
-export interface SyncState {
-  /** Device cache or server data has been loaded at least once. */
-  loaded: boolean;
-  /** Ops waiting to reach the server. */
-  pending: number;
-  online: boolean;
-  syncing: boolean;
-  lastSyncedAt: number | null;
-  /** Last non-network sync problem, human readable (Ukrainian). */
-  error: string | null;
-}
-
-interface DataStore {
-  data: AppData;
-  sync: SyncState;
-}
-
-export const useDataStore = create<DataStore>(() => ({
-  data: emptyData(),
-  sync: {
-    loaded: true,
-    pending: 0,
-    online: typeof navigator === 'undefined' ? true : navigator.onLine,
-    syncing: false,
-    lastSyncedAt: null,
-    error: null,
-  },
-}));
+export { useDataStore, type DataStore, type SyncState } from './state';
+export { clearSyncError, flushNow, hasDeviceCache, onUnauthorized, resetLocal, startSync } from './sync';
 
 export const useAppData = (): AppData => useDataStore((s) => s.data);
 export const useSettings = (): Settings => useDataStore((s) => s.data.settings);
@@ -59,7 +26,7 @@ export const getAppData = (): AppData => useDataStore.getState().data;
 
 /** Applies ops locally right away and queues them for the server. */
 export function commit(...ops: Op[]): void {
-  useDataStore.setState((s) => ({ data: ops.reduce(applyOp, s.data) }));
+  commitOps(ops);
 }
 
 export const dataActions = {
@@ -85,12 +52,12 @@ export const dataActions = {
   updateSettings(update: (s: Settings) => Settings): void {
     commit({ kind: 'settings.put', value: update(getAppData().settings) });
   },
-  /** Replaces everything (backup restore). Resolves once the server accepted it. */
+  /**
+   * Replaces everything (backup restore): flushes pending changes, uploads the backup,
+   * then swaps the local copy. Resolves once the server accepted it; throws `ApiError`
+   * (`bad_request` for a file that is not a valid backup, `network`, …) otherwise.
+   */
   async importAll(data: AppData): Promise<void> {
-    useDataStore.setState({ data });
+    await importAll(data);
   },
 };
-
-export function startSync(): () => void {
-  return () => {};
-}

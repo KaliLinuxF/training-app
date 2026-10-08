@@ -1,0 +1,63 @@
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.center {
+  align-items: center;
+}
+
+.baseline {
+  align-items: baseline;
+}
+
+.start {
+  align-items: flex-start;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 700;
+}
+
+.md .title {
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+.sm .title {
+  font-size: 17px;
+}
+
+.lg {
+  gap: 10px;
+}
+
+.lg .title {
+  font-size: 20px;
+  letter-spacing: -0.015em;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.lg .subtitle {
+  font-size: 14px;
+}
+
+.meta {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--muted);
+}

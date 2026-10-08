@@ -1,0 +1,24 @@
+.input {
+  appearance: none;
+  -webkit-appearance: none;
+  font-size: 17px;
+  font-weight: 600;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: var(--r12);
+  padding: 10px 12px;
+  color: var(--ink);
+  min-height: 44px;
+  min-width: 88px;
+  outline: none;
+  transition: border-color 150ms ease;
+}
+
+.input:focus {
+  border-color: var(--acc);
+}
+
+/* iOS renders the value in a shadow element that is left-aligned by default. */
+.input::-webkit-date-and-time-value {
+  text-align: center;
+}

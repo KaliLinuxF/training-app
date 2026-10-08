@@ -40,7 +40,8 @@ Server: one Docker container on a VPS behind Caddy at `https://fit.triple-a.dev`
 Additions we make on top of the design (keep them in the same visual language):
 login screen (single password), first-run setup sheet (start weight, goal weight, kcal goal),
 «Додай на початковий екран» guidance for iPhone push, test notification, custom workout types,
-theme switch (auto/light/dark), JSON export/import backup, offline queue with sync.
+theme switch (auto/light/dark), JSON export/import backup, offline queue with sync,
+**AI calorie estimate from a text description or a food photo + food photo diary + «Часті страви»** (§3.7).
 
 ## 2. Design
 
@@ -201,6 +202,39 @@ Env: `PORT` (3000) · `DATA_DIR` (`/data`, dev `./data`) · `STATIC_DIR` (dir wi
   exists; else «Порожньо».
 - Next weigh-in / measurements: next date with the reminder weekday from today (today counts unless already done)
   → «Сьогодні», «Завтра», or «Пн, 12 жовтня»; plus « · HH:MM»; «вимкнено» if the reminder is off.
+
+### 3.7 AI calorie estimate, food photos, frequent dishes
+
+Goal: she types what she ate in plain words («вівсянка з бананом, кава з молоком, борщ і шматок хліба») or
+takes/chooses a photo of the plate, and gets an itemised estimate (name · portion · kcal + total) she can adjust
+and add to the day with one tap. Meals are usually added one at a time through the day, so «Додати» **adds**
+to the day's kcal and appends a line to the food text.
+
+- **Model**: Claude Opus 5.5 (`claude-opus-5-5`) via the official `@anthropic-ai/sdk` on the **server only**
+  (key in env `ANTHROPIC_API_KEY`, model overridable via `FOOD_AI_MODEL`). Structured output (JSON schema),
+  `output_config.effort: 'low'`, adaptive thinking (default), server-side refusal fallback
+  (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`). Timeout 60 s. Always check `stop_reason`.
+  English system prompt; item names and comment in Ukrainian; Ukrainian/Eastern-European cuisine aware; use grams
+  when given, otherwise typical portions; never moralise; non-food photo → no items + short comment.
+- **Budget guard**: max 60 estimates per day (429 `rate_limited`, «Ліміт підрахунків на сьогодні вичерпано»).
+- **Feature flag**: `GET /api/food/status → { enabled }` (false when no key) — the UI hides the AI buttons then.
+- **Photos are saved** in the day's history (photo diary): the client downscales on device (canvas → JPEG,
+  full ≤ 1280 px q≈0.82, thumb ≤ 320 px) and uploads both; server stores files
+  `${DATA_DIR}/photos/<id>.jpg` + `<id>_t.jpg` (+ metadata table). `GET /api/photos/:id` and `/api/photos/:id/thumb`
+  (auth, `Cache-Control: private, max-age=31536000, immutable`). `DayEntry.photos: string[]` references them
+  (max 12/day); photos no longer referenced by any day and older than 24 h are garbage-collected daily.
+  Photos are not part of the JSON export (they live in the server backups).
+- **Frequent dishes («Часті страви»)**: part of AppData (`foods`), synced through ops, usable offline. Every added
+  estimate item / quick-add records `food.use` {name, portion, kcal, date} (upsert by case-insensitive name:
+  count+1, latest portion/kcal, lastUsed). The day sheet shows the top ~10 by count & recency as chips
+  («Вівсянка з бананом · 350»); tapping adds it like an estimate line. `food.delete` removes one (long-press / edit mode).
+- Endpoints: `POST /api/food/estimate` `{ date, text?, image?: { full: base64 JPEG, thumb: base64 JPEG } }` →
+  `{ photoId?, items: [{ name, portion, kcal }], totalKcal, comment }` (photo stored before the model call).
+- UI (day sheet, «Що я їла» section, 1b visual language): under the textarea a row with «✨ Порахувати» (estimate
+  the text) and «📷 Фото» (`<input type=file accept="image/*">` — iOS offers camera or library); disabled offline.
+  Result card: optional thumbnail, item rows (name + portion muted, kcal editable), total, «Додати N ккал» (solid)
+  and «Скасувати». Loading state «Рахую калорії…». Thumbnails strip of the day's photos (tap → full-screen viewer,
+  remove). Calendar day detail shows the thumbnails under «Харчування».
 
 ## 4. Conventions
 

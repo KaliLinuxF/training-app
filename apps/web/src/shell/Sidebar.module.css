@@ -1,0 +1,96 @@
+.sidebar {
+  width: 248px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--line);
+  padding: 28px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 22px;
+}
+
+.mark {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r12);
+  background: var(--solid);
+  color: var(--onSolid);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+
+.name {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.link {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 12px 14px;
+  border-radius: var(--r14);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.active {
+  background: var(--card);
+  color: var(--ink);
+}
+
+.active .dot {
+  background: var(--acc);
+}
+
+.record {
+  margin-top: 18px;
+  border: 0;
+  background: var(--solid);
+  color: var(--onSolid);
+  font-weight: 700;
+  font-size: 15px;
+  border-radius: var(--r14);
+  min-height: 48px;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.record:active {
+  transform: scale(0.98);
+}

@@ -1,0 +1,42 @@
+.pill {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.md {
+  padding: 6px 10px;
+}
+
+.sm {
+  padding: 5px 9px;
+}
+
+.lg {
+  padding: 8px 12px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.acc {
+  background: var(--accT);
+  color: var(--accD);
+}
+
+.acc2 {
+  background: var(--acc2T);
+  color: var(--acc2D);
+}
+
+.neutral {
+  background: var(--paper);
+  color: var(--muted);
+}
+
+.accSolid {
+  background: var(--acc);
+  color: var(--onAcc);
+}

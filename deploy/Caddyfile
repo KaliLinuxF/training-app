@@ -1,0 +1,34 @@
+# Caddy in front of the «Легко» app container — lives at /opt/training-app/Caddyfile.
+# Certificates are issued automatically and kept in the caddy_data volume; HTTP redirects to HTTPS.
+# No `log` directive: access logs stay off (the app logs one line per request itself).
+# The app sends its own Content-Security-Policy, so it is not set here.
+
+(security_headers) {
+	header {
+		# `?` = only when the response does not carry the header yet: the app's own (stricter)
+		# values win, and Caddy's own responses still get them.
+		?Strict-Transport-Security "max-age=31536000"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		-Via
+	}
+}
+
+fit.triple-a.dev {
+	encode zstd gzip
+	import security_headers
+
+	reverse_proxy app:3000 {
+		# Hold requests briefly while the app container restarts during a deploy.
+		lb_try_duration 15s
+		lb_try_interval 250ms
+	}
+
+	# Caddy's own errors (e.g. 502 when the app is down) get the same headers.
+	handle_errors {
+		import security_headers
+		respond "{err.status_code} {err.status_text}"
+	}
+}

@@ -1,0 +1,47 @@
+.row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.button {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.label,
+.value {
+  font-size: 14px;
+}
+
+.value {
+  text-align: right;
+}
+
+.rank {
+  grid-template-columns: 92px minmax(0, 1fr) 28px;
+}
+
+.rank .label {
+  font-weight: 500;
+}
+
+.rank .value {
+  font-weight: 700;
+}
+
+.history {
+  grid-template-columns: 96px minmax(0, 1fr) 78px;
+  padding: 9px 0;
+  border-top: 1px solid var(--line2);
+}
+
+.history .value {
+  font-weight: 600;
+}

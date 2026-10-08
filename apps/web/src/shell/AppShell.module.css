@@ -1,0 +1,29 @@
+.root {
+  max-width: 440px;
+  margin: 0 auto;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--paper);
+  position: relative;
+  box-shadow: 0 0 0 1px var(--line);
+  display: flex;
+  align-items: stretch;
+}
+
+.desktop {
+  max-width: 1280px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* Bottom padding keeps the last card clear of the floating tab bar. */
+  padding: calc(20px + var(--safe-top)) 18px calc(120px + var(--safe-bottom));
+}
+
+.desktop .main {
+  padding: 32px 36px 48px;
+}

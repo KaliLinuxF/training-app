@@ -1,0 +1,45 @@
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.value {
+  text-align: right;
+}
+
+.control {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line2);
+}
+
+.control:last-child {
+  border-bottom-color: transparent;
+}
+
+.control .label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.control .value {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.summary {
+  padding: 8px 0;
+  border-top: 1px solid var(--accLine);
+}
+
+.summary .label,
+.plain .label {
+  font-size: 15px;
+  color: var(--ink2);
+}
+
+.summary .value {
+  font-size: 16px;
+  font-weight: 700;
+}

@@ -1,0 +1,92 @@
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  background: var(--paper);
+}
+
+.button {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.button:active {
+  transform: scale(0.98);
+}
+
+.label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sub {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Home «Сьогодні» */
+.entry {
+  border-radius: var(--r16);
+  padding: 12px 14px;
+  gap: 3px;
+}
+.entry .label {
+  font-size: 13px;
+}
+.entry .value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* Home «Поточні заміри» */
+.measure {
+  border-radius: var(--r16);
+  padding: 12px;
+}
+.measure .label {
+  font-size: 13px;
+}
+.measure .value {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+/* Progress weight & kcal */
+.compact {
+  border-radius: var(--r14);
+  padding: 10px 12px;
+}
+
+/* Progress workouts */
+.count {
+  border-radius: var(--r14);
+  padding: 12px;
+}
+.count .value {
+  font-size: 22px;
+}
+
+/* Inside the dark hero card */
+.onSolid {
+  background: var(--solidSub);
+  border-radius: var(--r16);
+  padding: 12px 14px;
+}
+.onSolid .label {
+  font-size: 13px;
+  color: var(--onSolidMuted);
+}
+.onSolid .value {
+  font-size: 20px;
+  font-weight: 600;
+}

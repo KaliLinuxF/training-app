@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
     "build": "node build.mjs",
-    "start": "node dist/index.js",
+    "start": "node --enable-source-maps dist/index.js",
+    "set-password": "tsx --env-file-if-exists=.env src/cli.ts set-password",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },

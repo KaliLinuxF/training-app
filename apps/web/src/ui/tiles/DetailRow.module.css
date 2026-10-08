@@ -1,0 +1,25 @@
+.row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+  border-top: 1px solid var(--line2);
+}
+
+.label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.value {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.empty {
+  color: var(--faint);
+}

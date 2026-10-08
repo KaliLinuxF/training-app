@@ -1,0 +1,81 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.default {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r24);
+  padding: 18px;
+  gap: 14px;
+}
+
+.hero {
+  background: var(--solid);
+  color: var(--onSolid);
+  border-radius: var(--r28);
+  padding: 22px 22px 20px;
+  gap: 18px;
+}
+
+.solid {
+  background: var(--solid);
+  color: var(--onSolid);
+  border-radius: var(--r24);
+  padding: 18px;
+  gap: 14px;
+}
+
+.tint {
+  background: var(--accT);
+  border-radius: var(--r24);
+  padding: 18px;
+  gap: 4px;
+}
+
+.list {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r24);
+  padding: 6px 18px;
+}
+
+/* Gap overrides come after the variants so they win. */
+.gap0 {
+  gap: 0;
+}
+.gap2 {
+  gap: 2px;
+}
+.gap4 {
+  gap: 4px;
+}
+.gap6 {
+  gap: 6px;
+}
+.gap8 {
+  gap: 8px;
+}
+.gap10 {
+  gap: 10px;
+}
+.gap12 {
+  gap: 12px;
+}
+.gap14 {
+  gap: 14px;
+}
+.gap18 {
+  gap: 18px;
+}
+
+.row {
+  flex-direction: row;
+  align-items: center;
+}
+
+.full {
+  grid-column: 1 / -1;
+}

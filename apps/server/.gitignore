@@ -1,0 +1,2 @@
+# Local SQLite database and backups (DATA_DIR default in development).
+/data/

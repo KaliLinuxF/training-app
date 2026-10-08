@@ -1,0 +1,40 @@
+# Build context = repo root. The Dockerfile copies only manifests, tsconfig.base.json, packages/ and apps/.
+
+# Dependencies and build output (rebuilt inside the image)
+**/node_modules
+**/dist
+**/dev-dist
+**/coverage
+**/*.tsbuildinfo
+**/.vite
+
+# VCS, editors, OS junk
+.git
+.gitignore
+.gitattributes
+.vscode
+.idea
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+
+# Not needed to build the image
+design
+docs
+deploy
+e2e
+test-results
+playwright-report
+blob-report
+playwright.config.*
+*.md
+
+# Local data and secrets — never ship them
+data
+apps/server/data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/.env
+**/.env.*

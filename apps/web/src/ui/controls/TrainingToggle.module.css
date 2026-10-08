@@ -1,0 +1,44 @@
+.toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.option {
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.option:active {
+  transform: scale(0.98);
+}
+
+.md .option {
+  font-size: 15px;
+  border-radius: var(--r14);
+  min-height: 50px;
+}
+
+.lg .option {
+  font-size: 16px;
+  border-radius: var(--r16);
+  min-height: 54px;
+}
+
+.yes {
+  background: var(--accT);
+  border-color: var(--acc);
+}
+
+.no {
+  background: var(--solid);
+  color: var(--onSolid);
+  border-color: var(--ink);
+}

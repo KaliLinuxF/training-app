@@ -1,0 +1,19 @@
+.ink {
+  color: var(--ink);
+}
+
+.acc {
+  color: var(--accD);
+}
+
+.acc2 {
+  color: var(--acc2D);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.faint {
+  color: var(--faint);
+}

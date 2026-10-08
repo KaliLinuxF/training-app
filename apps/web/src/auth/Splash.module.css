@@ -1,0 +1,35 @@
+.splash {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: var(--safe-top) 18px var(--safe-bottom);
+  background: var(--paper);
+}
+
+.mark,
+.hint {
+  animation: appear 0.4s var(--ease-out) 0.3s both;
+}
+
+.hint {
+  margin: 0;
+  max-width: 320px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
