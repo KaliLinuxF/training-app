@@ -7,6 +7,7 @@
  */
 import { create } from 'zustand';
 import { api, ApiError } from '../lib/api';
+import { disablePush, syncPushSubscription } from '../lib/push';
 import { flushNow, hasDeviceCache, resetLocal } from '../store/data';
 
 export type AuthStatus = 'checking' | 'authed' | 'anon';
@@ -28,6 +29,7 @@ async function runCheck(): Promise<void> {
   try {
     await api.me();
     useAuthStore.setState({ status: 'authed', offline: false });
+    refreshPush();
   } catch (err) {
     if (err instanceof ApiError && err.isNetwork) {
       // Offline start: the cookie is probably fine, so open the app from the device cache.
@@ -40,6 +42,11 @@ async function runCheck(): Promise<void> {
     if (!(err instanceof ApiError && err.status === 401)) console.error('[legko] session check failed', err);
     useAuthStore.setState({ status: 'anon', offline: false });
   }
+}
+
+/** Re-registers this device's push subscription once the session is known to be valid (best effort). */
+function refreshPush(): void {
+  syncPushSubscription().catch(() => {});
 }
 
 export const authActions = {
@@ -55,6 +62,7 @@ export const authActions = {
   async login(password: string): Promise<void> {
     await api.login(password);
     useAuthStore.setState({ status: 'authed', offline: false });
+    refreshPush();
   },
 
   /**
@@ -64,6 +72,8 @@ export const authActions = {
   async logout(): Promise<boolean> {
     const synced = await flushNow();
     if (!synced && !window.confirm(UNSYNCED_LOGOUT_CONFIRM)) return false;
+    // Stop reminders on this device while the session still authorises the unsubscribe call.
+    await disablePush().catch(() => {});
     try {
       await api.logout();
     } catch (err) {

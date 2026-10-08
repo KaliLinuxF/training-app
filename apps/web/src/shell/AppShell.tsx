@@ -6,6 +6,7 @@ import { SheetHost } from '@/sheets/SheetHost';
 import { ui } from '@/store/ui';
 import { cx, Toast } from '@/ui';
 import { Sidebar } from './Sidebar';
+import { SyncWatcher } from './SyncWatcher';
 import { TabBar } from './TabBar';
 import s from './AppShell.module.css';
 
@@ -31,6 +32,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className={s.main}>{children}</main>
       {!isDesktop && <TabBar location={location} onRecord={recordToday} />}
       <Toast />
+      <SyncWatcher />
       <SheetHost />
     </div>
   );

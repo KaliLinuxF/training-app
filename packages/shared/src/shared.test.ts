@@ -14,6 +14,10 @@ import {
   opSchema,
   sgn,
   zonedNow,
+  defaultSettings,
+  foodEstimateRequestSchema,
+  rankFoods,
+  settingsSchema,
 } from './index';
 
 describe('dates', () => {
@@ -118,5 +122,49 @@ describe('settings', () => {
     expect(s.rem.weigh).toEqual({ on: false, day: 1, time: '08:00' });
     expect(s.rem.workout.days).toEqual([1, 3, 5]);
     expect(s.customTypes).toEqual([]);
+  });
+});
+
+describe('food ops & photos', () => {
+  it('keeps photos on a day and treats a photo-only day as non-empty', () => {
+    const d = applyOps(emptyData(), [
+      {
+        kind: 'day.put',
+        date: '2026-10-10',
+        value: { food: '', kcal: null, trained: null, types: [], notes: '', photos: ['abcdefghijklmnop', 'abcdefghijklmnop'] },
+      },
+    ]);
+    expect(d.days['2026-10-10']).toEqual({ food: '', kcal: null, trained: null, types: [], notes: '', photos: ['abcdefghijklmnop'] });
+    const e = applyOps(d, [{ kind: 'day.put', date: '2026-10-10', value: { food: '', kcal: null, trained: null, types: [], notes: '', photos: [] } }]);
+    expect(e.days).toEqual({});
+  });
+
+  it('upserts frequent dishes case-insensitively', () => {
+    const d = applyOps(emptyData(), [
+      { kind: 'food.use', date: '2026-10-09', value: { name: 'Вівсянка з бананом', portion: '250 г', kcal: 350 } },
+      { kind: 'food.use', date: '2026-10-10', value: { name: 'вівсянка з бананом ', portion: '300 г', kcal: 400 } },
+      { kind: 'food.use', date: '2026-10-10', value: { name: 'Кава з молоком', portion: '1 чашка', kcal: 60 } },
+    ]);
+    expect(d.foods).toHaveLength(2);
+    expect(d.foods.find((f) => f.kcal === 400)).toEqual({ name: 'вівсянка з бананом', portion: '300 г', kcal: 400, count: 2, lastUsed: '2026-10-10' });
+    expect(rankFoods(d.foods).map((f) => f.count)).toEqual([2, 1]);
+    const e = applyOps(d, [{ kind: 'food.delete', name: 'КАВА З МОЛОКОМ' }]);
+    expect(e.foods.map((f) => f.name)).toEqual(['вівсянка з бананом']);
+  });
+
+  it('normalises custom workout types identically to the server schema', () => {
+    const value = { ...defaultSettings(), customTypes: [' Йога ', 'йога', 'Пілатес'] };
+    const parsed = settingsSchema.parse(value);
+    const reduced = applyOps(emptyData(), [{ kind: 'settings.put', value }]).settings;
+    expect(parsed.customTypes).toEqual(['Йога', 'Пілатес']);
+    expect(reduced.customTypes).toEqual(parsed.customTypes);
+  });
+
+  it('accepts backups without foods and validates estimate requests', () => {
+    const { foods: _foods, ...old } = emptyData();
+    expect(appDataSchema.parse(old).foods).toEqual([]);
+    expect(foodEstimateRequestSchema.safeParse({ date: '2026-10-10' }).success).toBe(false);
+    expect(foodEstimateRequestSchema.safeParse({ date: '2026-10-10', text: 'борщ' }).success).toBe(true);
+    expect(opSchema.safeParse({ kind: 'day.put', date: '2026-10-10', value: { food: '', kcal: null, trained: null, types: [], notes: '', photos: ['bad id'] } }).success).toBe(false);
   });
 });

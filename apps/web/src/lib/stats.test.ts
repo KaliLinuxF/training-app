@@ -85,6 +85,7 @@ function makeData(input: DataInput = {}): AppData {
     days: input.days ?? {},
     weights: input.weights ?? [],
     measures: input.measures ?? [],
+    foods: [],
     settings: { ...base.settings, ...input.settings },
   };
 }

@@ -33,7 +33,7 @@ export function defaultSettings(): Settings {
 }
 
 export function emptyData(): AppData {
-  return { days: {}, weights: [], measures: [], settings: defaultSettings() };
+  return { days: {}, weights: [], measures: [], foods: [], settings: defaultSettings() };
 }
 
 /** Fills in anything missing from a stored/partial settings object (older data, new fields). */
@@ -49,6 +49,20 @@ export function normalizeSettings(input: Partial<Settings> | null | undefined): 
       weigh: { ...d.rem.weigh, ...rem.weigh },
       measure: { ...d.rem.measure, ...rem.measure },
     },
-    customTypes: s.customTypes ?? d.customTypes,
+    customTypes: normalizeTypeNames(s.customTypes ?? d.customTypes),
   };
+}
+
+/** Trimmed, non-empty, de-duplicated (case-insensitive) type names, first spelling wins. */
+export function normalizeTypeNames(names: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of names) {
+    const name = raw.trim();
+    const key = name.toLocaleLowerCase('uk');
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
 }

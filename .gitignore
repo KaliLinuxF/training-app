@@ -7,6 +7,8 @@ coverage/
 !.env.example
 /data/
 *.sqlite
+*.db
+*.db-*
 *.sqlite-*
 test-results/
 playwright-report/

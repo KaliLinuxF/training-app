@@ -23,6 +23,7 @@ export function normalizeAppData(input: Partial<AppData> | null | undefined): Ap
     days: isRecord(src.days) ? { ...src.days } : {},
     weights: Array.isArray(src.weights) ? [...src.weights].sort(byDate) : [],
     measures: Array.isArray(src.measures) ? [...src.measures].sort(byDate) : [],
+    foods: Array.isArray(src.foods) ? [...src.foods] : [],
     settings: normalizeSettings(isRecord(src.settings) ? src.settings : undefined),
   };
 }

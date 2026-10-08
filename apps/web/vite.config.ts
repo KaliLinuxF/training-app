@@ -64,7 +64,8 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // No public source maps: they would expose the sources and bloat the precache.
+    sourcemap: false,
   },
   test: {
     environment: 'jsdom',

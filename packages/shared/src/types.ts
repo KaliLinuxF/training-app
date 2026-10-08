@@ -18,6 +18,19 @@ export interface DayEntry {
   /** Workout types, only meaningful when `trained === true`. */
   types: string[];
   notes: string;
+  /** Food photo ids (photo diary), oldest first. Omitted when there are none. */
+  photos?: string[];
+}
+
+/** A dish she has logged before — powers the «Часті страви» quick-add chips. */
+export interface FoodItem {
+  name: string;
+  /** Human portion description, e.g. «250 г», «1 шматок». */
+  portion: string;
+  kcal: number;
+  /** How many times it was added. */
+  count: number;
+  lastUsed: ISODate;
 }
 
 export interface WeightEntry {
@@ -77,5 +90,7 @@ export interface AppData {
   weights: WeightEntry[];
   /** Sorted by date ascending, at most one entry per date. */
   measures: MeasureEntry[];
+  /** Frequent dishes, at most one per (case-insensitive) name, in no particular order. */
+  foods: FoodItem[];
   settings: Settings;
 }

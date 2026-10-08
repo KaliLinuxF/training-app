@@ -3,6 +3,9 @@ import {
   type ApiErrorCode,
   type AppData,
   type ErrorResponse,
+  type FoodEstimateRequest,
+  type FoodEstimateResponse,
+  type FoodStatusResponse,
   type HealthResponse,
   type OkResponse,
   type Op,
@@ -70,4 +73,7 @@ export const api = {
     request<OkResponse>('POST', API.pushSubscribe, { subscription, timezone }),
   pushUnsubscribe: (endpoint: string) => request<OkResponse>('POST', API.pushUnsubscribe, { endpoint }),
   pushTest: () => request<PushTestResponse>('POST', API.pushTest),
+  foodStatus: () => request<FoodStatusResponse>('GET', API.foodStatus),
+  /** AI calorie estimate from text and/or a downscaled JPEG (base64). Can take ~5–20 s. */
+  foodEstimate: (req: FoodEstimateRequest) => request<FoodEstimateResponse>('POST', API.foodEstimate, req),
 };

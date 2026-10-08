@@ -19,7 +19,13 @@ export const API = {
   pushSubscribe: '/api/push/subscribe', // POST PushSubscribeRequest → OkResponse
   pushUnsubscribe: '/api/push/unsubscribe', // POST { endpoint } → OkResponse
   pushTest: '/api/push/test', // POST → PushTestResponse
+  foodStatus: '/api/food/status', // GET  → FoodStatusResponse
+  foodEstimate: '/api/food/estimate', // POST FoodEstimateRequest → FoodEstimateResponse | 429 | 503 ai_unavailable | 502 ai_failed
 } as const;
+
+/** Stored food photo (JPEG): full size and thumbnail. Auth required, immutable. */
+export const photoUrl = (id: string): string => `/api/photos/${encodeURIComponent(id)}`;
+export const photoThumbUrl = (id: string): string => `/api/photos/${encodeURIComponent(id)}/thumb`;
 
 export interface OkResponse {
   ok: true;
@@ -44,6 +50,28 @@ export interface PushTestResponse {
   sent: number;
 }
 
+export interface FoodStatusResponse {
+  /** False when the server has no Anthropic API key — the UI hides the AI buttons. */
+  enabled: boolean;
+  /** Estimates left today under the daily budget guard. */
+  remainingToday: number;
+}
+
+export interface FoodEstimateItem {
+  name: string;
+  portion: string;
+  kcal: number;
+}
+
+export interface FoodEstimateResponse {
+  /** Id of the stored photo when one was sent; reference it from `DayEntry.photos` when adding. */
+  photoId: string | null;
+  items: FoodEstimateItem[];
+  totalKcal: number;
+  /** Short Ukrainian remark from the model (uncertainty, «це не схоже на їжу», …); may be empty. */
+  comment: string;
+}
+
 /** Error body for every non-2xx response. */
 export interface ErrorResponse {
   error: ApiErrorCode;
@@ -61,6 +89,9 @@ export type ApiErrorCode =
   | 'forbidden_origin'
   | 'not_found'
   | 'push_unavailable'
+  | 'ai_unavailable'
+  | 'ai_failed'
+  | 'payload_too_large'
   | 'internal';
 
 export type DataResponse = AppData;
