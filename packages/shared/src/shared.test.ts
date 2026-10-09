@@ -168,3 +168,25 @@ describe('food ops & photos', () => {
     expect(opSchema.safeParse({ kind: 'day.put', date: '2026-10-10', value: { food: '', kcal: null, trained: null, types: [], notes: '', photos: ['bad id'] } }).success).toBe(false);
   });
 });
+
+describe('food recalculation requests', () => {
+  it('accepts corrected items (optionally with a stored photo) and rejects mixed modes', () => {
+    const items = [{ name: 'Борщ зі сметаною', portion: '350 г' }];
+    expect(foodEstimateRequestSchema.safeParse({ date: '2026-10-10', items }).success).toBe(true);
+    expect(
+      foodEstimateRequestSchema.safeParse({ date: '2026-10-10', items, photoId: 'abcdefghijklmnopqrstuv' }).success,
+    ).toBe(true);
+    expect(foodEstimateRequestSchema.safeParse({ date: '2026-10-10', items: [] }).success).toBe(false);
+    expect(
+      foodEstimateRequestSchema.safeParse({ date: '2026-10-10', photoId: 'abcdefghijklmnopqrstuv', text: 'борщ' })
+        .success,
+    ).toBe(false);
+    expect(
+      foodEstimateRequestSchema.safeParse({
+        date: '2026-10-10',
+        items,
+        image: { full: 'A'.repeat(20), thumb: 'A'.repeat(20) },
+      }).success,
+    ).toBe(false);
+  });
+});

@@ -141,13 +141,30 @@ export const pushUnsubscribeRequestSchema = z.object({ endpoint: z.url().max(200
 const base64 = (max: number) => z.string().min(16).max(max).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Expected base64');
 
 /** `POST /api/food/estimate`: a text description, a photo (JPEG, downscaled on the device), or both. */
+/** One corrected position she sends back for recalculation; her name and portion are authoritative. */
+export const foodRecalcItemSchema = z.object({
+  name: z.string().trim().min(1).max(LIMITS.foodName),
+  portion: z.string().trim().max(LIMITS.portion),
+});
+export type FoodRecalcItem = z.infer<typeof foodRecalcItemSchema>;
+
+/**
+ * Two modes:
+ * - **estimate**: `text` and/or a new `image` → the model identifies the items (the photo is stored first);
+ * - **recalculate**: `items` (her corrected names/portions, same order back) + optional `photoId` of the
+ *   already stored photo for context (not stored again) → the model only prices those items.
+ */
 export const foodEstimateRequestSchema = z
   .object({
     date: isoDateSchema,
     text: z.string().trim().max(LIMITS.foodText).optional(),
     image: z.object({ full: base64(LIMITS.photoB64), thumb: base64(LIMITS.thumbB64) }).optional(),
+    items: z.array(foodRecalcItemSchema).min(1).max(30).optional(),
+    photoId: photoIdSchema.optional(),
   })
-  .refine((r) => Boolean(r.text) || r.image !== undefined, 'Describe the food or attach a photo');
+  .refine((r) => Boolean(r.text) || r.image !== undefined || r.items !== undefined, 'Describe the food or attach a photo')
+  .refine((r) => !(r.items && r.image), 'Send either a new photo or items to recalculate, not both')
+  .refine((r) => r.photoId === undefined || r.items !== undefined, 'photoId is only used when recalculating items');
 export type FoodEstimateRequest = z.input<typeof foodEstimateRequestSchema>;
 
 /** What the model must return (validated on the server before it reaches the client). */

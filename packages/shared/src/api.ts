@@ -64,8 +64,12 @@ export interface FoodEstimateItem {
 }
 
 export interface FoodEstimateResponse {
-  /** Id of the stored photo when one was sent; reference it from `DayEntry.photos` when adding. */
+  /**
+   * Id of the stored photo when one was sent (or, when recalculating, the `photoId` that was passed);
+   * reference it from `DayEntry.photos` when adding.
+   */
   photoId: string | null;
+  /** When recalculating: exactly the sent items, same order, names/portions as sent, new kcal. */
   items: FoodEstimateItem[];
   totalKcal: number;
   /** Short Ukrainian remark from the model (uncertainty, «це не схоже на їжу», …); may be empty. */

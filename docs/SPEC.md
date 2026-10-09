@@ -243,8 +243,14 @@ to the day's kcal and appends a line to the food text.
   «✨ Порахувати» opens a composer pre-filled with the part of «Що я їла» typed after the last estimated line
   (`unestimatedTail`); «Додати» replaces that part with the itemised line (`insertEstimate`) so the meal is never
   written twice. «Часті страви» usage (`food.use`) is committed together with the day on «Зберегти», never earlier.
-  Result card: optional thumbnail, item rows (name + portion muted, kcal editable), total, «Додати N ккал» (solid)
-  and «Скасувати». Loading state «Рахую калорії…». Thumbnails strip of the day's photos (tap → full-screen viewer,
+  Result card: optional thumbnail, item rows, total, «Додати N ккал» (solid) and «Скасувати».
+  **Every row is editable — name, portion and kcal — and she can add a missing row («+ позиція»).**
+  Recalculation rules: if only the amount changed and both portions are in the same measurable unit group
+  (г/кг or мл/л, comma decimals, «~»/«≈» allowed) with the name unchanged, kcal scale proportionally from the
+  last model-confirmed values **on the device, instantly, without an AI call**. Any other name/portion change marks
+  the row «змінено» and shows «✨ Перерахувати»: one `POST /api/food/estimate` in *recalculate* mode with all rows
+  `{ name, portion }` (her values are authoritative) plus the stored `photoId` for context; only the changed rows
+  take the new kcal (rows whose kcal she typed herself keep it). Counts as one estimate against the daily budget. Loading state «Рахую калорії…». Thumbnails strip of the day's photos (tap → full-screen viewer,
   remove). Calendar day detail shows the thumbnails under «Харчування».
 
 ## 4. Conventions
