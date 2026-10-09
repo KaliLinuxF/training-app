@@ -300,6 +300,11 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 
 Caddy (in this stack) is the only thing listening on 80/443, and it serves other projects too:
 
+- **Names on `edge` must be unique and project-prefixed.** Every compose service name and network alias is a DNS
+  name on each network the container joins, and Caddy resolves upstream names across all its networks. A generic name
+  (`app`, `web`, `api`, `db`, `caddy`) on `edge` hijacks another project's upstream — on 2026-10-09 a second project's
+  service called `app` took over `reverse_proxy app:3000` and fit.triple-a.dev timed out for ~3 minutes. «Легко» is
+  reached only as `legko-app` (an alias on its private network); other projects use e.g. `<project>-app`.
 - Each project lives in its own directory (e.g. `/opt/<project>`, owner `deploy`) with its own compose project.
 - Its web container joins the external Docker network **`edge`** (`networks: { edge: { external: true } }`)
   and **publishes no ports** (published ports bypass ufw). Give it a fixed `container_name` or use the service
