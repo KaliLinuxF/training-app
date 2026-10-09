@@ -32,6 +32,12 @@ services:
     # Not published: only Caddy is reachable from outside (published ports bypass ufw).
     expose:
       - '3000'
+    # Caddy reaches the app by this unique alias (see Caddyfile): the plain service name `app` is ambiguous
+    # for Caddy, which is also on the shared `edge` network with other projects.
+    networks:
+      default:
+        aliases:
+          - legko-app
     read_only: true
     tmpfs:
       - /tmp

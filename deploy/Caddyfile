@@ -26,7 +26,9 @@ fit.triple-a.dev {
 		max_size 17MB
 	}
 
-	reverse_proxy app:3000 {
+	# `legko-app` is a network alias unique to this stack. Never a generic name like `app`: Caddy also sits on
+	# the shared `edge` network, where another project's service of that name would win the DNS lookup.
+	reverse_proxy legko-app:3000 {
 		# Hold requests briefly while the app container restarts during a deploy.
 		lb_try_duration 15s
 		lb_try_interval 250ms
