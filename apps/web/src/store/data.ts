@@ -24,33 +24,36 @@ export const useSettings = (): Settings => useDataStore((s) => s.data.settings);
 export const useSyncState = (): SyncState => useDataStore((s) => s.sync);
 export const getAppData = (): AppData => useDataStore.getState().data;
 
-/** Applies ops locally right away and queues them for the server. */
-export function commit(...ops: Op[]): void {
-  commitOps(ops);
+/**
+ * Applies ops locally right away and queues them for the server.
+ * Returns `false` (and applies nothing) when an op is invalid — callers should keep the user's input then.
+ */
+export function commit(...ops: Op[]): boolean {
+  return commitOps(ops);
 }
 
 export const dataActions = {
   /** Saves the whole day; an empty entry deletes the day. */
-  saveDay(date: ISODate, entry: DayEntry): void {
-    commit({ kind: 'day.put', date, value: entry });
+  saveDay(date: ISODate, entry: DayEntry): boolean {
+    return commit({ kind: 'day.put', date, value: entry });
   },
-  deleteDay(date: ISODate): void {
-    commit({ kind: 'day.delete', date });
+  deleteDay(date: ISODate): boolean {
+    return commit({ kind: 'day.delete', date });
   },
   /** `null` removes the weigh-in for that date. */
-  setWeight(date: ISODate, kg: number | null): void {
-    commit(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
+  setWeight(date: ISODate, kg: number | null): boolean {
+    return commit(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
   },
   /** `null` (or all three values empty) removes the measurements for that date. */
-  setMeasure(date: ISODate, m: MeasureValues | null): void {
-    commit(
+  setMeasure(date: ISODate, m: MeasureValues | null): boolean {
+    return commit(
       m == null || (m.chest == null && m.waist == null && m.hips == null)
         ? { kind: 'measure.delete', date }
         : { kind: 'measure.put', date, value: m },
     );
   },
-  updateSettings(update: (s: Settings) => Settings): void {
-    commit({ kind: 'settings.put', value: update(getAppData().settings) });
+  updateSettings(update: (s: Settings) => Settings): boolean {
+    return commit({ kind: 'settings.put', value: update(getAppData().settings) });
   },
   /**
    * Replaces everything (backup restore): flushes pending changes, uploads the backup,

@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react';
+import type { ComponentPropsWithRef } from 'react';
 import { cx } from '../internal/cx';
 import s from './Button.module.css';
 
@@ -17,7 +17,7 @@ export type ButtonVariant = 'solid' | 'accent' | 'outline' | 'ghost';
  */
 export type ButtonSize = 'sm' | 'md' | 'lg';
 
-export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface ButtonProps extends ComponentPropsWithRef<'button'> {
   variant?: ButtonVariant;
   size?: ButtonSize;
   fullWidth?: boolean;

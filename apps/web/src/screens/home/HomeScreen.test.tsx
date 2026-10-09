@@ -89,7 +89,7 @@ describe('HomeScreen', () => {
   });
 
   it('«✕ Не було» saves the day without a workout, keeping the rest, and confirms', () => {
-    const saveDay = vi.spyOn(dataActions, 'saveDay').mockImplementation(() => undefined);
+    const saveDay = vi.spyOn(dataActions, 'saveDay').mockImplementation(() => true);
     const entry = day({ food: 'Борщ', kcal: 1200, notes: 'Ок', photos: ['p1'] });
     setData({ days: { [TODAY]: entry } });
     render(<HomeScreen />);

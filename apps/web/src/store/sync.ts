@@ -336,24 +336,29 @@ function stopSession(): void {
 // ---- public API ------------------------------------------------------------------------
 
 /** Applies ops locally right away, persists them and queues them for the server. */
-export function commitOps(ops: readonly Op[]): void {
+/** Returns `false` when any op was refused locally (invalid) — nothing of the batch is applied then. */
+export function commitOps(ops: readonly Op[]): boolean {
   // A new change from the user retires the previous one-off notice.
   if (errorKind === 'notice') {
     errorKind = null;
     patchSync({ error: null });
   }
-  enqueue(ops);
+  return enqueue(ops);
 }
 
-function enqueue(ops: readonly Op[]): void {
+function enqueue(ops: readonly Op[]): boolean {
   const valid: Op[] = [];
   for (const op of ops) {
     const parsed = opSchema.safeParse(op);
     if (parsed.success) valid.push(parsed.data);
     else console.warn('[legko] refusing an invalid op', op, parsed.error.issues);
   }
-  if (valid.length < ops.length) setError(SYNC_ERRORS.invalidLocal, 'notice');
-  if (valid.length === 0) return;
+  // All or nothing: a half-applied save (e.g. the day without its weigh-in) would be worse than none.
+  if (valid.length < ops.length) {
+    setError(SYNC_ERRORS.invalidLocal, 'notice');
+    return false;
+  }
+  if (valid.length === 0) return true;
 
   outbox = [...outbox, ...valid.map((op) => ({ id: newOutboxId(), op }))];
   const data = applyOps(useDataStore.getState().data, valid);
@@ -361,6 +366,7 @@ function enqueue(ops: readonly Op[]): void {
   persist(CACHE_KEYS.data, data);
   persist(CACHE_KEYS.outbox, outbox);
   kick();
+  return true;
 }
 
 /**

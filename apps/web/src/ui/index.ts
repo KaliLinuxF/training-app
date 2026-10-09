@@ -75,3 +75,4 @@ export { deltaTone, type Tone } from './tone';
 
 // Utilities
 export { cx } from './internal/cx';
+export { ConfirmHost } from './feedback/ConfirmDialog';

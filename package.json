@@ -13,7 +13,11 @@
     "test": "pnpm -r test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "e2e": "playwright test"
+    "e2e": "pnpm -r build && playwright test",
+    "e2e:run": "playwright test",
+    "e2e:visual": "playwright test e2e/visual.spec.ts",
+    "e2e:report": "playwright show-report",
+    "e2e:typecheck": "tsc -p e2e/tsconfig.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

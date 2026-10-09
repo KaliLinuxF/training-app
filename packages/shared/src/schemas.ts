@@ -1,4 +1,7 @@
 import { z } from 'zod';
+
+// No eval-based fast path: the web app runs under a strict CSP without 'unsafe-eval'.
+z.config({ jitless: true });
 import { normalizeTypeNames } from './defaults';
 import { isValidHM, isValidISODate, isValidTimeZone } from './dates';
 import type { AppData, DayEntry, FoodItem, MeasureValues, Settings } from './types';

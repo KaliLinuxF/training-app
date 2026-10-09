@@ -4,7 +4,7 @@ import { useIsDesktop } from '@/lib/platform';
 import { useToday } from '@/lib/useToday';
 import { SheetHost } from '@/sheets/SheetHost';
 import { ui } from '@/store/ui';
-import { cx, Toast } from '@/ui';
+import { ConfirmHost, cx, Toast } from '@/ui';
 import { Sidebar } from './Sidebar';
 import { SyncWatcher } from './SyncWatcher';
 import { TabBar } from './TabBar';
@@ -34,6 +34,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Toast />
       <SyncWatcher />
       <SheetHost />
+      <ConfirmHost />
     </div>
   );
 }
