@@ -60,7 +60,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    proxy: { '/api': 'http://127.0.0.1:3000' },
+    // API_PORT lets several dev stacks run side by side (default server port 3000).
+    proxy: { '/api': `http://127.0.0.1:${process.env.API_PORT ?? '3000'}` },
   },
   build: {
     target: 'es2022',
