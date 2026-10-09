@@ -66,16 +66,20 @@ test.describe('touch gestures (iPhone)', () => {
     await app.quickAction('Вага').click();
     await sheet.getByRole('button', { name: 'Плюс 0,1 кг' }).click();
     start = await center(heading);
-    const asked = new Promise<string>((resolve) =>
-      page.once('dialog', (d) => {
-        resolve(d.message());
-        void d.dismiss();
-      }),
-    );
+    // The in-app question shows while the panel waits off-screen; «Залишитись» slides it back.
+    const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
     await touchDrag(page, start, { x: start.x, y: start.y + 300 });
-    expect(await asked).toBe('Є незбережені зміни. Закрити без збереження?');
+    await expect(ask).toContainText('Закрити без збереження?');
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
     await expect(sheet).toBeVisible();
     await expect.poll(() => sheet.evaluate((el) => el.style.transform)).toBe('');
     await expect(sheet.getByRole('textbox', { name: 'Вага', exact: true })).toHaveValue('65,5');
+
+    // Dragged again and confirmed: the draft goes with the sheet.
+    start = await center(heading);
+    await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+    await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await app.expectSheetClosed();
   });
 });

@@ -20,6 +20,12 @@ fit.triple-a.dev {
 	encode zstd gzip
 	import security_headers
 
+	# Nothing the app accepts is larger (its biggest cap is 16 MiB for an import; login takes 4 KiB),
+	# so bigger bodies stop here. The app enforces the per-route limits itself.
+	request_body {
+		max_size 17MB
+	}
+
 	reverse_proxy app:3000 {
 		# Hold requests briefly while the app container restarts during a deploy.
 		lb_try_duration 15s

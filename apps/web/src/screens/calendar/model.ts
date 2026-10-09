@@ -9,12 +9,12 @@ import {
   f0,
   f1,
   fN,
-  iso,
   isValidISODate,
   MONTHS_SHORT,
   ok,
   parse,
   type AppData,
+  type DayEntry,
   type ISODate,
 } from '@legko/shared';
 import {
@@ -42,20 +42,32 @@ export function resolveSelected(param: string | null | undefined, today: ISODate
   return param;
 }
 
-const monthKeyOf = (year: number, month0: number): string => `${year}-${String(month0 + 1).padStart(2, '0')}`;
+// ---------------------------------------------------------------------------
+// Shown month (separate from the selection, as in the prototype's `calY` / `calM`)
+// ---------------------------------------------------------------------------
+
+/** A calendar month, `YYYY-MM`. */
+export type MonthKey = string;
+
+const monthKeyOf = (year: number, month0: number): MonthKey =>
+  `${year}-${String(month0 + 1).padStart(2, '0')}`;
+
+/** The month that contains `date`. */
+export const monthOf = (date: ISODate): MonthKey => date.slice(0, 7);
+
+function parseMonthKey(key: MonthKey): { year: number; month0: number } {
+  return { year: Number(key.slice(0, 4)), month0: Number(key.slice(5, 7)) - 1 };
+}
 
 /**
- * Selection after moving the calendar by `delta` months: the same day of the month, clamped to
- * the target month's length («31 березня» → «30 квітня») and to today. `null` when the target
- * month lies in the future.
+ * The shown month after ‹ / › or a swipe: `delta` months from `shown`, or `null` when that month
+ * lies after today's. Only the view moves — the selected day and its card stay put.
  */
-export function stepMonth(selected: ISODate, delta: number, today: ISODate): ISODate | null {
-  const d = parse(selected);
-  const target = shiftMonth(d.getFullYear(), d.getMonth(), delta);
-  if (monthKeyOf(target.year, target.month0) > today.slice(0, 7)) return null;
-  const daysInMonth = new Date(target.year, target.month0 + 1, 0).getDate();
-  const next = iso(new Date(target.year, target.month0, Math.min(d.getDate(), daysInMonth)));
-  return next > today ? today : next;
+export function stepMonth(shown: MonthKey, delta: number, today: ISODate): MonthKey | null {
+  const { year, month0 } = parseMonthKey(shown);
+  const target = shiftMonth(year, month0, delta);
+  const next = monthKeyOf(target.year, target.month0);
+  return next > monthOf(today) ? null : next;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,10 +105,13 @@ function cellLabel(c: CalendarCell): string {
   return parts.join(', ');
 }
 
-/** The month that contains `selected`, with fill kinds and accessible names per cell. */
-export function buildMonth(data: AppData, selected: ISODate, today: ISODate): MonthModel {
-  const d = parse(selected);
-  const month = calendarMonth(data, d.getFullYear(), d.getMonth(), today, selected);
+/**
+ * The `shown` month with fill kinds and accessible names per cell. `selected` is highlighted only
+ * when it falls in that month.
+ */
+export function buildMonth(data: AppData, shown: MonthKey, selected: ISODate, today: ISODate): MonthModel {
+  const { year, month0 } = parseMonthKey(shown);
+  const month = calendarMonth(data, year, month0, today, selected);
   return {
     ...month,
     key: monthKeyOf(month.year, month.month0),
@@ -192,7 +207,7 @@ export interface HistoryRow {
   /** Workout pill: the first type / «Тренування», «Відпочинок», or «—». */
   training: string;
   trainingTone: 'acc' | 'neutral';
-  /** Screen-reader name of the row button. */
+  /** Screen-reader name of the row button (see `historyLabel`). */
   label: string;
 }
 
@@ -202,21 +217,34 @@ export interface HistoryModel {
   hasMore: boolean;
 }
 
+/**
+ * Screen-reader name of a «Останні записи» row: one sentence with lower-case app wording, e.g.
+ * «9 жовтня, калорії не вказані, Вівсянка з бананом, тренування: Верх тіла, Прес». What she typed
+ * (food, workout type names) is read as written.
+ */
+function historyLabel(date: ISODate, e: DayEntry): string {
+  const kcal = ok(e.kcal) ? `${f0(e.kcal)} ккал` : 'калорії не вказані';
+  const food = e.food.trim() || 'харчування не записане';
+  let training = 'тренування не відмічене';
+  if (e.trained === true) training = e.types.length ? `тренування: ${e.types.join(', ')}` : 'тренування';
+  else if (e.trained === false) training = 'відпочинок';
+  return [dLong(date), kcal, food, training].join(', ');
+}
+
 export function buildHistory(data: AppData, limit: number): HistoryModel {
   const rows = recentDays(data, limit).map(({ date, entry: e }): HistoryRow => {
     const d = parse(date);
-    const training = e.trained === true ? e.types[0] || 'Тренування' : e.trained === false ? 'Відпочинок' : EMPTY;
-    const kcal = ok(e.kcal) ? `${f0(e.kcal)} ккал` : 'Калорії не вказані';
-    const food = e.food.trim() || 'Харчування не записане';
+    const training =
+      e.trained === true ? e.types[0] || 'Тренування' : e.trained === false ? 'Відпочинок' : EMPTY;
     return {
       date,
       day: d.getDate(),
       month: MONTHS_SHORT[d.getMonth()] ?? '',
-      kcal,
-      food,
+      kcal: ok(e.kcal) ? `${f0(e.kcal)} ккал` : 'Калорії не вказані',
+      food: e.food.trim() || 'Харчування не записане',
       training,
       trainingTone: e.trained === true ? 'acc' : 'neutral',
-      label: [dLong(date), kcal, food, training === EMPTY ? 'тренування не відмічене' : training].join(', '),
+      label: historyLabel(date, e),
     };
   });
   return { rows, hasMore: Object.keys(data.days).length > rows.length };

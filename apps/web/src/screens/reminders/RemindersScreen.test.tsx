@@ -1,3 +1,4 @@
+import { todayISO } from '@legko/shared';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { authActions } from '@/auth/auth';
@@ -7,8 +8,11 @@ import type { PushStatus } from '@/lib/push';
 import { dataActions, useDataStore } from '@/store/data';
 import { initialSyncState } from '@/store/state';
 import { deferred, sampleData, settle } from '@/store/test-utils';
-import { useUiStore } from '@/store/ui';
+import type * as SyncModule from '@/store/sync';
+import { ui, useUiStore } from '@/store/ui';
 import { installMatchMedia } from '@/ui/internal/testing';
+import { backupDevice, type ShareHost } from './backupFile';
+import { parseBackup } from './model';
 import { RemindersScreen } from './RemindersScreen';
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     syncPushSubscription: vi.fn<() => Promise<void>>(),
   },
   api: { sendOps: vi.fn(), getData: vi.fn(), importData: vi.fn(), logout: vi.fn() },
+  flushNow: vi.fn<() => Promise<boolean>>(),
 }));
 
 vi.mock('@/lib/push', () => mocks.push);
@@ -27,10 +32,16 @@ vi.mock('@/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
   api: { ...mocks.api, exportUrl: '/api/export' },
 }));
+vi.mock('@/store/sync', async (importOriginal) => ({
+  ...(await importOriginal<typeof SyncModule>()),
+  flushNow: mocks.flushNow,
+}));
 vi.mock('idb-keyval', async () => (await import('@/store/test-utils')).fakeIdb());
 
 const settings = () => useDataStore.getState().data.settings;
 const toast = () => useUiStore.getState().toast?.text;
+const patchSync = (patch: Partial<ReturnType<typeof initialSyncState>>) =>
+  act(() => useDataStore.setState((st) => ({ sync: { ...st.sync, ...patch } })));
 
 function renderScreen(status: PushStatus = 'default') {
   mocks.push.getPushStatus.mockResolvedValue(status);
@@ -56,8 +67,9 @@ beforeEach(() => {
   for (const fn of Object.values(mocks.push)) fn.mockReset();
   for (const fn of Object.values(mocks.api)) fn.mockReset();
   mocks.api.sendOps.mockReturnValue(new Promise(() => undefined));
-  useDataStore.setState({ data: sampleData(), sync: { ...initialSyncState(), loaded: true } });
-  useUiStore.setState({ sheet: null, toast: null });
+  mocks.flushNow.mockReset().mockResolvedValue(true);
+  useDataStore.setState({ data: sampleData(), sync: { ...initialSyncState(), loaded: true, online: true } });
+  useUiStore.setState({ sheet: null, toast: null, confirm: null });
   localStorage.clear();
   delete document.documentElement.dataset.theme;
 });
@@ -130,7 +142,7 @@ describe('RemindersScreen', () => {
 
     it('opens the install guide on an iPhone browser tab', async () => {
       await renderReady('needs-install');
-      fireEvent.click(screen.getByRole('button', { name: 'Як увімкнути' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Як?' }));
       expect(useUiStore.getState().sheet?.mode).toBe('install');
     });
 
@@ -245,15 +257,22 @@ describe('RemindersScreen', () => {
       expect(data.getByText('Офлайн — 3 зміни чекають на інтернет')).toBeTruthy();
     });
 
-    it('restores a backup after confirming', async () => {
+    it('restores a backup after confirming in the app, never with window.confirm', async () => {
       const importAll = vi.spyOn(dataActions, 'importAll').mockResolvedValue();
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const confirm = vi.spyOn(ui, 'confirm').mockResolvedValue(true);
+      const native = vi.spyOn(window, 'confirm');
       await renderReady();
 
       pickFile(JSON.stringify(sampleData({ weights: [{ date: '2026-10-05', kg: 65.4 }] })));
       await act(settle);
 
-      expect(confirm).toHaveBeenCalledWith('Це замінить усі записи даними з файлу. Продовжити?');
+      expect(confirm).toHaveBeenCalledWith({
+        title: 'Відновити з резервної копії?',
+        body: 'Усі поточні записи буде замінено даними з файлу.',
+        confirmLabel: 'Відновити',
+        destructive: true,
+      });
+      expect(native).not.toHaveBeenCalled();
       expect(importAll).toHaveBeenCalledTimes(1);
       expect(importAll.mock.calls[0]?.[0].weights).toEqual([{ date: '2026-10-05', kg: 65.4 }]);
       expect(toast()).toBe('Дані відновлено');
@@ -261,29 +280,177 @@ describe('RemindersScreen', () => {
 
     it('does nothing when the restore is cancelled, and rejects foreign files', async () => {
       const importAll = vi.spyOn(dataActions, 'importAll').mockResolvedValue();
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
       await renderReady();
 
       pickFile(JSON.stringify(sampleData()));
       await act(settle);
-      expect(confirm).toHaveBeenCalledTimes(1);
+      // The real in-app dialog is waiting for an answer.
+      const asked = useUiStore.getState().confirm;
+      expect(asked?.title).toBe('Відновити з резервної копії?');
+      await act(async () => {
+        asked?.resolve(false);
+        await settle();
+      });
+      expect(useUiStore.getState().confirm).toBeNull();
       expect(importAll).not.toHaveBeenCalled();
 
       pickFile('{"not":"a backup"}');
       await act(settle);
-      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(useUiStore.getState().confirm).toBeNull();
       expect(toast()).toBe('Файл не схожий на резервну копію «Легко»');
     });
 
     it('shows the server error when the restore fails', async () => {
       vi.spyOn(dataActions, 'importAll').mockRejectedValue(new ApiError(0, 'network', 'Немає зʼєднання з сервером'));
-      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      vi.spyOn(ui, 'confirm').mockResolvedValue(true);
       await renderReady();
 
       pickFile(JSON.stringify(sampleData()));
       await act(settle);
       expect(toast()).toBe('Немає зʼєднання з сервером');
       expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Відновити з копії' }).disabled).toBe(false);
+    });
+
+    describe('in the installed iPhone app', () => {
+      const shareHost = (share: ShareHost['share'] = () => Promise.resolve()) => {
+        const h = { iosApp: true, share: vi.fn(share), canShare: vi.fn(() => true) };
+        vi.spyOn(backupDevice, 'host').mockReturnValue(h);
+        return h;
+      };
+      const saveButton = (name = 'Завантажити резервну копію') =>
+        card('Дані').getByRole<HTMLButtonElement>('button', { name });
+      const sharedFile = (h: ReturnType<typeof shareHost>, call = 0): File => {
+        const file = h.share.mock.calls[call]?.[0]?.files?.[0];
+        if (!file) throw new Error('nothing shared');
+        return file;
+      };
+      const read = (file: File) =>
+        new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.readAsText(file);
+        });
+
+      it('hands the file to the share sheet instead of a download link that would trap the app', async () => {
+        const h = shareHost();
+        await renderReady();
+        expect(card('Дані').queryByRole('link')).toBeNull();
+
+        fireEvent.click(saveButton());
+        // Synchronously, inside the tap: iOS only shows the share sheet for a user gesture.
+        expect(h.share).toHaveBeenCalledTimes(1);
+        expect(mocks.flushNow).not.toHaveBeenCalled();
+        const file = sharedFile(h);
+        expect(file.name).toBe(`legko-${todayISO()}.json`);
+        expect(file.type).toBe('application/json');
+        expect(parseBackup(await read(file))).toEqual(useDataStore.getState().data);
+
+        await act(settle);
+        expect(toast()).toBeUndefined();
+        expect(saveButton().disabled).toBe(false);
+      });
+
+      it('sends queued changes first, then opens the share sheet', async () => {
+        const h = shareHost();
+        const flushed = deferred<boolean>();
+        mocks.flushNow.mockReturnValue(flushed.promise);
+        await renderReady();
+        patchSync({ pending: 2 });
+
+        fireEvent.click(saveButton());
+        expect(mocks.flushNow).toHaveBeenCalledTimes(1);
+        expect(h.share).not.toHaveBeenCalled();
+        expect(saveButton('Готую копію…').disabled).toBe(true);
+
+        patchSync({ pending: 0 });
+        await act(async () => {
+          flushed.resolve(true);
+          await settle();
+        });
+        expect(h.share).toHaveBeenCalledTimes(1);
+        expect(saveButton().disabled).toBe(false);
+      });
+
+      it('asks for one more tap when iOS refuses the share sheet after the wait', async () => {
+        const h = shareHost();
+        h.share.mockRejectedValueOnce(new DOMException('needs a gesture', 'NotAllowedError'));
+        mocks.flushNow.mockImplementation(() => {
+          useDataStore.setState((st) => ({ sync: { ...st.sync, pending: 0 } }));
+          return Promise.resolve(true);
+        });
+        await renderReady();
+        patchSync({ pending: 1 });
+
+        fireEvent.click(saveButton());
+        await act(settle);
+        expect(toast()).toBe('Копія готова — натисни ще раз, щоб зберегти');
+
+        fireEvent.click(saveButton('Поділитися файлом'));
+        expect(h.share).toHaveBeenCalledTimes(2);
+        expect(mocks.flushNow).toHaveBeenCalledTimes(1);
+        await act(settle);
+        expect(saveButton().disabled).toBe(false);
+      });
+
+      it('drops the prepared copy when something changes before the second tap', async () => {
+        const h = shareHost();
+        h.share.mockRejectedValueOnce(new DOMException('needs a gesture', 'NotAllowedError'));
+        await renderReady();
+        patchSync({ pending: 1 });
+        mocks.flushNow.mockImplementation(() => {
+          useDataStore.setState((st) => ({ sync: { ...st.sync, pending: 0 } }));
+          return Promise.resolve(true);
+        });
+        fireEvent.click(saveButton());
+        await act(settle);
+        expect(saveButton('Поділитися файлом')).toBeTruthy();
+
+        patchSync({ pending: 1 });
+        fireEvent.click(saveButton());
+        expect(mocks.flushNow).toHaveBeenCalledTimes(2);
+        await act(settle);
+        expect(h.share).toHaveBeenCalledTimes(2);
+      });
+
+      it('stays quiet when she closes the share sheet, and says so when sharing fails', async () => {
+        const h = shareHost();
+        h.share.mockRejectedValueOnce(new DOMException('closed', 'AbortError'));
+        h.share.mockRejectedValueOnce(new TypeError('no'));
+        await renderReady();
+
+        fireEvent.click(saveButton());
+        await act(settle);
+        expect(toast()).toBeUndefined();
+
+        fireEvent.click(saveButton());
+        await act(settle);
+        expect(toast()).toBe('Не вдалося зберегти копію. Спробуй ще раз');
+      });
+
+      it('needs the connection and a finished sync', async () => {
+        const h = shareHost();
+        mocks.flushNow.mockResolvedValue(false);
+        await renderReady();
+
+        patchSync({ online: false });
+        fireEvent.click(saveButton());
+        expect(toast()).toBe('Немає інтернету — копію можна завантажити, коли зʼявиться звʼязок');
+
+        patchSync({ online: true, pending: 1 });
+        fireEvent.click(saveButton());
+        await act(settle);
+        expect(toast()).toBe('Не всі зміни встигли синхронізуватися — спробуй ще раз пізніше');
+        expect(saveButton().disabled).toBe(false);
+        expect(h.share).not.toHaveBeenCalled();
+      });
+
+      it('points to Safari on an iOS that cannot share files', async () => {
+        vi.spyOn(backupDevice, 'host').mockReturnValue({ iosApp: true });
+        await renderReady();
+        expect(card('Дані').queryByRole('link')).toBeNull();
+        fireEvent.click(saveButton());
+        expect(toast()).toBe('На цьому iPhone копію можна завантажити лише в Safari');
+      });
     });
   });
 
@@ -293,5 +460,36 @@ describe('RemindersScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Вийти' }));
     expect(logout).toHaveBeenCalledTimes(1);
     await act(settle);
+  });
+
+  it('says «Виходжу…» only once she has confirmed the logout', async () => {
+    const leaving = deferred<boolean>();
+    // Like authActions.logout: asks in the app's dialog, then logs out.
+    vi.spyOn(authActions, 'logout').mockImplementation(async () =>
+      (await ui.confirm({ title: 'Вийти з Легко на цьому пристрої?' })) ? leaving.promise : false,
+    );
+    const logoutButton = (name: string) => screen.getByRole<HTMLButtonElement>('button', { name });
+    await renderReady();
+
+    fireEvent.click(logoutButton('Вийти'));
+    await act(settle);
+    expect(logoutButton('Вийти').disabled).toBe(true);
+    await act(async () => {
+      useUiStore.getState().confirm?.resolve(false);
+      await settle();
+    });
+    expect(logoutButton('Вийти').disabled).toBe(false);
+
+    fireEvent.click(logoutButton('Вийти'));
+    await act(async () => {
+      await settle();
+      useUiStore.getState().confirm?.resolve(true);
+      await settle();
+    });
+    expect(logoutButton('Виходжу…').disabled).toBe(true);
+    await act(async () => {
+      leaving.resolve(true);
+      await settle();
+    });
   });
 });

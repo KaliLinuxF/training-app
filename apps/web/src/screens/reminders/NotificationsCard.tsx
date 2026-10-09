@@ -73,7 +73,7 @@ export function NotificationsCard({ today }: { today: ISODate }) {
   };
 
   return (
-    <Card variant="solid" row full as="section" aria-labelledby={titleId}>
+    <Card variant="solid" row full as="section" aria-labelledby={titleId} className={s.panel}>
       <div className={s.text}>
         <h2 id={titleId} className={s.title}>
           Сповіщення на телефон
@@ -87,7 +87,7 @@ export function NotificationsCard({ today }: { today: ISODate }) {
           </button>
         )}
       </div>
-      <Button variant="accent" size="sm" onClick={onCta} disabled={view.disabled}>
+      <Button variant="accent" size="sm" className={s.cta} onClick={onCta} disabled={view.disabled}>
         {view.cta}
       </Button>
     </Card>

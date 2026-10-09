@@ -61,7 +61,7 @@ test.describe('sync between devices', () => {
     page,
     server,
   }) => {
-    // Reject the first batch that carries the day mark (other ops, e.g. a time-zone fix at start-up, pass).
+    // Reject the first batch that carries the day mark (any other op passes).
     let rejected = false;
     await page.route('**/api/ops', async (route) => {
       const { ops } = route.request().postDataJSON() as { ops: { kind: string }[] };
@@ -80,10 +80,8 @@ test.describe('sync between devices', () => {
     expect((await server.getData()).days[TODAY]?.trained).toBeNull();
   });
 
-  // FIXME(app bug, see the e2e report «Time-zone alias makes every Chromium start rewrite the settings»):
-  // Chrome resolves Europe/Kyiv to the legacy «Europe/Kiev», `fixTimezone` compares the raw strings
-  // and re-uploads the whole settings object (timezone «Europe/Kiev») at every session start.
-  test.fixme('opening the app does not rewrite the settings when the device zone is an alias of the stored one', async ({
+  // Chrome reports the legacy «Europe/Kiev» for Kyiv; the stored zone is «Europe/Kyiv».
+  test('opening the app does not rewrite the settings when the device zone is an alias of the stored one', async ({
     app,
     page,
     server,
@@ -98,6 +96,62 @@ test.describe('sync between devices', () => {
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     expect(settingsWrites).toEqual([]);
     expect((await server.getData()).settings.timezone).toBe('Europe/Kyiv');
+  });
+
+  test('a laptop in another time zone does not move the reminders', async ({ browser, server }) => {
+    // Reminders follow the phone's zone (sent with its push subscription), not the last browser opened.
+    const laptop = await browser.newContext({
+      baseURL: 'http://127.0.0.1:3399',
+      serviceWorkers: 'block',
+      timezoneId: 'Europe/Simferopol',
+      locale: 'uk-UA',
+    });
+    try {
+      await laptop.clock.install({ time: new Date('2026-10-14T10:05:00+03:00') });
+      await loginContext(laptop);
+      const laptopPage = await laptop.newPage();
+      const settingsWrites: unknown[] = [];
+      laptopPage.on('request', (r) => {
+        if (!r.url().endsWith('/api/ops')) return;
+        const { ops } = r.postDataJSON() as { ops: { kind: string }[] };
+        settingsWrites.push(...ops.filter((op) => op.kind === 'settings.put'));
+      });
+      const laptopApp = new App(laptopPage);
+      await laptopApp.goto('/reminders');
+      await expect(laptopApp.region('Дані')).toContainText('Усе синхронізовано');
+      // A later foreground refresh does not write either.
+      await laptopPage.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await expect(laptopApp.region('Дані')).toContainText('Усе синхронізовано');
+      expect(settingsWrites).toEqual([]);
+    } finally {
+      await laptop.close();
+    }
+    expect((await server.getData()).settings.timezone).toBe('Europe/Kyiv');
+  });
+
+  test('a tab that stays in front picks up changes from another device: on focus, then every minute', async ({
+    app,
+    page,
+    server,
+  }) => {
+    await app.goto('/');
+    await expect(app.region('Сьогодні')).toContainText('Тренування · ще не відмічено');
+
+    // The phone marks the day while this tab stays visible the whole time.
+    const data = await server.getData();
+    data.days[TODAY] = { food: '', kcal: null, types: [], notes: '', ...data.days[TODAY], trained: false };
+    await server.importData(data);
+    // The window gets focus back (a focus right after the start-up load is skipped).
+    await page.clock.runFor(5_000);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+
+    // The phone records a weigh-in; no event at all here, the minute poll brings it in.
+    const next = await server.getData();
+    next.weights.push({ date: TODAY, kg: 64.9 });
+    await server.importData(next);
+    await page.clock.runFor(60_000);
+    await expect(app.region('Поточна вага')).toContainText('64,9');
   });
 
   test('pending local changes are not overwritten by an older server copy', async ({

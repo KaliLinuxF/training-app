@@ -42,7 +42,10 @@
   color: var(--accD);
 }
 
-/* Horizontally scrolling chip row, edge to edge inside the sheet; the 4px padding keeps focus rings visible. */
+/*
+ * Touch: one horizontally scrolling chip row, edge to edge inside the sheet (wraps for a mouse, below);
+ * the 4px padding keeps focus rings visible.
+ */
 .chips {
   list-style: none;
   margin: -4px calc(-1 * var(--food-bleed));
@@ -126,5 +129,32 @@
 
   .edit:hover {
     color: var(--ink);
+  }
+}
+
+/*
+ * Mouse / trackpad (desktop modal): a vertical wheel cannot scroll a row with a hidden scrollbar,
+ * so the chips past the edge would be unreachable. Wrap them onto more lines instead.
+ */
+@media (hover: hover) and (pointer: fine) {
+  .chips {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    margin: -4px;
+    padding: 4px;
+  }
+
+  .chipItem {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* A very long name wraps inside its chip instead of sticking out of the sheet. */
+  .chip {
+    max-width: 100%;
+    white-space: normal;
+    text-align: left;
+    padding-block: 10px;
   }
 }

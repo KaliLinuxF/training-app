@@ -49,7 +49,7 @@ export function fakeIdb(): FakeIdb {
   };
 }
 
-/** The phone's zone, so server fixtures don't trigger the automatic time-zone update. */
+/** This device's zone: fixtures look like data whose zone was set by this phone's push subscription. */
 export const DEVICE_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 export function sampleData(patch: Partial<AppData> = {}): AppData {

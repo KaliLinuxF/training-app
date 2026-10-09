@@ -13,6 +13,12 @@ export const WORKOUT_TYPES = [
 
 export const DEFAULT_TIMEZONE = 'Europe/Kyiv';
 
+/** Bounds for the goal steppers and the first-run setup (narrower than the schema's sanity limits). */
+export const GOAL_LIMITS = {
+  kg: { min: 30, max: 200, step: 0.5 },
+  kcal: { min: 800, max: 5000, step: 50 },
+} as const;
+
 export function defaultReminders(): Reminders {
   return {
     workout: { on: true, days: [1, 3, 5], time: '18:00' },

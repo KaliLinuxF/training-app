@@ -23,7 +23,13 @@ export function demoData(today: string): AppData {
   };
   let s = addDays(today, -68);
   while (parse(s).getDay() !== 1) s = addDays(s, -1);
-  const data: AppData = { days: {}, weights: [], measures: [], foods: [], settings: { ...defaultSettings(), onboarded: true } };
+  const data: AppData = {
+    days: {},
+    weights: [],
+    measures: [],
+    foods: [],
+    settings: { ...defaultSettings(), onboarded: true },
+  };
   let k = 0;
   for (let d = s; d <= today; d = addDays(d, 1)) {
     const dow = parse(d).getDay();
@@ -53,7 +59,8 @@ export function demoData(today: string): AppData {
       if (rnd() < 0.3) e.types.push(planned === 'Прес' ? 'Кардіо' : 'Прес');
     }
     if (rnd() < 0.12) e.notes = 'Гарне самопочуття, випила 2 л води';
-    if (isToday) Object.assign(e, { food: 'Вівсянка з бананом, кава', kcal: null, trained: null, types: [], notes: '' });
+    if (isToday)
+      Object.assign(e, { food: 'Вівсянка з бананом, кава', kcal: null, trained: null, types: [], notes: '' });
     data.days[d] = e;
   }
   const used = addDays(today, -1);
@@ -78,7 +85,11 @@ async function main(): Promise<void> {
   const origin = `http://127.0.0.1:${arg('port', '3000')}`;
   const password = arg('password', process.env.DEV_PASSWORD);
   const headers = { 'Content-Type': 'application/json', Origin: origin };
-  const login = await fetch(`${origin}/api/auth/login`, { method: 'POST', headers, body: JSON.stringify({ password }) });
+  const login = await fetch(`${origin}/api/auth/login`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ password }),
+  });
   if (!login.ok) throw new Error(`Login failed: ${login.status} ${await login.text()}`);
   const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
   const res = await fetch(`${origin}/api/import`, {

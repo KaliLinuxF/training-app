@@ -3,6 +3,18 @@
   color: var(--accD);
 }
 
+/* Sheet footer: optional error line centred above the full-width button. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.footer > .error {
+  text-align: center;
+  line-height: 1.4;
+}
+
 /* Prototype line 488: three measurement tiles in a row. */
 .measureGrid {
   display: grid;

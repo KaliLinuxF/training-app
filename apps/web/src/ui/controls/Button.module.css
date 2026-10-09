@@ -19,11 +19,19 @@
 }
 
 .sm {
+  position: relative;
   font-size: 14px;
   font-weight: 600;
   padding: 10px 14px;
   border-radius: var(--r12);
   min-height: 40px;
+}
+
+/* 44px tap target for the 40px button without changing the layout. */
+.sm::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
 }
 
 .md {

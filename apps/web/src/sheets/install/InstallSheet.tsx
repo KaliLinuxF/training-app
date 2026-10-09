@@ -31,19 +31,28 @@ export function ShareIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Current iOS Safari: in the default compact layout «Поділитися» sits in the «•••» menu at the
+ * bottom (older layouts show it right in the bar). The add sheet has an «Open as Web App» switch
+ * that must stay on, otherwise Safari makes a plain bookmark and push never works. The installed
+ * app keeps its own storage, so she signs in there once.
+ */
 function steps(iconClass: string): ReactNode[] {
   return [
     <>
       Відкрий <b>{APP_HOST}</b> у Safari
     </>,
     <>
-      Натисни <b>«Поділитися»</b> <ShareIcon className={iconClass} /> внизу екрана
+      Натисни <b>«Поділитися»</b> <ShareIcon className={iconClass} /> — кнопка внизу екрана або в меню{' '}
+      <b>«•••»</b>
     </>,
     <>
-      Обери <b>«На початковий екран»</b> → <b>«Додати»</b>
+      Обери <b>«На початковий екран»</b>, залиш увімкненим <b>«Відкривати як вебпрограму»</b> і натисни{' '}
+      <b>«Додати»</b>
     </>,
+    <>Відкрий Легко з іконки й увійди ще раз (лише першого разу)</>,
     <>
-      Відкрий Легко з іконки й увімкни сповіщення в <b>«Нагадуваннях»</b>
+      Увімкни сповіщення в <b>«Нагадуваннях»</b>
     </>,
   ];
 }

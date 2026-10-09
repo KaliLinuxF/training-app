@@ -39,6 +39,10 @@
   --acc2: oklch(0.72 0.11 175);
   --acc2T: oklch(0.95 0.03 175);
   --acc2D: oklch(0.45 0.08 175);
+  /* Keyboard / text-field focus ring: ≥ 3:1 on --paper and --card (WCAG 1.4.11). --acc is too pale here. */
+  --focus: var(--accD);
+  /* The same ring on --solid surfaces (dark in light theme, light in dark theme). */
+  --focusOnSolid: var(--acc);
 
   /* Elevation & overlays (prototype values, tinted with the 1b ink). */
   --shadow-bar: 0 10px 30px rgba(30, 34, 41, 0.1);
@@ -51,6 +55,9 @@
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Non-zero only in landscape on notched iPhones (Dynamic Island / rounded corners). */
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 
   color-scheme: light;
 }
@@ -81,6 +88,8 @@
     --acc2: oklch(0.74 0.11 175);
     --acc2T: oklch(0.3 0.04 175);
     --acc2D: oklch(0.84 0.08 175);
+    --focus: var(--acc);
+    --focusOnSolid: oklch(0.48 0.12 290);
     --shadow-bar: 0 10px 30px rgba(0, 0, 0, 0.35);
     --shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.4);
     --backdrop: rgba(0, 0, 0, 0.55);
@@ -112,6 +121,8 @@
   --acc2: oklch(0.74 0.11 175);
   --acc2T: oklch(0.3 0.04 175);
   --acc2D: oklch(0.84 0.08 175);
+  --focus: var(--acc);
+  --focusOnSolid: oklch(0.48 0.12 290);
   --shadow-bar: 0 10px 30px rgba(0, 0, 0, 0.35);
   --shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.4);
   --backdrop: rgba(0, 0, 0, 0.55);

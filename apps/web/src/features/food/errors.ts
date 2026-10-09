@@ -13,10 +13,16 @@ export class PhotoError extends Error {
   }
 }
 
+/** What the estimate was made from: the advice after a failure depends on it. */
+export type EstimateSource = 'text' | 'photo';
+
 export const ESTIMATE_MESSAGES = {
   rate_limited: 'Ліміт підрахунків на сьогодні вичерпано',
   ai_unavailable: 'Підрахунок зараз недоступний',
-  ai_failed: 'Не вдалося розпізнати — спробуй описати текстом',
+  /** The model could not make sense of a description she typed. */
+  ai_failed_text: 'Не вдалося порахувати — спробуй ще раз або опиши детальніше (з грамами)',
+  /** …or of a photo: describing the meal in words is the way out. */
+  ai_failed_photo: 'Не вдалося розпізнати — спробуй описати текстом',
   payload_too_large: 'Фото завелике',
   network: 'Немає зʼєднання з сервером',
   unauthorized: 'Сесія закінчилась — увійди ще раз',
@@ -26,14 +32,15 @@ export const ESTIMATE_MESSAGES = {
   fallback: 'Не вдалося порахувати — спробуй ще раз',
 } as const;
 
-/** Ukrainian toast text for anything an estimate attempt can throw. */
-export function estimateErrorMessage(err: unknown): string {
+/** Ukrainian text (toast + inline alert) for anything an estimate attempt can throw. */
+export function estimateErrorMessage(err: unknown, source: EstimateSource): string {
   if (err instanceof PhotoError) return ESTIMATE_MESSAGES[err.problem];
   if (err instanceof ApiError) {
     switch (err.code) {
+      case 'ai_failed':
+        return source === 'photo' ? ESTIMATE_MESSAGES.ai_failed_photo : ESTIMATE_MESSAGES.ai_failed_text;
       case 'rate_limited':
       case 'ai_unavailable':
-      case 'ai_failed':
       case 'payload_too_large':
       case 'network':
       case 'unauthorized':

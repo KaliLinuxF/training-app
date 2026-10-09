@@ -2,8 +2,8 @@
 import { fN, type MeasureKey } from '@legko/shared';
 import { useId } from 'react';
 import { MEASURE_LABELS } from '@/lib/stats';
-import { Field, MeasureInputTile, NumberStepperField } from '@/ui';
-import { stepKcal, stepWeight } from '../helpers';
+import { Button, Field, MeasureInputTile, NumberStepperField } from '@/ui';
+import { stepKcal, stepWeight, type StepRange } from '../helpers';
 import { digitsOnly, MEASURE_KEYS, type MeasureError, type MeasureTexts } from '../validation';
 import s from './fields.module.css';
 
@@ -14,6 +14,30 @@ export function FieldError({ id, message }: { id: string; message: string | unde
     <span id={id} className={s.error} role="alert">
       {message}
     </span>
+  );
+}
+
+/** Shown above «Зберегти» when the store refused the save (nothing was applied, the draft stays). */
+export const SAVE_FAILED = 'Не вдалося зберегти — перевір дані й спробуй ще раз';
+
+export interface SaveFooterProps {
+  label: string;
+  onSave: () => void;
+  disabled: boolean;
+  /** Message above the button (e.g. `SAVE_FAILED`). */
+  error?: string;
+}
+
+/** Sheet footer: full-width «Зберегти» / «Почати» (lg) with an optional inline error above it. */
+export function SaveFooter({ label, onSave, disabled, error }: SaveFooterProps) {
+  const errId = useId();
+  return (
+    <div className={s.footer}>
+      <FieldError id={errId} message={error} />
+      <Button size="lg" fullWidth onClick={onSave} disabled={disabled} aria-describedby={error ? errId : undefined}>
+        {label}
+      </Button>
+    </div>
   );
 }
 
@@ -28,12 +52,14 @@ export interface WeightFieldProps {
   base: number | null;
   /** 0,1 for weigh-ins, 0,5 for the goal. */
   step?: number;
+  /** ± never leaves these bounds (the goal). */
+  range?: StepRange;
   error: string | undefined;
   name?: string;
 }
 
 /** «Вага» — big kg input with ± buttons (lg). */
-export function WeightField({ label, hint, value, onChange, base, step = 0.1, error, name }: WeightFieldProps) {
+export function WeightField({ label, hint, value, onChange, base, step = 0.1, range, error, name }: WeightFieldProps) {
   const errId = useId();
   const t = stepText(step);
   return (
@@ -50,8 +76,8 @@ export function WeightField({ label, hint, value, onChange, base, step = 0.1, er
         incrementText={`+${t}`}
         decrementLabel={`Мінус ${t} кг`}
         incrementLabel={`Плюс ${t} кг`}
-        onDecrement={() => onChange(stepWeight(value, base, -step))}
-        onIncrement={() => onChange(stepWeight(value, base, step))}
+        onDecrement={() => onChange(stepWeight(value, base, -step, range))}
+        onIncrement={() => onChange(stepWeight(value, base, step, range))}
         className={error ? s.invalid : undefined}
         aria-invalid={error ? true : undefined}
         aria-errormessage={error ? errId : undefined}
@@ -65,12 +91,14 @@ export interface KcalFieldProps {
   label: string;
   value: string;
   onChange: (text: string) => void;
+  /** ± never leaves these bounds (the daily goal). */
+  range?: StepRange;
   error: string | undefined;
   name?: string;
 }
 
 /** «Калорії за день» — kcal input with −50 / +50 (md), digits only. */
-export function KcalField({ label, value, onChange, error, name }: KcalFieldProps) {
+export function KcalField({ label, value, onChange, range, error, name }: KcalFieldProps) {
   const errId = useId();
   return (
     <Field label={label}>
@@ -87,8 +115,8 @@ export function KcalField({ label, value, onChange, error, name }: KcalFieldProp
         incrementText="+50"
         decrementLabel="Мінус 50 ккал"
         incrementLabel="Плюс 50 ккал"
-        onDecrement={() => onChange(stepKcal(value, -50))}
-        onIncrement={() => onChange(stepKcal(value, 50))}
+        onDecrement={() => onChange(stepKcal(value, -50, range))}
+        onIncrement={() => onChange(stepKcal(value, 50, range))}
         className={error ? s.invalid : undefined}
         aria-invalid={error ? true : undefined}
         aria-errormessage={error ? errId : undefined}

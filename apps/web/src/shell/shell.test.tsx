@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cssValue, readCss } from '@/ui/internal/cssSource';
 import { stubScrollTo } from '@/ui/internal/testing';
 import { isNavActive } from './nav';
 import { Sidebar } from './Sidebar';
@@ -65,5 +66,24 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Нагадування' }).getAttribute('aria-current')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: '+ Записати день' }));
     expect(onRecord).toHaveBeenCalledOnce();
+  });
+});
+
+describe('side safe areas (notched iPhone in landscape)', () => {
+  it('keeps the app, the tab bar and the sheets clear of the Dynamic Island and the rounded corners', () => {
+    const global = readCss('styles/global.css');
+    expect(cssValue(global, '#root', 'padding-left')).toBe('var(--safe-left)');
+    expect(cssValue(global, '#root', 'padding-right')).toBe('var(--safe-right)');
+
+    // The fixed tab bar is centred between the insets (at most 440px wide), not on the whole screen.
+    const bar = readCss('shell/TabBar.module.css');
+    expect(cssValue(bar, '.bar', 'left')).toBe('var(--safe-left)');
+    expect(cssValue(bar, '.bar', 'right')).toBe('var(--safe-right)');
+    expect(cssValue(bar, '.bar', 'margin')).toBe('0 auto');
+    expect(cssValue(bar, '.bar', 'transform')).toBeUndefined();
+
+    const sheet = readCss('ui/sheet/Sheet.module.css');
+    expect(cssValue(sheet, '.backdrop', 'padding-left')).toBe('var(--safe-left)');
+    expect(cssValue(sheet, '.backdrop', 'padding-right')).toBe('var(--safe-right)');
   });
 });

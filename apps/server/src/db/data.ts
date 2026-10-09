@@ -18,6 +18,7 @@ import {
   type WeightEntry,
 } from '@legko/shared';
 import { silentLogger, type Logger } from '../logger';
+import { canonicalTimeZone } from '../timezone';
 import { getKv, KV, setKv } from './kv';
 import { num, numOrNull, text } from './rows';
 import type { Database, Row } from './sqlite';
@@ -36,8 +37,12 @@ export interface DataRepo {
   apply(ops: readonly Op[]): void;
   /** Replaces everything (import) in one transaction. */
   replaceAll(data: AppData): void;
-  /** Stores a new `settings.timezone`; returns false when it was already set. */
-  setTimezone(timeZone: string): boolean;
+  /**
+   * Stores the canonical form of `timeZone` as `settings.timezone`, unless the stored zone is
+   * already the same zone under any spelling (`Europe/Kiev` = `Europe/Kyiv`). Returns the stored
+   * id, or null when nothing was written.
+   */
+  setTimezone(timeZone: string): string | null;
   /** Whether the action a reminder asks for was already recorded for `date`. */
   isDone(kind: ReminderKind, date: ISODate): boolean;
 }
@@ -240,11 +245,12 @@ export function createDataRepo(
     },
 
     setTimezone(timeZone) {
+      const zone = canonicalTimeZone(timeZone);
       return transaction(db, () => {
         const current = readSettings();
-        if (current.timezone === timeZone) return false;
-        writeSettings({ ...current, timezone: timeZone });
-        return true;
+        if (canonicalTimeZone(current.timezone) === zone) return null;
+        writeSettings({ ...current, timezone: zone });
+        return zone;
       });
     },
 

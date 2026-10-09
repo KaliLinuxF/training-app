@@ -1,14 +1,24 @@
-import { LIMITS, num, type MeasureKey } from '@legko/shared';
+import { GOAL_LIMITS, LIMITS, num, type MeasureKey } from '@legko/shared';
+
+/** «5000» → «5 000» (the copy groups thousands with a plain space, like «20 000 ккал»). */
+const grouped = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 /** Inline error copy shown under a field (13px, `--accD`). */
 export const FIELD_ERRORS = {
   kg: `Вага — від ${LIMITS.kg.min} до ${LIMITS.kg.max} кг`,
   cm: `Заміри — від ${LIMITS.cm.min} до ${LIMITS.cm.max} см`,
-  kcal: 'Калорії — не більше 20 000 ккал',
-  kcalGoal: 'Від 500 до 10 000 ккал на день',
+  kcal: `Калорії — не більше ${grouped(LIMITS.kcal.max)} ккал`,
+  goal: `Ціль — від ${GOAL_LIMITS.kg.min} до ${GOAL_LIMITS.kg.max} кг`,
+  kcalGoal: `Від ${grouped(GOAL_LIMITS.kcal.min)} до ${grouped(GOAL_LIMITS.kcal.max)} ккал на день`,
   goalRequired: 'Вкажи цільову вагу',
   kcalGoalRequired: 'Вкажи калорії на день',
+  text: `Задовгий текст — не більше ${grouped(LIMITS.text)} символів`,
+  types: `Можна обрати до ${LIMITS.types} типів`,
 } as const;
+
+/** Free text (food, notes): what is saved is trimmed, so that is what has to fit. */
+export const textError = (text: string): string | undefined =>
+  text.trim().length > LIMITS.text ? FIELD_ERRORS.text : undefined;
 
 /** Measurement inputs in display order (chest · waist · hips). */
 export const MEASURE_KEYS: readonly MeasureKey[] = ['chest', 'waist', 'hips'];

@@ -1,7 +1,16 @@
-/* Prototype lines 356–362: text column (flex 1, gap 3) + accent CTA on the solid panel. */
+/*
+ * Prototype lines 356–362: text column (flex 1, gap 3) + accent CTA on the solid panel.
+ * The title stays on one line: when the CTA does not fit beside it (a long CTA such as
+ * «Заблоковано», a 320px phone), the CTA moves below the text and spans the panel instead.
+ */
+.panel {
+  flex-wrap: wrap;
+}
+
 .text {
-  flex: 1;
-  min-width: 0;
+  /* Takes all the free space next to the CTA, but never gets narrower than the title. */
+  flex: 999 1 0;
+  min-width: min-content;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -12,6 +21,7 @@
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .sub {
@@ -19,6 +29,11 @@
   font-size: 13px;
   line-height: 1.4;
   color: var(--onSolidMuted);
+}
+
+/* Its natural width beside the text; the full width when it wraps onto its own line. */
+.cta {
+  flex: 1 0 auto;
 }
 
 /* Quiet text action under the subtitle; the tap area is grown to 44px without moving the layout. */

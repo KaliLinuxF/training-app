@@ -2,7 +2,7 @@ import { ApiError } from '../../lib/api';
 import { isIOS } from '../../lib/platform';
 
 export const LOGIN_ERRORS = {
-  badPassword: 'Невірний пароль',
+  badPassword: 'Неправильний пароль',
   rateLimited: 'Забагато спроб — спробуй за кілька хвилин',
   network: 'Немає зʼєднання з сервером',
   other: 'Щось пішло не так',

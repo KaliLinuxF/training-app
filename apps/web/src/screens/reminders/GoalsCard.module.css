@@ -1,0 +1,20 @@
+/*
+ * Each row is a label + the 196px stepper. When the card is narrower than the stepper, the gap and
+ * the labels' longest word together (~266px: a 320px phone, a narrow desktop column), each label
+ * sits above a full-width stepper instead of the «+» being pushed past the card's edge.
+ */
+.card {
+  container-type: inline-size;
+}
+
+@container (max-width: 265px) {
+  .row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .stepper {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

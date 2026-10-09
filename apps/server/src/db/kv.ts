@@ -7,8 +7,10 @@ export const KV = {
   settings: 'settings',
   vapidPublicKey: 'vapid_public_key',
   vapidPrivateKey: 'vapid_private_key',
-  /** `{ date, count }`: AI estimates attempted on the user's current local day. */
+  /** `{ date, count }`: AI estimates attempted on the current budget day (FOOD_BUDGET_TIMEZONE). */
   foodBudget: 'food_budget',
+  /** JSON array of epoch-ms times of recent failed logins from any address (global login cap). */
+  loginFailures: 'login_failures',
 } as const;
 
 export type KvKey = (typeof KV)[keyof typeof KV];

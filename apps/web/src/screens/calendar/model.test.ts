@@ -5,6 +5,7 @@ import {
   buildHistory,
   buildMonth,
   cellFill,
+  monthOf,
   resolveSelected,
   stepMonth,
   type MonthCell,
@@ -26,7 +27,13 @@ function fixture(): AppData {
   const data = emptyData();
   data.days = {
     '2026-10-10': day({ food: 'Вівсянка з бананом, кава' }),
-    '2026-10-08': day({ food: 'Омлет, борщ', kcal: 1650, trained: true, types: ['Верх тіла', 'Прес'], notes: 'Добре' }),
+    '2026-10-08': day({
+      food: 'Омлет, борщ',
+      kcal: 1650,
+      trained: true,
+      types: ['Верх тіла', 'Прес'],
+      notes: 'Добре',
+    }),
     '2026-10-07': day({ kcal: 1500, trained: false }),
     '2026-10-06': day({ trained: true }),
     '2026-10-05': day({ notes: 'Лише нотатка' }),
@@ -55,25 +62,26 @@ describe('resolveSelected', () => {
   });
 });
 
-describe('stepMonth', () => {
-  it('keeps the day of the month', () => {
-    expect(stepMonth('2026-10-05', -1, TODAY)).toBe('2026-09-05');
-    expect(stepMonth('2026-08-05', 1, TODAY)).toBe('2026-09-05');
+describe('monthOf / stepMonth', () => {
+  it('takes the month of a day', () => {
+    expect(monthOf('2026-10-05')).toBe('2026-10');
+    expect(monthOf('2025-01-31')).toBe('2025-01');
   });
 
-  it('clamps to the length of the target month', () => {
-    expect(stepMonth('2026-03-31', -1, TODAY)).toBe('2026-02-28');
-    expect(stepMonth('2026-08-31', 1, TODAY)).toBe('2026-09-30');
+  it('moves the shown month by one', () => {
+    expect(stepMonth('2026-10', -1, TODAY)).toBe('2026-09');
+    expect(stepMonth('2026-08', 1, TODAY)).toBe('2026-09');
   });
 
   it('crosses years', () => {
-    expect(stepMonth('2026-01-15', -1, TODAY)).toBe('2025-12-15');
-    expect(stepMonth('2025-12-15', 1, TODAY)).toBe('2026-01-15');
+    expect(stepMonth('2026-01', -1, TODAY)).toBe('2025-12');
+    expect(stepMonth('2025-12', 1, TODAY)).toBe('2026-01');
   });
 
-  it('clamps to today and refuses future months', () => {
-    expect(stepMonth('2026-09-30', 1, TODAY)).toBe(TODAY);
-    expect(stepMonth(TODAY, 1, TODAY)).toBeNull();
+  it('reaches the current month but never a future one', () => {
+    expect(stepMonth('2026-09', 1, TODAY)).toBe('2026-10');
+    expect(stepMonth('2026-10', 1, TODAY)).toBeNull();
+    expect(stepMonth('2026-12', -1, '2026-12-01')).toBe('2026-11');
   });
 });
 
@@ -81,8 +89,8 @@ describe('buildMonth', () => {
   const cells = (m: ReturnType<typeof buildMonth>): MonthCell[] =>
     m.cells.filter((c): c is MonthCell => c !== null);
 
-  it('shows the month of the selected day, Monday first', () => {
-    const m = buildMonth(fixture(), '2026-10-05', TODAY);
+  it('shows the given month, Monday first', () => {
+    const m = buildMonth(fixture(), '2026-10', '2026-10-05', TODAY);
     expect(m.title).toBe('Жовтень 2026');
     expect(m.key).toBe('2026-10');
     expect(m.weekdays).toEqual(['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд']);
@@ -94,7 +102,7 @@ describe('buildMonth', () => {
   });
 
   it('marks fills: selected › trained › food › none', () => {
-    const m = buildMonth(fixture(), '2026-10-08', TODAY);
+    const m = buildMonth(fixture(), '2026-10', '2026-10-08', TODAY);
     const byDay = new Map(cells(m).map((c) => [c.day, c]));
     expect(byDay.get(8)?.fill).toBe('selected');
     expect(byDay.get(6)?.fill).toBe('trained');
@@ -108,7 +116,7 @@ describe('buildMonth', () => {
   });
 
   it('builds spoken labels', () => {
-    const m = buildMonth(fixture(), '2026-10-01', TODAY);
+    const m = buildMonth(fixture(), '2026-10', '2026-10-01', TODAY);
     const byDay = new Map(cells(m).map((c) => [c.day, c]));
     expect(byDay.get(8)?.label).toBe('8 жовтня, тренування, харчування');
     expect(byDay.get(10)?.label).toBe('10 жовтня, сьогодні, харчування');
@@ -116,20 +124,30 @@ describe('buildMonth', () => {
   });
 
   it('allows going forward from past months', () => {
-    const m = buildMonth(fixture(), '2026-09-30', TODAY);
+    const m = buildMonth(fixture(), '2026-09', '2026-09-30', TODAY);
     expect(m.title).toBe('Вересень 2026');
+    expect(m.key).toBe('2026-09');
     expect(m.canGoNext).toBe(true);
     expect(m.isCurrentMonth).toBe(false);
   });
 
+  it('highlights the selection only in its own month', () => {
+    const sep = cells(buildMonth(fixture(), '2026-09', '2026-10-08', TODAY));
+    expect(sep.some((c) => c.isSelected || c.fill === 'selected')).toBe(false);
+    expect(sep.find((c) => c.day === 30)?.fill).toBe('food');
+    const oct = cells(buildMonth(fixture(), '2026-10', '2026-10-08', TODAY));
+    expect(oct.filter((c) => c.fill === 'selected').map((c) => c.day)).toEqual([8]);
+  });
+
   it('cellFill ignores the weigh-in mark', () => {
-    const base = cells(buildMonth(emptyData(), '2026-10-01', TODAY))[2];
+    const base = cells(buildMonth(emptyData(), '2026-10', '2026-10-01', TODAY))[2];
     expect(base && cellFill({ ...base, isSelected: false, weighOrMeasure: true })).toBe('none');
   });
 });
 
 describe('buildDayDetail', () => {
-  const values = (d: ReturnType<typeof buildDayDetail>) => Object.fromEntries(d.rows.map((r) => [r.label, r.value]));
+  const values = (d: ReturnType<typeof buildDayDetail>) =>
+    Object.fromEntries(d.rows.map((r) => [r.label, r.value]));
 
   it('formats a full day like the prototype', () => {
     const data = fixture();
@@ -208,12 +226,27 @@ describe('buildHistory', () => {
       trainingTone: 'neutral',
     });
     expect(trained).toMatchObject({ kcal: `${f0(1650)} ккал`, training: 'Верх тіла', trainingTone: 'acc' });
-    expect(rest).toMatchObject({ food: 'Харчування не записане', training: 'Відпочинок', trainingTone: 'neutral' });
+    expect(rest).toMatchObject({
+      food: 'Харчування не записане',
+      training: 'Відпочинок',
+      trainingTone: 'neutral',
+    });
     expect(wasTrained?.training).toBe('Тренування');
     expect(notesOnly?.food).toBe('Харчування не записане');
     expect(sep).toMatchObject({ day: 30, month: 'вер' });
-    expect(trained?.label).toBe(`8 жовтня, ${f0(1650)} ккал, Омлет, борщ, Верх тіла`);
-    expect(today?.label).toContain('тренування не відмічене');
+  });
+
+  it('names rows for screen readers in one lower-case sentence, keeping her own words', () => {
+    const [today, trained, rest, wasTrained, notesOnly] = buildHistory(fixture(), 8).rows;
+    expect(today?.label).toBe(
+      '10 жовтня, калорії не вказані, Вівсянка з бананом, кава, тренування не відмічене',
+    );
+    expect(trained?.label).toBe(`8 жовтня, ${f0(1650)} ккал, Омлет, борщ, тренування: Верх тіла, Прес`);
+    expect(rest?.label).toBe(`7 жовтня, ${f0(1500)} ккал, харчування не записане, відпочинок`);
+    expect(wasTrained?.label).toBe('6 жовтня, калорії не вказані, харчування не записане, тренування');
+    expect(notesOnly?.label).toBe(
+      '5 жовтня, калорії не вказані, харчування не записане, тренування не відмічене',
+    );
   });
 
   it('pages', () => {

@@ -42,7 +42,10 @@ export function TextArea({
     const cs = getComputedStyle(el);
     const line = parseFloat(cs.lineHeight) || 16 * 1.45;
     const chrome =
-      parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+      parseFloat(cs.paddingTop) +
+      parseFloat(cs.paddingBottom) +
+      parseFloat(cs.borderTopWidth) +
+      parseFloat(cs.borderBottomWidth);
     const max = Math.max(rows, autoGrowMaxRows) * line + chrome;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, max)}px`;

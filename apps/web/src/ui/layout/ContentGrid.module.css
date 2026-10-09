@@ -5,7 +5,8 @@
   align-items: start;
 }
 
-@media (min-width: 900px) {
+/* Same condition as DESKTOP_QUERY (lib/platform.ts): a phone in landscape stays one column. */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
   .grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -1,9 +1,9 @@
-import { useId, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
-import { api } from '@/lib/api';
-import { dataActions, flushNow, useSyncState } from '@/store/data';
+import { useId, useRef, useState, type ChangeEvent } from 'react';
+import { dataActions, useSyncState } from '@/store/data';
 import { ui } from '@/store/ui';
 import { Button, Card, CardHeader, cx } from '@/ui';
-import { BACKUP_COPY, BACKUP_MAX_BYTES, errorText, parseBackup, syncStatus } from './model';
+import { BackupDownload } from './BackupDownload';
+import { BACKUP_COPY, BACKUP_MAX_BYTES, errorText, parseBackup, RESTORE_CONFIRM, syncStatus } from './model';
 import s from './DataCard.module.css';
 
 const ERROR_MS = 3200;
@@ -15,35 +15,6 @@ export function DataCard() {
   const status = syncStatus(sync);
   const fileRef = useRef<HTMLInputElement>(null);
   const [restoring, setRestoring] = useState(false);
-  // Set right before re-clicking the link once pending changes have been flushed.
-  const flushed = useRef(false);
-
-  const onDownload = (e: MouseEvent<HTMLAnchorElement>) => {
-    if (flushed.current) {
-      flushed.current = false;
-      return;
-    }
-    if (!sync.online) {
-      e.preventDefault();
-      ui.flash(BACKUP_COPY.offline, ERROR_MS);
-      return;
-    }
-    if (sync.pending === 0) return;
-    // The file comes from the server: send what is still queued first so the copy is complete.
-    e.preventDefault();
-    const link = e.currentTarget;
-    flushNow().then(
-      (ok) => {
-        if (!ok) {
-          ui.flash(BACKUP_COPY.notSynced, ERROR_MS);
-          return;
-        }
-        flushed.current = true;
-        link.click();
-      },
-      () => ui.flash(BACKUP_COPY.notSynced, ERROR_MS),
-    );
-  };
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
@@ -63,7 +34,7 @@ export function DataCard() {
       ui.flash(BACKUP_COPY.invalid, ERROR_MS);
       return;
     }
-    if (!window.confirm(BACKUP_COPY.confirm)) return;
+    if (!(await ui.confirm(RESTORE_CONFIRM))) return;
     setRestoring(true);
     try {
       await dataActions.importAll(data);
@@ -89,9 +60,7 @@ export function DataCard() {
         }
       />
       <div className={s.actions}>
-        <a className={s.download} href={api.exportUrl} download onClick={onDownload}>
-          Завантажити резервну копію
-        </a>
+        <BackupDownload />
         <Button variant="outline" fullWidth disabled={restoring} onClick={() => fileRef.current?.click()}>
           {restoring ? 'Відновлюю…' : 'Відновити з копії'}
         </Button>

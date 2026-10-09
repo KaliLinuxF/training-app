@@ -21,6 +21,7 @@ const ICON = '/icons/icon-192.png';
 const BADGE = '/icons/badge-96.png';
 
 // --- Lifecycle: a new version takes over immediately (the shell is precached, data lives on the server).
+// Pages that were open keep their old bundle until they reload into it (src/pwa/update.ts).
 
 self.addEventListener('install', () => {
   void self.skipWaiting();

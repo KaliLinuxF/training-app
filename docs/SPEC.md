@@ -73,6 +73,11 @@ light **and** dark theme, calendar marks mode **«Заливка»** (fill).
   switch knob slides; buttons get a gentle `:active` scale(0.98). Everything honours `prefers-reduced-motion`.
 - Copy is Ukrainian, exactly as in the prototype where it exists. Typographic minus `−` for negatives, comma decimals.
 - Dark mode: tokens switch automatically (system) unless the user forces a theme (`data-theme` on `<html>`).
+- Deliberate deviations (decided after review): the calendar legend in fill mode shows small tinted squares
+  that look like the filled cells (the prototype's legend is static dots); the desktop shell needs
+  `(min-width: 900px) and (hover: hover) and (pointer: fine)` so a phone in landscape keeps the mobile shell;
+  every confirmation uses the in-app `ui.confirm()` dialog (never `window.confirm`, which looks foreign in the
+  standalone iPhone app); month ‹ › in the calendar only change the shown month (selection stays, as in the prototype).
 
 ## 3. Architecture
 
@@ -162,7 +167,10 @@ Env: `PORT` (3000) · `DATA_DIR` (`/data`, dev `./data`) · `STATIC_DIR` (dir wi
   in order). Flush on: change, `online`, app foreground, every 30 s while pending. Network/5xx errors → keep and retry
   with backoff; 400 `invalid_op` → drop that op (log, surface `sync.error`); 401 → auth state `anon`.
   Start-up: render from IndexedDB instantly, then `GET /api/data`, then re-apply still-pending outbox ops on top.
-  Refresh from the server when the app returns to the foreground (if nothing pending).
+  Refresh from the server when the app returns to the foreground, on focus, and every 60 s while visible
+  (if nothing pending). Saves send only the parts of a record that actually changed (two devices must not
+  erase each other's weigh-ins). `settings.timezone` follows the phone that receives reminders (sent with the
+  push subscription, canonicalised), not whichever browser opened the app last.
 - **UI state**: `apps/web/src/store/ui.ts` — `ui.openSheet(date, mode, patch?)`, `ui.closeSheet()`, `ui.flash(text)`.
 - **Today**: `useToday()` (`lib/useToday.ts`). Weeks start on Monday (`mondayOf`).
 - **Platform**: `lib/platform.ts` (`isIOS`, `isStandalone`, `useIsDesktop`). **Theme**: `lib/theme.ts`.
@@ -230,8 +238,11 @@ to the day's kcal and appends a line to the food text.
   («Вівсянка з бананом · 350»); tapping adds it like an estimate line. `food.delete` removes one (long-press / edit mode).
 - Endpoints: `POST /api/food/estimate` `{ date, text?, image?: { full: base64 JPEG, thumb: base64 JPEG } }` →
   `{ photoId?, items: [{ name, portion, kcal }], totalKcal, comment }` (photo stored before the model call).
-- UI (day sheet, «Що я їла» section, 1b visual language): under the textarea a row with «✨ Порахувати» (estimate
-  the text) and «📷 Фото» (`<input type=file accept="image/*">` — iOS offers camera or library); disabled offline.
+- UI (day sheet, «Що я їла» section, 1b visual language): under the textarea a row with «✨ Порахувати» and
+  «📷 Фото» (`<input type=file accept="image/*">` — iOS offers camera or library); disabled offline.
+  «✨ Порахувати» opens a composer pre-filled with the part of «Що я їла» typed after the last estimated line
+  (`unestimatedTail`); «Додати» replaces that part with the itemised line (`insertEstimate`) so the meal is never
+  written twice. «Часті страви» usage (`food.use`) is committed together with the day on «Зберегти», never earlier.
   Result card: optional thumbnail, item rows (name + portion muted, kcal editable), total, «Додати N ккал» (solid)
   and «Скасувати». Loading state «Рахую калорії…». Thumbnails strip of the day's photos (tap → full-screen viewer,
   remove). Calendar day detail shows the thumbnails under «Харчування».

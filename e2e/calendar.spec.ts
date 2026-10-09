@@ -33,14 +33,24 @@ test.describe('calendar', () => {
     await expect(grid(page).getByRole('button', { name: /^15 жовтня/ })).toHaveCount(0);
     await expect(app.region('14 жовтня 2026')).toContainText('середа · сьогодні');
 
+    // ‹ › only move the shown month (prototype `prevMonth` / `nextMonth`): the selected day,
+    // its card and the URL stay; no cell is highlighted in a month without the selection.
     await prevMonth.click();
     await expect(monthTitle(page)).toHaveText('Вересень 2026');
+    await expect(page).toHaveURL(/\/calendar$/);
+    await expect(app.region('14 жовтня 2026')).toContainText('середа · сьогодні');
+    await expect(grid(page).locator('button[aria-pressed="true"]')).toHaveCount(0);
+    await expect(nextMonth).toBeEnabled();
+
+    await grid(page)
+      .getByRole('button', { name: /^14 вересня/ })
+      .click();
     await expect(page).toHaveURL(/\/calendar\?date=2026-09-14$/);
     await expect(app.region('14 вересня 2026')).toContainText('✓ Верх тіла, Прес');
-    await expect(nextMonth).toBeEnabled();
 
     await prevMonth.click();
     await expect(monthTitle(page)).toHaveText('Серпень 2026');
+    await expect(app.region('14 вересня 2026')).toBeVisible();
     await grid(page)
       .getByRole('button', { name: /^3 серпня/ })
       .click();
@@ -54,8 +64,11 @@ test.describe('calendar', () => {
     await nextMonth.click();
     await nextMonth.click();
     await expect(monthTitle(page)).toHaveText('Жовтень 2026');
-    await expect(page).toHaveURL(/date=2026-10-03$/);
     await expect(nextMonth).toBeDisabled();
+    // Still 3 August: browsing never re-selects a day.
+    await expect(page).toHaveURL(/date=2026-08-03$/);
+    await expect(aug3).toBeVisible();
+    await expect(grid(page).locator('button[aria-pressed="true"]')).toHaveCount(0);
   });
 
   test('?date= deep link selects the day; invalid or future dates fall back to today', async ({
@@ -110,8 +123,24 @@ test.describe('calendar', () => {
     await list.getByRole('button', { name: 'Показати ще' }).click();
     await expect(rows).toHaveCount(24);
 
+    // Screen-reader names are one lower-case sentence (her own words stay as typed).
+    await expect(rows.first().getByRole('button')).toHaveAccessibleName(
+      '14 жовтня, калорії не вказані, Вівсянка з бананом, кава, тренування не відмічене',
+    );
+    await expect(rows.nth(1).getByRole('button')).toHaveAccessibleName(
+      /^13 жовтня, 1\s740 ккал, .+, тренування: Кардіо/,
+    );
+
+    // A history row selects that day and shows its month, even after browsing elsewhere.
+    await page.getByRole('button', { name: 'Попередній місяць' }).click();
+    await expect(monthTitle(page)).toHaveText('Вересень 2026');
     await rows.nth(1).getByRole('button').click();
     await expect(page).toHaveURL(/date=2026-10-13$/);
+    await expect(monthTitle(page)).toHaveText('Жовтень 2026');
+    await expect(grid(page).getByRole('button', { name: /^13 жовтня/ })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await expect(app.region('13 жовтня 2026')).toContainText('Гарне самопочуття, випила 2 л води');
   });
 

@@ -17,7 +17,10 @@ export interface StepperProps {
   className?: string;
 }
 
-/** «− value +» control from «Мої цілі»: 44px step buttons, value 17/700 centred (min-width 96). */
+/**
+ * «− value +» control from «Мої цілі»: 44px step buttons, value 17/700 centred (min-width 96).
+ * Below 360px it tightens (value 16/700, min-width 80, gap 4) to fit next to its label on a 320px phone.
+ */
 export function Stepper({
   value,
   onDecrement,

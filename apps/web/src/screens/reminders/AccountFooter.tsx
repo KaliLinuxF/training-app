@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '@/auth/auth';
-import { ui } from '@/store/ui';
+import { ui, useConfirm } from '@/store/ui';
 import { Button } from '@/ui';
 import s from './AccountFooter.module.css';
 
@@ -8,6 +8,8 @@ import s from './AccountFooter.module.css';
 export function AccountFooter() {
   const { logout } = useAuth();
   const [leaving, setLeaving] = useState(false);
+  // `logout()` asks first (in the app's dialog): not «Виходжу…» while she is still deciding.
+  const asking = useConfirm() !== null;
 
   const onLogout = () => {
     setLeaving(true);
@@ -22,7 +24,7 @@ export function AccountFooter() {
   return (
     <footer className={s.footer}>
       <Button variant="outline" className={s.logout} onClick={onLogout} disabled={leaving}>
-        {leaving ? 'Виходжу…' : 'Вийти'}
+        {leaving && !asking ? 'Виходжу…' : 'Вийти'}
       </Button>
       <p className={s.caption}>Легко · трекер схуднення</p>
     </footer>

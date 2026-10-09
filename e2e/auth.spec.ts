@@ -27,9 +27,38 @@ test.describe('session', () => {
     await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(false);
   });
 
+  test('a device with data opens at once even when the server does not answer', async ({ app, page }) => {
+    await app.goto('/');
+    await expect.poll(async () => (await app.deviceCache()).data).toBeTruthy();
+    // One bar in a gym basement: every API request hangs (the app gives up on them after 15 s).
+    await page.route('**/api/**', () => undefined);
+    await page.reload();
+    await app.ready();
+    await expect(app.region('Поточна вага')).toContainText('65,4');
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
+  test('«Вийти» always asks first, says what happens, and can be cancelled', async ({ app, page }) => {
+    await app.goto('/reminders');
+    await page.getByRole('button', { name: 'Вийти' }).click();
+    const dialog = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
+    await expect(dialog).toContainText('Нагадування сюди більше не приходитимуть');
+    await expect(dialog).toContainText('Усі записи залишаться на сервері.');
+    await dialog.getByRole('button', { name: 'Скасувати' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(app.heading('Нагадування')).toBeVisible();
+    expect((await app.deviceCache()).data).toBeTruthy();
+    const me = await page.context().request.get('/api/auth/me');
+    expect(me.status()).toBe(200);
+  });
+
   test('logging out and back in without a reload loads the data again', async ({ app, page }) => {
     await app.goto('/reminders');
     await page.getByRole('button', { name: 'Вийти' }).click();
+    await page
+      .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
+      .getByRole('button', { name: 'Вийти', exact: true })
+      .click();
     const password = page.getByLabel('Пароль', { exact: true });
     await password.fill(PASSWORD);
     await page.getByRole('button', { name: 'Увійти' }).click();
@@ -58,7 +87,7 @@ test.describe('login', () => {
 
     await password.fill('definitely-not-it');
     await submit.click();
-    await expect(page.getByRole('alert')).toHaveText('Невірний пароль');
+    await expect(page.getByRole('alert')).toHaveText('Неправильний пароль');
     await expect(password).toHaveAttribute('aria-invalid', 'true');
     await expect(app.nav).toBeHidden();
 

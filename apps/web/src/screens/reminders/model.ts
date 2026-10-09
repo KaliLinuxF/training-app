@@ -9,6 +9,7 @@ import {
   DOW_SHORT,
   f0,
   f1,
+  GOAL_LIMITS,
   LIMITS,
   normalizeTypeNames,
   WEEK_ORDER,
@@ -23,6 +24,7 @@ import { ApiError } from '@/lib/api';
 import type { PushStatus } from '@/lib/push';
 import type { ThemePref } from '@/lib/theme';
 import type { SyncState } from '@/store/data';
+import type { ConfirmOptions } from '@/store/ui';
 
 // ---- reminders ------------------------------------------------------------------------
 
@@ -67,18 +69,20 @@ export function withReminder<K extends ReminderKind>(
 // ---- goals ----------------------------------------------------------------------------
 
 export interface StepRange {
-  min: number;
-  max: number;
-  step: number;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
 }
 
-export const GOAL_KG: StepRange = { min: 30, max: 200, step: 0.5 };
-export const GOAL_KCAL: StepRange = { min: 800, max: 5000, step: 50 };
-
-/** One step up (`1`) or down (`-1`), rounded to 0.1 and clamped to the range. */
+/**
+ * One step up (`1`) or down (`-1`), rounded to 0.1. The range only stops a step from leaving it:
+ * a value that is already outside (older data, a restored backup) moves one ordinary step
+ * towards the range instead of jumping to the bound.
+ */
 export function stepValue(value: number, dir: 1 | -1, range: StepRange): number {
   const next = Math.round((value + dir * range.step) * 10) / 10;
-  return Math.min(range.max, Math.max(range.min, next));
+  if (dir === 1) return value >= range.max ? value : Math.min(range.max, next);
+  return value <= range.min ? value : Math.max(range.min, next);
 }
 
 export type GoalKey = 'goal' | 'kcalGoal';
@@ -94,7 +98,8 @@ export interface GoalRowModel {
   canIncrement: boolean;
 }
 
-const GOAL_RANGES: Record<GoalKey, StepRange> = { goal: GOAL_KG, kcalGoal: GOAL_KCAL };
+/** The same bounds as the first-run setup. */
+const GOAL_RANGES: Record<GoalKey, StepRange> = { goal: GOAL_LIMITS.kg, kcalGoal: GOAL_LIMITS.kcal };
 
 export function goalRows(settings: Settings): GoalRowModel[] {
   const row = (key: GoalKey, label: string, value: string, what: string): GoalRowModel => {
@@ -139,7 +144,8 @@ const NOTIF_COPY: Record<PushStatus, { sub: string; cta: string; action: NotifAc
   enabled: { sub: 'Нагадування приходять, навіть коли застосунок закритий', cta: 'Тест', action: 'test' },
   'needs-install': {
     sub: 'На iPhone нагадування працюють, коли Легко додано на початковий екран',
-    cta: 'Як увімкнути',
+    // As short as on the Home install banner: a long CTA squeezes the title onto two lines.
+    cta: 'Як?',
     action: 'install',
   },
   denied: {
@@ -248,14 +254,26 @@ export function syncStatus(sync: Pick<SyncState, 'loaded' | 'online' | 'pending'
 }
 
 export const BACKUP_COPY = {
-  confirm: 'Це замінить усі записи даними з файлу. Продовжити?',
   restored: 'Дані відновлено',
   invalid: 'Файл не схожий на резервну копію «Легко»',
   tooLarge: 'Файл завеликий для резервної копії',
   restoreFailed: 'Не вдалося відновити дані. Спробуй ще раз',
   offline: 'Немає інтернету — копію можна завантажити, коли зʼявиться звʼязок',
   notSynced: 'Не всі зміни встигли синхронізуватися — спробуй ще раз пізніше',
+  /** iOS refused the share sheet after the sync wait: it needs a fresh tap. */
+  tapAgain: 'Копія готова — натисни ще раз, щоб зберегти',
+  shareFailed: 'Не вдалося зберегти копію. Спробуй ще раз',
+  /** Installed iPhone app on an iOS that cannot share files (a download link would trap the app). */
+  safariOnly: 'На цьому iPhone копію можна завантажити лише в Safari',
 } as const;
+
+/** Asked before a backup replaces everything. */
+export const RESTORE_CONFIRM = {
+  title: 'Відновити з резервної копії?',
+  body: 'Усі поточні записи буде замінено даними з файлу.',
+  confirmLabel: 'Відновити',
+  destructive: true,
+} as const satisfies ConfirmOptions;
 
 /** Backups are a few MB at most; anything much bigger is not one of ours. */
 export const BACKUP_MAX_BYTES = 20 * 1024 * 1024;

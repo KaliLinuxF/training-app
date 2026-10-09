@@ -63,15 +63,10 @@ export function MonthCard({ month, onSelect, onStep }: MonthCardProps) {
         </div>
       </div>
 
+      {/* Fill mode: food / workout swatches are tinted squares like the cells (deliberate deviation, SPEC §2). */}
       <Legend centered>
-        <span className={s.legendItem}>
-          <span className={cx(s.square, s.squareFood)} aria-hidden="true" />
-          Харчування
-        </span>
-        <span className={s.legendItem}>
-          <span className={cx(s.square, s.squareTrained)} aria-hidden="true" />
-          Тренування
-        </span>
+        <LegendItem shape="square" color="acc2T" label="Харчування" />
+        <LegendItem shape="square" color="accT" label="Тренування" />
         <LegendItem color="solid" label="Вага / заміри" />
       </Legend>
     </Card>

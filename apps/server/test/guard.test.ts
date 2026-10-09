@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { createTestServer, json, PASSWORD } from './helpers';
+import { BODY_LIMITS } from '../src/http/bodyLimit';
+import { createTestServer, json, PASSWORD, postStream, streamedBody } from './helpers';
 
 const login = { body: { password: PASSWORD } };
 
@@ -106,5 +107,61 @@ describe('API error shape', () => {
     const res = await s.call('/api/ops', { cookie, body: 'x'.repeat(16 * 1024 * 1024 + 1) });
     expect(res.status).toBe(413);
     expect(await json(res)).toMatchObject({ error: 'payload_too_large' });
+  });
+});
+
+describe('request body limits', () => {
+  const MB = 1024 * 1024;
+  const ROUTE_LIMITS: [string, number][] = [
+    ['/api/ops', BODY_LIMITS.bulk],
+    ['/api/import', BODY_LIMITS.bulk],
+    ['/api/food/estimate', BODY_LIMITS.foodEstimate],
+    ['/api/push/subscribe', BODY_LIMITS.small],
+    ['/api/push/unsubscribe', BODY_LIMITS.small],
+  ];
+
+  it.each(ROUTE_LIMITS)('%s does not read a body before the session check', async (path) => {
+    const s = await createTestServer();
+    const body = streamedBody(32 * MB);
+    const res = await postStream(s, path, body);
+    expect(res.status).toBe(401);
+    expect(body.pulled()).toBe(0);
+  });
+
+  it.each(ROUTE_LIMITS)('%s stops reading at its cap (%i bytes) → 413', async (path, cap) => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const chunk = 16 * 1024;
+    const body = streamedBody(cap + 4 * chunk, chunk);
+    const res = await postStream(s, path, body, { Cookie: cookie });
+    expect(res.status).toBe(413);
+    expect(await json(res)).toMatchObject({ error: 'payload_too_large' });
+    expect(body.pulled()).toBeLessThanOrEqual(cap + chunk);
+  });
+
+  it('a declared Content-Length over the cap is refused without reading', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const body = streamedBody(MB);
+    const res = await postStream(s, '/api/push/subscribe', body, {
+      Cookie: cookie,
+      'Content-Length': String(BODY_LIMITS.small + 1),
+    });
+    expect(res.status).toBe(413);
+    expect(body.pulled()).toBe(0);
+  });
+
+  it('small routes still take realistic bodies', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const subscription = {
+      endpoint: `https://web.push.apple.com/${'Q'.repeat(1900)}`,
+      keys: { p256dh: 'p'.repeat(200), auth: 'a'.repeat(100) },
+    };
+    const res = await s.call('/api/push/subscribe', {
+      cookie,
+      body: { subscription, timezone: 'Europe/Kyiv' },
+    });
+    expect(res.status).toBe(200);
   });
 });

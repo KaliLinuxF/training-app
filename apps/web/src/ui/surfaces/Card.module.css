@@ -28,6 +28,12 @@
   gap: 14px;
 }
 
+/* Focus rings drawn on the solid background need the inverted ring colour. */
+.hero,
+.solid {
+  --focus: var(--focusOnSolid);
+}
+
 .tint {
   background: var(--accT);
   border-radius: var(--r24);

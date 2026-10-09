@@ -9,6 +9,7 @@ import {
   type OpsResponse,
 } from '@legko/shared';
 import type { Hono } from 'hono';
+import { BODY_LIMITS, limitBody } from '../bodyLimit';
 import { apiError, badRequest, describeIssue, MESSAGES, readJson } from '../errors';
 import type { AppEnv } from '../types';
 import type { RouteDeps } from './deps';
@@ -25,7 +26,7 @@ function opsArray(body: unknown): unknown[] | null {
 export function registerDataRoutes(app: Hono<AppEnv>, { data, auth, now }: RouteDeps): void {
   app.get(API.data, auth, (c) => c.json(data.read()));
 
-  app.post(API.ops, auth, async (c) => {
+  app.post(API.ops, auth, limitBody(BODY_LIMITS.bulk), async (c) => {
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);
     const raw = opsArray(body.value);
@@ -55,7 +56,7 @@ export function registerDataRoutes(app: Hono<AppEnv>, { data, auth, now }: Route
     return c.body(JSON.stringify(snapshot, null, 2));
   });
 
-  app.post(API.import, auth, async (c) => {
+  app.post(API.import, auth, limitBody(BODY_LIMITS.bulk), async (c) => {
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);
     const parsed = appDataSchema.safeParse(body.value);

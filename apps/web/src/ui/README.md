@@ -17,6 +17,12 @@ General rules
 - `Tone` = `'ink' | 'acc' | 'acc2' | 'muted' | 'faint'` → text colour `--ink`, `--accD`, `--acc2D`, `--muted`, `--faint`.
   `deltaTone(n)` ports the prototype `tone()`: `< −0.04` → `acc2` (mint), `> 0.04` → `acc` (lavender), else `ink`.
 - `cx(...classes)` joins class names (falsy values skipped).
+- Focus: the global `:focus-visible` ring is `2px solid var(--focus)` (light `--accD`, dark `--acc`: ≥ 3:1 on paper, card,
+  line and accT). Text fields show it as their border plus a 1px spread (`box-shadow: 0 0 0 1px var(--focus)`).
+  `hero` / `solid` cards set `--focus: var(--focusOnSolid)` for controls on the dark surface. Never `outline: none` without
+  a replacement ring.
+- Tap targets ≥ 44px (SPEC §2). A smaller visual size keeps its look and grows the hit area with a transparent
+  `::after { position: absolute; inset: … }` on a `position: relative` host (`Button sm`, `Segmented`, sheet ✕, ghost button).
 - Grid children are one column wide; use `full` (where offered), `<FullRow>` or `className={fullRowClass}` to span
   both desktop columns (`grid-column: 1 / -1`).
 
@@ -32,8 +38,9 @@ Home: `<ScreenHeader subtitle="Субота, 10 жовтня" title={greeting()}
 
 ### `ContentGrid` — lines 34, 139, 210, 351 (`cols` in `renderVals`)
 
-`<div>` props. 1 column below 900px, `repeat(2, minmax(0,1fr))` from 900px (same breakpoint as `useIsDesktop`),
-gap 14, `align-items: start`. Also exports `FullRow` (div spanning all columns) and `fullRowClass`.
+`<div>` props. 1 column on phones, `repeat(2, minmax(0,1fr))` in the desktop shell — the media query is `DESKTOP_QUERY`
+(`(min-width: 900px) and (hover: hover) and (pointer: fine)`, same as `useIsDesktop`), so a phone in landscape stays
+one column. Gap 14, `align-items: start`. Also exports `FullRow` (div spanning all columns) and `fullRowClass`.
 
 ### `Avatar` — line 40
 
@@ -116,7 +123,7 @@ label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` re
 `{ label, value, pct, variant?: 'rank'|'history', tone?: 'acc'|'acc2' (default 'acc'), onClick?, 'aria-label'?, className? }`
 
 - `rank`: grid `92px / 1fr / 28px`, gap 10; label 14/500; 10px bar (`--line2` track); value 14/700. «Найчастіше».
-- `history`: grid `96px / 1fr / 78px`, gap 10, padding `9px 0`, `--line2` divider above; label 14; 6px bar; value
+- `history`: grid `96px / 1fr / 78px`, gap 10, padding `9px 0`, min-height 44 (tap target), `--line2` divider above; label 14; 6px bar; value
   14/600. «Історія калорій»: `tone={item.tone === 'over' ? 'acc' : 'acc2'}`, `onClick` → open that day.
 
 ## Controls
@@ -127,7 +134,8 @@ label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` re
 
 - variants: `solid` (default; `--solid`/`--onSolid`), `accent` (`--acc`/`--onAcc`, 700, nowrap), `outline` (`--card` +
   1px `--line`, ink), `ghost` (transparent, muted 14/500, padding `8px 0`; tap area grown invisibly to 44px; ignores `size`).
-- sizes: `sm` 14/600, padding `10px 14px`, `--r12`, min-height 40 (44 for `accent`) — banner CTA, notifications CTA;
+- sizes: `sm` 14/600, padding `10px 14px`, `--r12`, min-height 40 (44 for `accent`), tap area grown invisibly to 44 —
+  banner CTA, notifications CTA;
   `md` (default) 15/600, `--r14`, min-height 50 — «Редагувати день» (add `margin-top: 8px`);
   `lg` 16/700, `--r16`, min-height 56 — sheet «Зберегти» (`fullWidth`).
 
@@ -159,8 +167,8 @@ selected → `--accT` / `--accD` / `--acc` border, else `--card` / ink / `--line
 ### `Segmented` — lines 215–218
 
 `{ options: {value, label}[], value, onChange, 'aria-label' (required), sticky?, full?, className? }` (generic over the value).
-Track `--line`, padding 4, `--r16`, equal columns, gap 4. Items min-height 40, `--r12`, 13/600; active → `--card`, ink,
-`--shadow-seg`; else transparent / muted. `role="radiogroup"` + `role="radio"`, roving tabindex, ←/→/Home/End.
+Track `--line`, padding 4, `--r16`, equal columns, gap 4. Items min-height 40 (tap area 44), `--r12`, 13/600; active →
+`--card`, ink, `--shadow-seg`; else transparent / `--ink2` (`--muted` is below 4.5:1 on the track). `role="radiogroup"` + `role="radio"`, roving tabindex, ←/→/Home/End.
 `sticky` → `position: sticky; top: calc(8px + safe-top); z-index: 5`. Progress: `<Segmented full sticky aria-label="Період" …/>`.
 
 ### `Switch` — line 371
@@ -175,7 +183,8 @@ Discriminated by `mode`:
 
 - `{ mode: 'multi', value: Weekday[], onChange(days: Weekday[]) }` — toggle buttons (`aria-pressed`); result sorted Monday-first.
 - `{ mode: 'single', value: Weekday, onChange(day: Weekday) }` — radio group with arrow keys.
-  Common: `'aria-label'` (required), `disabled?`, `className?`. Grid of 7 (gap 5), Monday first, labels «Пн…Нд»
+  Common: `'aria-label'` (required), `disabled?`, `className?`. Grid of 7 (gap 5; each tap area reaches into half of the gaps,
+  so ≥ 44px wide from 375px), Monday first, labels «Пн…Нд»
   (accessible names «Понеділок…»). Buttons min-height 44, `--r12`, 13/600, 1.5px border; selected → `--solid` /
   `--onSolid` / `--ink` border, else `--card` / ink / `--line`. For the «off» state the prototype dims the picker and the
   time row with `opacity: .45` — do that in the screen. Also exports `toggleWeekday(days, day)`.
@@ -184,6 +193,7 @@ Discriminated by `mode`:
 
 `{ value (formatted), onDecrement, onIncrement, decrementLabel? = 'Зменшити', incrementLabel? = 'Збільшити', canDecrement?, canIncrement?, 'aria-label'?, className? }`.
 `IconButton shape="step"` (paper) − value (display 17/700, min-width 96, `<output aria-live>`) +; gap 6.
+Below 360px (320px phones) the value is 16/700, min-width 80, gap 4, so «Мої цілі» rows fit the card; 360px+ unchanged.
 Use with `<KeyValueRow variant="plain" label="Цільова вага" value={<Stepper …/>} />`.
 
 ### `Field` — sheet labels, lines 443–444, 457–458, 461–462, 473–480, 485–486, 499–500
@@ -204,18 +214,19 @@ Grid `54px 1fr 54px`, gap 8. `md` (kcal): height 54, value 24/700, unit «кка
 ### `TextArea` — lines 459, 501
 
 `{ value, onChange(text), rows? = 3, ...textarea props }`. 16px / 1.45, `--card`, 1px `--line`, `--r16`, padding 14,
-no resize; focus → `--acc` border. «Що я їла» `rows={3}`, «Нотатки» `rows={2}`.
+no resize; focus → 2px `--focus` ring (border + 1px spread). «Що я їла» `rows={3}`, «Нотатки» `rows={2}`.
 
 ### `TimeInput` — line 380
 
 `{ value: 'HH:MM', onChange(hm), ...input props }`. `<input type="time">` 17/600, `--paper`, 1px `--line`, `--r12`,
-padding `10px 12px`, min-height 44. Empty values (browser «clear») are ignored. Give it an `aria-label` («Час»).
+padding `10px 12px`, min-height 44, focus → 2px `--focus` ring. Empty values (browser «clear») are ignored. Give it an `aria-label` («Час»).
 
 ### `MeasureInputTile` — lines 489–492
 
 `{ label, value, onChange(text), placeholder? = '—', unit? = 'см', ...input props }`. The tile is a `<label>`:
 `--card`, 1px `--line`, `--r16`, padding `10px 12px`, gap 6; label 13 muted; input 22/700 + unit 13 muted (baseline);
-`inputMode="decimal"`. Placeholder = previous value (`fN(prev)`). Lay three out in `repeat(3, minmax(0,1fr))` gap 8.
+`inputMode="decimal"`, focus → 2px `--focus` ring on the tile. Placeholder = previous value (`fN(prev)`); a placeholder with a
+digit is drawn in `--muted` (it is data, ≥ 4.5:1), the plain «—» stays `--faint`. Lay three out in `repeat(3, minmax(0,1fr))` gap 8.
 
 ### `QuickAction` — lines 92–95
 
@@ -293,11 +304,12 @@ const shown = useRetained(sheet);    // keeps the content during the exit animat
 `SheetProps { open, onClose, heading, dateNav?, footer?, children?, onExited? }`;
 `SheetDateNav { date, weekday, onPrev, onNext, canPrev?, canNext?, prevLabel? = 'Попередній день', nextLabel? = 'Наступний день' }`.
 
-- Portal into `<body>`; backdrop `--backdrop` (z 60). Panel `--paper`, column, scrolls as a whole.
+- Portal into `<body>`; backdrop `--backdrop` (z 60), padded by `--safe-left` / `--safe-right` (landscape iPhone). Panel
+  `--paper`, column, scrolls as a whole.
 - Mobile: bottom-aligned, `max-width 440`, radius `--r28 --r28 0 0`, `max-height 92dvh`, slides up 280ms
   `--ease-out`. Desktop (`useIsDesktop()`): centred, `max-width 560`, radius `--r28`, `max-height min(720px, 92dvh)`.
 - Sticky header (padding `10px 18px 0`, gap 12): 40×5 `--line3` handle; heading 14/500 muted (`<h2>`, the dialog's
-  name) + 40px round `--line` «✕» («Закрити»); optional `dateNav` (card-surface `StepNav`, date display 22/700
+  name) + 40px round `--line` «✕» («Закрити», 44px tap area); optional `dateNav` (card-surface `StepNav`, date display 22/700
   −0.02em, weekday 13 muted, padding-bottom 10). Without `dateNav` the header gets `padding-bottom: 10px`.
 - Body: padding `4px 18px 18px`, column gap 18 — put `<Field>`s here.
 - Sticky footer: padding `12px 18px calc(20px + safe-bottom)`, `--line` top border.
@@ -311,7 +323,9 @@ const shown = useRetained(sheet);    // keeps the content during the exit animat
 ## App shell (`@/shell/AppShell`)
 
 Not part of `@/ui`, listed for reference. Mobile: column `max-width 440`, padding `20px 18px 120px` (+ safe areas),
-floating glass tab bar (Головна · Календар · «+» · Прогрес · Нагадування). Desktop ≥ 900px: container 1280, 248px
-sticky sidebar (logo, links, «+ Записати день»), main padding `32px 36px 48px`. `<main>` is a flex column with gap 14;
+floating glass tab bar (Головна · Календар · «+» · Прогрес · Нагадування) centred between the side safe areas.
+Desktop (`DESKTOP_QUERY`: ≥ 900px **and** a mouse/trackpad, so a phone in landscape keeps the mobile shell): container
+1280, 248px sticky sidebar (logo, links, «+ Записати день»), main padding `32px 36px 48px`. `#root` is padded by
+`--safe-left` / `--safe-right` (notched iPhone in landscape). `<main>` is a flex column with gap 14;
 screens render a `<ContentGrid>` inside it. «+» → `ui.openSheet(today, 'day')`. The page scrolls to the top on every
 route change; tapping the current section scrolls to the top. Renders `<Toast />` and `<SheetHost />`.

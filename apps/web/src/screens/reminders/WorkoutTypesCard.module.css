@@ -94,7 +94,8 @@
 }
 
 .input:focus {
-  border-color: var(--acc);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .error {

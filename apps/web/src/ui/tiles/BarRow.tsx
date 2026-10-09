@@ -6,7 +6,7 @@ import s from './BarRow.module.css';
 /**
  * - `rank`    — «Найчастіше» workout types: grid 92px / bar / 28px, label 14/500, 10px bar, value 14/700
  * - `history` — «Історія калорій»: grid 96px / bar / 78px, label 14, 6px bar, value 14/600,
- *               padding 9px 0 with a `--line2` divider above (clickable)
+ *               padding 9px 0, min-height 44 (tap target), a `--line2` divider above (clickable)
  */
 export type BarRowVariant = 'rank' | 'history';
 

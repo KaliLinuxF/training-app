@@ -58,4 +58,8 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--ink);
+  /* Safety net for very narrow columns: never spill past the button border. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

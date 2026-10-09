@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Chip } from './Chip';
 import { Field } from './Field';
+import { MeasureInputTile } from './MeasureInputTile';
+import tileStyles from './MeasureInputTile.module.css';
 import { NumberStepperField } from './NumberStepperField';
 import { Segmented } from './Segmented';
 import { Stepper } from './Stepper';
@@ -95,6 +97,23 @@ describe('Segmented', () => {
     expect(onChange).toHaveBeenLastCalledWith('all');
     fireEvent.keyDown(week, { key: 'End' });
     expect(onChange).toHaveBeenLastCalledWith('all');
+  });
+});
+
+describe('MeasureInputTile', () => {
+  it('draws a previous measurement darker than the plain «—» placeholder', () => {
+    render(
+      <>
+        <MeasureInputTile label="Талія" value="" onChange={() => undefined} placeholder="73,5" />
+        <MeasureInputTile label="Стегна" value="" onChange={() => undefined} />
+      </>,
+    );
+    const waist = screen.getByRole('textbox', { name: /Талія/ });
+    const hips = screen.getByRole('textbox', { name: /Стегна/ });
+    expect(waist.getAttribute('placeholder')).toBe('73,5');
+    expect(waist.classList.contains(tileStyles.previous ?? '')).toBe(true);
+    expect(hips.getAttribute('placeholder')).toBe('—');
+    expect(hips.classList.contains(tileStyles.previous ?? '')).toBe(false);
   });
 });
 

@@ -284,23 +284,42 @@ describe('daily estimate budget', () => {
     expect(photoRows()).toBe(0);
   });
 
-  it('renews at midnight in settings.timezone', async () => {
-    const { s, cookie, estimate, status } = await setup({ foodDailyLimit: 1 });
+  it('renews at midnight Kyiv time', async () => {
+    const { s, estimate, status } = await setup({ foodDailyLimit: 1 });
     s.clock.now = Date.UTC(2026, 9, 9, 20, 59); // 23:59 in Kyiv
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
-    expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(429);
+    const limited = await estimate({ date: '2026-10-09', text: 'борщ' });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('Retry-After')).toBe('60');
     s.clock.now = Date.UTC(2026, 9, 9, 21, 1); // 00:01 on Oct 10 in Kyiv
     expect(await status()).toEqual({ enabled: true, remainingToday: 1 });
     expect((await estimate({ date: '2026-10-10', text: 'борщ' })).status).toBe(200);
+  });
 
-    // The day follows settings.timezone: in New York it is still Oct 9, a day with no count.
-    await s.call('/api/ops', {
+  it('changing settings.timezone (ops or push subscribe) does not open a fresh budget', async () => {
+    const { s, cookie, estimate, estimator, status } = await setup({ foodDailyLimit: 1 });
+    s.clock.now = Date.UTC(2026, 9, 9, 20, 0); // 23:00 in Kyiv
+    expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
+
+    // Kiritimati is already on Oct 10 and Pago Pago still on Oct 9 — neither is a new budget day.
+    for (const timezone of ['Pacific/Kiritimati', 'Pacific/Pago_Pago', 'America/New_York']) {
+      const put = await s.call('/api/ops', {
+        cookie,
+        body: { ops: [{ kind: 'settings.put', value: { ...defaultSettings(), timezone } }] },
+      });
+      expect(put.status).toBe(200);
+      expect(await status(), timezone).toEqual({ enabled: true, remainingToday: 0 });
+      expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status, timezone).toBe(429);
+    }
+    await s.call('/api/push/subscribe', {
       cookie,
       body: {
-        ops: [{ kind: 'settings.put', value: { ...defaultSettings(), timezone: 'America/New_York' } }],
+        subscription: { endpoint: 'https://web.push.apple.com/x', keys: { p256dh: 'p', auth: 'a' } },
+        timezone: 'Pacific/Kiritimati',
       },
     });
-    expect(await status()).toEqual({ enabled: true, remainingToday: 1 });
+    expect((await estimate({ date: '2026-10-10', text: 'борщ' })).status).toBe(429);
+    expect(estimator.inputs).toHaveLength(1);
   });
 });
 

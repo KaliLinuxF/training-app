@@ -1,14 +1,36 @@
-/* Quick buttons: full row, 2 columns on the phone, 4 on desktop (prototype `quickCols`). */
+/*
+ * Quick buttons: full row, 2 columns on the phone, 4 on desktop (prototype `quickCols`).
+ * The switch depends on the row's own width, not the viewport: a button needs ~166px
+ * (14+14 padding, 2 border, 36 icon, 12 gap, «Харчування» 15/600 ≈ 88), so 4 columns fit from
+ * 4 × 166 + 3 × 10 gaps ≈ 700px. That is the 1280px desktop of the prototype (960px of content),
+ * but not a 900–1020px window next to the sidebar, nor the 440px phone column in landscape.
+ */
 .quick {
   grid-column: 1 / -1;
+  container-type: inline-size;
+}
+
+.quickGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 
-@media (min-width: 900px) {
-  .quick {
+@container (min-width: 700px) {
+  .quickGrid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/*
+ * «Останнє зважування / Наступне…» rows need a ~360px card («Наступне зважування» 146 + gap 12 +
+ * «Ср, 30 вересня · 20:30» 163 + padding/border 38). Half of the desktop grid is
+ * (viewport − 248 sidebar − 72 padding − 14 gap) / 2, i.e. narrower below ~1060px, where label and
+ * value would both wrap — so the card takes the full row there. A no-op in the one-column phone layout.
+ */
+@media (max-width: 1059px) {
+  .control {
+    grid-column: 1 / -1;
   }
 }
 

@@ -1,14 +1,22 @@
 import type { FoodItem } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import {
+  addedMessage,
   buildFoodAdd,
   buildFrequentDishes,
+  chipAddLabel,
   chipLabel,
   clampItem,
+  COMPOSER_CLOSED,
+  composerEdited,
+  consumedTail,
   draftsToItems,
   draftsTotal,
+  emptyEstimateComment,
   estimateItems,
   formatFoodLine,
+  foundMessage,
+  openComposer,
   parseKcal,
   pluralUk,
   remainingHint,
@@ -50,17 +58,54 @@ describe('formatFoodLine', () => {
 });
 
 describe('buildFoodAdd', () => {
-  it('sums the items and carries the photo id', () => {
-    const items = [
-      { name: 'Борщ', portion: '300 г', kcal: 260 },
-      { name: 'Хліб', portion: '1 скибка', kcal: 160 },
-    ];
+  const items = [
+    { name: 'Борщ', portion: '300 г', kcal: 260 },
+    { name: 'Хліб', portion: '1 скибка', kcal: 160 },
+  ];
+
+  it('sums the items, carries the photo id and the dishes to record on save', () => {
     expect(buildFoodAdd(items, 'p_123')).toEqual({
       line: 'Борщ (300 г), хліб (1 скибка) — 420 ккал',
+      consumed: '',
       kcal: 420,
       photoId: 'p_123',
       items,
+      uses: items,
     });
+  });
+
+  it('carries the «Що я їла» tail the line replaces', () => {
+    expect(buildFoodAdd(items, null, 'борщ і хліб').consumed).toBe('борщ і хліб');
+  });
+});
+
+describe('composer', () => {
+  it('opens pre-filled with the unestimated tail', () => {
+    expect(openComposer(COMPOSER_CLOSED, 'борщ, хліб')).toEqual({ open: true, text: 'борщ, хліб', prefill: 'борщ, хліб' });
+    expect(openComposer(COMPOSER_CLOSED, '')).toEqual({ open: true, text: '', prefill: '' });
+  });
+
+  it('keeps her own text when reopened, refreshes an untouched pre-fill', () => {
+    const own = { open: false, text: 'салат', prefill: 'борщ' };
+    expect(openComposer(own, 'борщ, хліб')).toEqual({ ...own, open: true });
+    const untouched = { open: false, text: 'борщ', prefill: 'борщ' };
+    expect(openComposer(untouched, 'борщ, хліб')).toEqual({ open: true, text: 'борщ, хліб', prefill: 'борщ, хліб' });
+  });
+
+  it('only an unchanged pre-fill is replaced by the estimate', () => {
+    const c = { open: true, text: 'борщ, хліб', prefill: 'борщ, хліб' };
+    expect(composerEdited(c)).toBe(false);
+    expect(consumedTail(c)).toBe('борщ, хліб');
+    expect(consumedTail({ ...c, text: '  борщ, хліб ' })).toBe('борщ, хліб');
+
+    const edited = { ...c, text: 'борщ 300 г, хліб' };
+    expect(composerEdited(edited)).toBe(true);
+    expect(consumedTail(edited)).toBe('');
+
+    const typed = { open: true, text: 'салат', prefill: '' };
+    expect(composerEdited(typed)).toBe(true);
+    expect(consumedTail(typed)).toBe('');
+    expect(composerEdited({ ...typed, text: '  ' })).toBe(false);
   });
 });
 
@@ -147,6 +192,11 @@ describe('frequent dishes', () => {
   it('chip label', () => {
     expect(chipLabel({ name: 'Сирники', kcal: 1200 })).toBe(`Сирники · 1${NBSP_GROUP}200`);
   });
+
+  it('chip accessible name: the dish in quotes, no «·» for VoiceOver to read out', () => {
+    expect(chipAddLabel({ name: 'Кава з молоком', kcal: 60 })).toBe('Додати «Кава з молоком», 60 ккал');
+    expect(chipAddLabel({ name: 'Сирники ', kcal: 1200 })).toBe(`Додати «Сирники», 1${NBSP_GROUP}200 ккал`);
+  });
 });
 
 describe('copy helpers', () => {
@@ -174,5 +224,25 @@ describe('copy helpers', () => {
     expect(remainingHint(3)).toBe('Сьогодні ще 3 підрахунки');
     expect(remainingHint(1)).toBe('Сьогодні ще 1 підрахунок');
     expect(remainingHint(0)).toBe('Ліміт підрахунків на сьогодні вичерпано');
+  });
+
+  it('announcements for screen readers', () => {
+    expect(foundMessage(0, 0)).toBe('Нічого не знайдено');
+    expect(foundMessage(1, 80)).toBe('Знайдено 1 позицію, разом 80 ккал');
+    expect(foundMessage(3, 385)).toBe('Знайдено 3 позиції, разом 385 ккал');
+    expect(foundMessage(5, 1650)).toBe(`Знайдено 5 позицій, разом 1${NBSP_GROUP}650 ккал`);
+    expect(addedMessage({ items: [{ name: 'Борщ', portion: '300 г', kcal: 260 }], kcal: 260 })).toBe(
+      'Додано «Борщ», 260 ккал',
+    );
+    const two = [
+      { name: 'Борщ', portion: '300 г', kcal: 260 },
+      { name: 'Хліб', portion: '', kcal: 125 },
+    ];
+    expect(addedMessage({ items: two, kcal: 385 })).toBe('Додано 385 ккал');
+  });
+
+  it('nothing found: the advice fits what was sent', () => {
+    expect(emptyEstimateComment(true)).toBe('Не вдалося знайти їжу на фото — спробуй описати текстом.');
+    expect(emptyEstimateComment(false)).toBe('Не вдалося знайти їжу в описі — спробуй сформулювати інакше.');
   });
 });

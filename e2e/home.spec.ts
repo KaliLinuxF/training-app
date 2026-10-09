@@ -103,6 +103,44 @@ test.describe('home', () => {
   });
 });
 
+test.describe('home layout on desktop', () => {
+  /** Text taller than ~2 font sizes has wrapped onto a second line. */
+  const wrapped = (el: Element) =>
+    [...el.children].some(
+      (c) => c.getBoundingClientRect().height > parseFloat(getComputedStyle(c).fontSize) * 2,
+    );
+
+  test('quick buttons and control rows fit narrow windows next to the sidebar', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'desktop', 'desktop shell only');
+    const labels = ['Харчування', 'Тренування', 'Вага', 'Заміри'] as const;
+    // 960px = half of a 1920 screen (2 columns); from ~1020px all four fit in one row like the prototype.
+    for (const [width, perRow] of [
+      [960, 2],
+      [1024, 4],
+      [1280, 4],
+    ] as const) {
+      await page.setViewportSize({ width, height: 900 });
+      await app.goto('/');
+      const tops = new Set<number>();
+      for (const label of labels) {
+        const button = app.quickAction(label);
+        const box = await button.boundingBox();
+        if (!box) throw new Error(`«${label}» is not visible at ${width}px`);
+        tops.add(Math.round(box.y));
+        expect(await button.evaluate((el) => el.scrollWidth - el.clientWidth), `${label} @${width}`).toBe(0);
+      }
+      expect(tops.size, `rows of quick buttons @${width}`).toBe(labels.length / perRow);
+
+      for (const label of ['Останнє зважування', 'Наступне зважування', 'Наступні заміри']) {
+        expect(await controlRow(page, label).evaluate(wrapped), `${label} @${width}`).toBe(false);
+      }
+    }
+  });
+});
+
 test.describe('iPhone install hint', () => {
   test('«Як?» explains the install; «Сховати» hides it for good on this device', async ({
     app,
@@ -114,7 +152,7 @@ test.describe('iPhone install hint', () => {
     await page.getByRole('button', { name: 'Як?' }).click();
     const sheet = app.sheet('Встановлення на iPhone');
     await expect(sheet).toContainText('fit.triple-a.dev');
-    await expect(sheet.getByRole('listitem')).toHaveCount(4);
+    await expect(sheet.getByRole('listitem')).toHaveCount(5);
     await sheet.getByRole('button', { name: 'Зрозуміло' }).click();
     await app.expectSheetClosed();
 

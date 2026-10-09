@@ -1,16 +1,20 @@
 import { f0 } from '@legko/shared';
-import { useId } from 'react';
+import { useId, type Ref } from 'react';
 import { Button, Card, CardHeader } from '@/ui';
-import { draftsTotal, pluralUk, remainingHint, type DraftItem } from './model';
+import { draftsTotal, emptyEstimateComment, pluralUk, remainingHint, type DraftItem } from './model';
 import s from './EstimateCard.module.css';
 
 export interface EstimateCardProps {
   drafts: readonly DraftItem[];
   comment: string;
+  /** The estimate came from a photo (changes the advice when nothing was found). */
+  photo?: boolean;
   /** Thumbnail (`data:` URL) when the estimate came from a photo. */
   preview: string | null;
   /** Estimates left today (hint shown when ≤ 10). */
   remaining: number | null;
+  /** The «Оцінка калорій» title (focusable with tabIndex −1): focus lands here when the result arrives. */
+  titleRef?: Ref<HTMLSpanElement>;
   onEditKcal: (itemId: string, kcalText: string) => void;
   onRemove: (itemId: string) => void;
   onAdd: () => void;
@@ -23,8 +27,10 @@ export interface EstimateCardProps {
 export function EstimateCard({
   drafts,
   comment,
+  photo = false,
   preview,
   remaining,
+  titleRef,
   onEditKcal,
   onRemove,
   onAdd,
@@ -43,7 +49,11 @@ export function EstimateCard({
         as="h3"
         size="sm"
         titleId={titleId}
-        title="Оцінка калорій"
+        title={
+          <span ref={titleRef} tabIndex={-1} className={s.title}>
+            Оцінка калорій
+          </span>
+        }
         subtitle={
           empty ? 'Нічого не знайдено' : `${drafts.length} ${pluralUk(drafts.length, 'позиція', 'позиції', 'позицій')} · можна виправити`
         }
@@ -68,7 +78,7 @@ export function EstimateCard({
       )}
 
       {(comment || empty) && (
-        <p className={s.comment}>{comment || 'Не вдалося знайти їжу — спробуй описати текстом.'}</p>
+        <p className={s.comment}>{comment || emptyEstimateComment(photo)}</p>
       )}
       {hint && <p className={s.remaining}>{hint}</p>}
 
@@ -149,12 +159,18 @@ export interface EstimateLoadingProps {
   photo: boolean;
   preview: string | null;
   onCancel: () => void;
+  /** «Скасувати»: focus waits here while the model answers. */
+  cancelRef?: Ref<HTMLButtonElement>;
 }
 
-/** «Рахую калорії…» placeholder while the photo is prepared and the model answers. */
-export function EstimateLoading({ photo, preview, onCancel }: EstimateLoadingProps) {
+/**
+ * «Рахую калорії…» placeholder while the photo is prepared and the model answers. Not a live
+ * region itself (one inserted with its text already in it is often not read): FoodAssist's
+ * persistent status region announces the progress.
+ */
+export function EstimateLoading({ photo, preview, onCancel, cancelRef }: EstimateLoadingProps) {
   return (
-    <div className={s.loading} role="status" aria-live="polite">
+    <div className={s.loading}>
       {preview ? (
         <img className={s.thumb} src={preview} alt="" />
       ) : (
@@ -167,7 +183,7 @@ export function EstimateLoading({ photo, preview, onCancel }: EstimateLoadingPro
         <span className={s.bar} aria-hidden="true" />
         <span className={`${s.bar} ${s.barShort}`} aria-hidden="true" />
       </div>
-      <Button variant="ghost" className={s.loadingCancel} onClick={onCancel}>
+      <Button ref={cancelRef} variant="ghost" className={s.loadingCancel} onClick={onCancel}>
         Скасувати
       </Button>
     </div>

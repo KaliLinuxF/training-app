@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PhotoStrip } from './PhotoStrip';
 import { swipeResult } from './PhotoViewer';
@@ -31,6 +32,28 @@ describe('PhotoStrip', () => {
     fireEvent.click(removes[1]!);
     expect(onRemove).toHaveBeenCalledWith('bbbbbbbbbbbbbbbb');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('after a removal focus moves to the next ✕ (or the previous), and past the strip once it is empty', () => {
+    function Harness() {
+      const [ids, setIds] = useState(IDS);
+      return (
+        <div role="dialog">
+          <PhotoStrip ids={ids} onRemove={(id) => setIds((all) => all.filter((x) => x !== id))} />
+          <button type="button">Далі</button>
+        </div>
+      );
+    }
+    render(<Harness />);
+    const removes = () => screen.getAllByRole('button', { name: 'Видалити фото' });
+    fireEvent.click(removes()[0]!);
+    expect(removes()).toHaveLength(2);
+    expect(document.activeElement).toBe(removes()[0]);
+    fireEvent.click(removes()[1]!);
+    expect(document.activeElement).toBe(removes()[0]);
+    fireEvent.click(removes()[0]!);
+    expect(screen.queryByRole('button', { name: 'Видалити фото' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Далі' }));
   });
 
   it('a broken thumbnail becomes a placeholder', () => {

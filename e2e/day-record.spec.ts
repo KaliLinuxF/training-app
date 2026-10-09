@@ -1,6 +1,9 @@
-import { acceptNextDialog } from './support/app';
+import type { Page } from '@playwright/test';
 import { TODAY } from './support/env';
 import { expect, test } from './support/test';
+
+/** The in-app «Є незбережені зміни» question (`ui.confirm`, an alertdialog — never a native confirm). */
+const discardQuestion = (page: Page) => page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
 
 test.describe('day record', () => {
   test('training + types (incl. a new own type), food, kcal ±50, notes, weight and measurements', async ({
@@ -163,11 +166,44 @@ test.describe('day record', () => {
         .first()
         .getByRole('button', { name: 'Було', exact: true }),
     ).toHaveAttribute('aria-pressed', 'true');
-    const asked = acceptNextDialog(page);
     await sheet.getByRole('button', { name: 'Закрити' }).click();
-    expect(await asked).toBe('Є незбережені зміни. Закрити без збереження?');
+    const ask = discardQuestion(page);
+    await expect(ask).toContainText('Закрити без збереження?');
+    await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await expect(ask).toBeHidden();
     await app.expectSheetClosed();
     await expect(todayCard).toContainText('Тренування · Не було');
+  });
+
+  test('saving the day on a device that missed another device’s weigh-in keeps it', async ({ app, server }) => {
+    await app.goto('/');
+    // Meanwhile the phone records today's weigh-in and measurements (this tab has not re-read the server).
+    const phone = await server.getData();
+    phone.weights.push({ date: TODAY, kg: 65.1 });
+    phone.measures.push({ date: TODAY, chest: 89.5, waist: 69.5, hips: 97.5 });
+    await server.importData(phone);
+
+    await app.recordButton().click();
+    const sheet = app.sheet('Запис дня');
+    await sheet.getByRole('textbox', { name: 'Нотатки' }).fill('Сон 8 годин');
+    await app.save(sheet);
+
+    await expect
+      .poll(async () => {
+        const d = await server.getData();
+        return {
+          notes: d.days[TODAY]?.notes,
+          food: d.days[TODAY]?.food,
+          weight: d.weights.find((w) => w.date === TODAY)?.kg,
+          measure: d.measures.find((m) => m.date === TODAY),
+        };
+      })
+      .toEqual({
+        notes: 'Сон 8 годин',
+        food: 'Вівсянка з бананом, кава',
+        weight: 65.1,
+        measure: { date: TODAY, chest: 89.5, waist: 69.5, hips: 97.5 },
+      });
   });
 
   test('quick buttons, the «+» / «Записати день» button and Escape', async ({ app, page }) => {
@@ -187,9 +223,13 @@ test.describe('day record', () => {
       'aria-pressed',
       'true',
     );
-    // Pre-set «Було» is a change: Escape asks; dismissing keeps the sheet open.
-    page.once('dialog', (d) => void d.dismiss());
+    // Pre-set «Було» is a change: Escape asks; Escape again answers «stay» and keeps the sheet open.
     await page.keyboard.press('Escape');
+    const ask = discardQuestion(page);
+    await expect(ask).toBeVisible();
+    await expect(ask.getByRole('button', { name: 'Залишитись' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(ask).toBeHidden();
     await expect(sheet).toBeVisible();
     await sheet.getByRole('button', { name: 'Не було', exact: true }).click();
     await expect(sheet.getByRole('button', { name: 'Прес', exact: true })).toBeHidden();

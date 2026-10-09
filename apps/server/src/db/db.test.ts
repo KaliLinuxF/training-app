@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { defaultSettings } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import { createDataRepo } from './data';
 import { getKv, KV, setKv } from './kv';
@@ -129,12 +130,32 @@ describe('data repo', () => {
     expect(repo.isDone('workout', '2026-10-14')).toBe(false);
   });
 
-  it('setTimezone stores a new zone once', () => {
-    const repo = createDataRepo(openDatabase(':memory:'));
-    expect(repo.setTimezone('Europe/Kyiv')).toBe(false);
-    expect(repo.setTimezone('Europe/Warsaw')).toBe(true);
+  it('setTimezone stores a new zone once, canonicalised; aliases of the stored zone change nothing', () => {
+    const db = openDatabase(':memory:');
+    const repo = createDataRepo(db);
+    const raw = () => getKv(db, KV.settings);
+    expect(repo.setTimezone('Europe/Kyiv')).toBeNull();
+    expect(repo.setTimezone('Europe/Kiev')).toBeNull();
+    expect(raw()).toBeNull(); // defaults were never written
+
+    expect(repo.setTimezone('Europe/Warsaw')).toBe('Europe/Warsaw');
     expect(repo.settings().timezone).toBe('Europe/Warsaw');
-    expect(repo.setTimezone('Europe/Warsaw')).toBe(false);
+    const stored = raw();
+    expect(repo.setTimezone('Europe/Warsaw')).toBeNull();
+    expect(repo.setTimezone('europe/warsaw')).toBeNull();
+    expect(raw()).toBe(stored);
+
+    // Chrome reports the legacy id; the current IANA name is stored.
+    expect(repo.setTimezone('Europe/Kiev')).toBe('Europe/Kyiv');
+    expect(repo.settings().timezone).toBe('Europe/Kyiv');
+    expect(repo.setTimezone('US/Eastern')).toBe('America/New_York');
+  });
+
+  it('setTimezone leaves a legacy spelling alone when the zone is the same', () => {
+    const repo = createDataRepo(openDatabase(':memory:'));
+    repo.apply([{ kind: 'settings.put', value: { ...defaultSettings(), timezone: 'Europe/Kiev' } }]);
+    expect(repo.setTimezone('Europe/Kyiv')).toBeNull();
+    expect(repo.settings().timezone).toBe('Europe/Kiev');
   });
 });
 

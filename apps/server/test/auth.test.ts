@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { clearPassword, setPassword } from '../src/auth/password';
+import { LOGIN_GLOBAL_LIMIT } from '../src/auth/rateLimit';
 import { SESSION_RENEW_AFTER_MS, SESSION_TTL_MS } from '../src/auth/sessions';
-import { createTestServer, json, PASSWORD, sessionCookie, TEST_SCRYPT } from './helpers';
+import { BODY_LIMITS } from '../src/http/bodyLimit';
+import {
+  createTestServer,
+  json,
+  PASSWORD,
+  postStream,
+  sessionCookie,
+  streamedBody,
+  TEST_SCRYPT,
+} from './helpers';
 
 const PROTECTED: [string, 'GET' | 'POST'][] = [
   ['/api/data', 'GET'],
@@ -84,6 +94,67 @@ describe('login', () => {
 
     s.clock.now += 15 * 60_000;
     expect((await attempt('198.51.100.1', PASSWORD)).status).toBe(200);
+  });
+
+  it('caps failed logins from all addresses together (botnet, many IPv6 addresses)', async () => {
+    const s = await createTestServer({ trustProxy: true });
+    const from = (ip: string, password = 'wrong password') =>
+      s.call('/api/auth/login', { body: { password }, headers: { 'X-Forwarded-For': ip } });
+
+    for (let i = 0; i < LOGIN_GLOBAL_LIMIT.maxFailures; i++) {
+      expect((await from(`198.51.100.${i}`)).status).toBe(401);
+    }
+    const limited = await from('203.0.113.200', PASSWORD);
+    expect(limited.status).toBe(429);
+    expect(await json(limited)).toMatchObject({ error: 'rate_limited' });
+    expect(Number(limited.headers.get('Retry-After'))).toBe(900);
+
+    s.clock.now += 15 * 60_000;
+    expect((await from('203.0.113.200', PASSWORD)).status).toBe(200);
+  });
+
+  it('counts an IPv6 client by its /64', async () => {
+    const s = await createTestServer({ trustProxy: true });
+    const from = (ip: string, password = 'wrong password') =>
+      s.call('/api/auth/login', { body: { password }, headers: { 'X-Forwarded-For': ip } });
+    for (let i = 1; i <= 5; i++) expect((await from(`2001:db8:5:6::${i}`)).status).toBe(401);
+    expect((await from('2001:db8:5:6:dead:beef::1', PASSWORD)).status).toBe(429);
+    expect((await from('2001:db8:5:7::1', PASSWORD)).status).toBe(200);
+  });
+
+  it('successful logins never add up to the overall cap', async () => {
+    const s = await createTestServer();
+    for (let i = 0; i < LOGIN_GLOBAL_LIMIT.maxFailures + 5; i++) {
+      expect((await s.call('/api/auth/login', { body: { password: PASSWORD } })).status).toBe(200);
+    }
+  });
+
+  it('parallel guesses from one address cannot slip past the limit', async () => {
+    const s = await createTestServer();
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () => s.call('/api/auth/login', { body: { password: 'wrong password' } })),
+    );
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses.filter((x) => x === 401)).toHaveLength(5);
+    expect(statuses.filter((x) => x === 429)).toHaveLength(7);
+  });
+
+  it('reads at most a few KB of a login body', async () => {
+    const s = await createTestServer();
+    const body = streamedBody(16 * 1024 * 1024, 1024);
+    const res = await postStream(s, '/api/auth/login', body);
+    expect(res.status).toBe(413);
+    expect(await json(res)).toMatchObject({ error: 'payload_too_large' });
+    expect(body.pulled()).toBeLessThanOrEqual(BODY_LIMITS.login + 1024);
+  });
+
+  it('a throttled client is refused before its body is read', async () => {
+    const s = await createTestServer();
+    for (let i = 0; i < 5; i++) await s.call('/api/auth/login', { body: { password: 'wrong password' } });
+    const body = streamedBody(16 * 1024 * 1024);
+    const res = await postStream(s, '/api/auth/login', body);
+    expect(res.status).toBe(429);
+    expect(body.pulled()).toBe(0);
   });
 
   it('a successful login resets the failure counter', async () => {

@@ -32,29 +32,6 @@
   gap: 8px;
 }
 
-/* The download is a real link (the browser saves the server's file); styled as an outline md button. */
-.download {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 50px;
-  padding: 0 18px;
-  border: 1px solid var(--line);
-  border-radius: var(--r14);
-  background: var(--card);
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 600;
-  text-align: center;
-  text-decoration: none;
-  transition: transform 120ms ease;
-}
-
-.download:active {
-  transform: scale(0.98);
-}
-
 /* Off-screen but still clickable from script (iOS ignores clicks on display:none file inputs). */
 .file {
   position: absolute;

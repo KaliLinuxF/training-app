@@ -11,11 +11,19 @@ import {
   getAppData,
   hasDeviceCache,
   onUnauthorized,
+  refreshFromServer,
   resetLocal,
   startSync,
   useDataStore,
 } from './data';
-import { MAX_BATCH, PENDING_POLL_MS, retryDelay, SYNC_ERRORS } from './sync';
+import {
+  FOCUS_REFRESH_GAP_MS,
+  MAX_BATCH,
+  PENDING_POLL_MS,
+  REFRESH_POLL_MS,
+  retryDelay,
+  SYNC_ERRORS,
+} from './sync';
 import { deferred, DEVICE_TZ, fakeIdb, sampleData, settle, type FakeIdb } from './test-utils';
 
 const mocks = vi.hoisted(() => ({
@@ -206,18 +214,21 @@ describe('start-up', () => {
     expect(mocks.api.sendOps).not.toHaveBeenCalled();
   });
 
-  it('moves settings.timezone to the phone zone after the first server load', async () => {
+  it('never rewrites the settings at start-up, whatever zone this device is in', async () => {
+    // The phone's zone travels with its push subscription; a laptop must not overwrite it.
     const other = DEVICE_TZ === 'Asia/Tokyo' ? 'Europe/Kyiv' : 'Asia/Tokyo';
     const server = sampleData();
     mocks.api.getData.mockResolvedValue({ ...server, settings: { ...server.settings, timezone: other } });
 
     begin();
     await settle();
+    document.dispatchEvent(new Event('visibilitychange'));
+    await settle();
 
-    expect(getAppData().settings.timezone).toBe(DEVICE_TZ);
-    expect(sentBatches()).toEqual([
-      [{ kind: 'settings.put', value: { ...server.settings, timezone: DEVICE_TZ } }],
-    ]);
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+    expect(getAppData().settings.timezone).toBe(other);
+    expect(mocks.api.sendOps).not.toHaveBeenCalled();
+    expect(sync().pending).toBe(0);
   });
 });
 
@@ -438,11 +449,112 @@ describe('foreground refresh', () => {
     );
   });
 
+  it('re-reads the server every minute while visible and nothing is pending', async () => {
+    begin();
+    await settle();
+    mocks.api.getData.mockResolvedValue(sampleData({ weights: [{ date: TODAY, kg: 64.8 }] }));
+
+    await vi.advanceTimersByTimeAsync(REFRESH_POLL_MS - 1);
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+    expect(getAppData().weights).toEqual([{ date: TODAY, kg: 64.8 }]);
+
+    await vi.advanceTimersByTimeAsync(REFRESH_POLL_MS);
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not poll the server while hidden or while changes are waiting to be sent', async () => {
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    begin();
+    await settle();
+    await vi.advanceTimersByTimeAsync(3 * REFRESH_POLL_MS);
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+
+    visibility.mockReturnValue('visible');
+    mocks.api.sendOps.mockRejectedValue(networkError());
+    commit(weightOp(TODAY, 65));
+    await settle();
+    await vi.advanceTimersByTimeAsync(3 * REFRESH_POLL_MS);
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+    expect(mocks.api.sendOps.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('re-reads the server when the window gets focus, but not right after another load', async () => {
+    begin();
+    await settle();
+
+    // Focus usually arrives together with visibilitychange: one load is enough.
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(FOCUS_REFRESH_GAP_MS);
+    mocks.api.getData.mockResolvedValue(sampleData({ weights: [{ date: TODAY, kg: 64.9 }] }));
+    window.dispatchEvent(new Event('focus'));
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+    expect(getAppData().weights).toEqual([{ date: TODAY, kg: 64.9 }]);
+  });
+
+  it('re-reads the server when the page comes back from the back/forward cache', async () => {
+    begin();
+    await settle();
+    await vi.advanceTimersByTimeAsync(FOCUS_REFRESH_GAP_MS);
+
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+  });
+
+  it('follows a load that was already in flight with a fresh one when asked to refresh', async () => {
+    const first = deferred<ReturnType<typeof sampleData>>();
+    mocks.api.getData.mockReturnValueOnce(first.promise);
+    begin();
+    await settle();
+
+    // E.g. the server changed settings.timezone after this request was answered.
+    refreshFromServer();
+    mocks.api.getData.mockResolvedValue(sampleData({ weights: [{ date: TODAY, kg: 64.7 }] }));
+    first.resolve(sampleData());
+    await settle();
+
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+    expect(getAppData().weights).toEqual([{ date: TODAY, kg: 64.7 }]);
+  });
+
+  it('retries a failed refresh with backoff and ignores refresh requests without a session', async () => {
+    refreshFromServer();
+    await settle();
+    expect(mocks.api.getData).not.toHaveBeenCalled();
+
+    mocks.api.getData.mockRejectedValueOnce(networkError());
+    begin();
+    await settle();
+    expect(sync().loaded).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(retryDelay(1));
+    await settle();
+    expect(mocks.api.getData).toHaveBeenCalledTimes(2);
+    expect(sync().loaded).toBe(true);
+  });
+
   it('stops listening after cleanup', async () => {
     begin();
     await settle();
     stop?.();
+    await vi.advanceTimersByTimeAsync(FOCUS_REFRESH_GAP_MS);
     document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(2 * REFRESH_POLL_MS);
     await settle();
     expect(mocks.api.getData).toHaveBeenCalledTimes(1);
   });

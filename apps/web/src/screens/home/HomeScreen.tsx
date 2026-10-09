@@ -20,13 +20,7 @@ import {
 } from '@/ui';
 import { DismissibleBanner } from './DismissibleBanner';
 import { HeroCard } from './HeroCard';
-import {
-  markNoTraining,
-  NO_TRAINING_TOAST,
-  OFFLINE_NOTE,
-  QUICK_ACTIONS,
-  type HomeAction,
-} from './homeModel';
+import { markNoTraining, NO_TRAINING_TOAST, OFFLINE_NOTE, QUICK_ACTIONS, type HomeAction } from './homeModel';
 import { TodayCard } from './TodayCard';
 import { useHomeModel } from './useHomeModel';
 import s from './HomeScreen.module.css';
@@ -47,8 +41,8 @@ export function HomeScreen() {
       ui.openSheet(today, 'day', { trained: true });
       return;
     }
-    dataActions.saveDay(today, markNoTraining(getAppData().days[today]));
-    ui.flash(NO_TRAINING_TOAST);
+    // A refused save already shows the sync notice; the toast would claim it was recorded.
+    if (dataActions.saveDay(today, markNoTraining(getAppData().days[today]))) ui.flash(NO_TRAINING_TOAST);
   };
 
   return (
@@ -84,9 +78,11 @@ export function HomeScreen() {
       <TodayCard today={model.today} onOpen={openToday} onTrained={markTrained} />
 
       <div className={s.quick}>
-        {QUICK_ACTIONS.map((q) => (
-          <QuickAction key={q.label} label={q.label} tone={q.tone} onClick={() => open(q.action)} />
-        ))}
+        <div className={s.quickGrid}>
+          {QUICK_ACTIONS.map((q) => (
+            <QuickAction key={q.label} label={q.label} tone={q.tone} onClick={() => open(q.action)} />
+          ))}
+        </div>
       </div>
 
       <Section title="Цей тиждень">
@@ -113,7 +109,7 @@ export function HomeScreen() {
         </div>
       </Card>
 
-      <Card variant="list">
+      <Card variant="list" className={s.control}>
         {model.control.map((row) => (
           <KeyValueRow key={row.label} label={row.label} value={row.value} />
         ))}

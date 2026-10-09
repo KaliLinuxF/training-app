@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { bodyLimit } from 'hono/body-limit';
-import { createRateLimiter, LOGIN_RATE_LIMIT, type RateLimiter } from '../auth/rateLimit';
+import { createLoginLimiter, kvFailureLog, type RateLimiter } from '../auth/rateLimit';
 import { createSessionStore } from '../auth/sessions';
 import { DEFAULT_FOOD_DAILY_LIMIT, type Config } from '../config';
 import { createDataRepo } from '../db/data';
@@ -26,9 +25,6 @@ import { registerPhotoRoutes } from './routes/photos';
 import { registerPushRoutes } from './routes/push';
 import type { AppEnv } from './types';
 
-/** Large enough for a full import of years of data (and 500 ops with long notes). */
-export const MAX_BODY_BYTES = 16 * 1024 * 1024;
-
 export interface AppDeps {
   db: Database;
   config: Pick<Config, 'production' | 'publicOrigin' | 'trustProxy' | 'staticDir'>;
@@ -41,6 +37,7 @@ export interface AppDeps {
   food?: { estimator: FoodEstimator | null; dailyLimit?: number };
   /** Injectable clock, epoch ms. */
   now?: () => number;
+  /** Default: per-address and global login throttle, the global part persisted in `kv`. */
   loginLimiter?: RateLimiter;
   version?: string;
 }
@@ -60,7 +57,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     },
     logger,
     now,
-    loginLimiter: deps.loginLimiter ?? createRateLimiter(LOGIN_RATE_LIMIT),
+    loginLimiter: deps.loginLimiter ?? createLoginLimiter({ log: kvFailureLog(db), logger }),
     auth: requireAuth({ sessions, now, secureCookie: config.production }),
     secureCookie: config.production,
     trustProxy: config.trustProxy,
@@ -71,14 +68,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.use(requestLog(logger));
   app.use(securityHeaders({ hsts: config.production }));
   app.use('/api/*', noStore);
-  app.use(
-    '/api/*',
-    bodyLimit({
-      maxSize: MAX_BODY_BYTES,
-      onError: (c) => apiError(c, 413, 'payload_too_large', MESSAGES.tooLarge),
-    }),
-  );
   app.use('/api/*', mutationGuard(config));
+  // Body size caps are per route, behind the session check: see http/bodyLimit.ts.
 
   registerHealthRoutes(app, routeDeps);
   registerAuthRoutes(app, routeDeps);

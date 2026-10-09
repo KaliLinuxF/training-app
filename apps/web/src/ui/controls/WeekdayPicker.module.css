@@ -5,6 +5,7 @@
 }
 
 .day {
+  position: relative;
   border: 1.5px solid var(--line);
   background: var(--card);
   color: var(--ink);
@@ -18,6 +19,16 @@
     transform 120ms ease,
     background-color 150ms ease,
     border-color 150ms ease;
+}
+
+/*
+ * Seven columns leave ~41px per day on a 390px phone: reach into half of each 5px gap so the tap target is 44px+
+ * wide (inset counts from the padding box, inside the 1.5px border).
+ */
+.day::after {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
 }
 
 .day:active:not(:disabled) {

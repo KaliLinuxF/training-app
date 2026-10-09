@@ -5,6 +5,9 @@
   display: flex;
   justify-content: center;
   align-items: flex-end;
+  /* Keep the panel clear of the Dynamic Island / rounded corners in landscape (the dim layer still covers them). */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 /* The dim layer is separate so it can fade without fading the panel. */
@@ -114,6 +117,7 @@
 }
 
 .close {
+  position: relative;
   width: 40px;
   height: 40px;
   flex-shrink: 0;
@@ -127,6 +131,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 44px tap target around the 40px circle. */
+.close::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
 }
 
 .dateNav {

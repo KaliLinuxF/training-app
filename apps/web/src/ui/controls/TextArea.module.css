@@ -10,9 +10,13 @@
   resize: none;
   outline: none;
   color: var(--ink);
-  transition: border-color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .textarea:focus {
-  border-color: var(--acc);
+  /* 2px focus ring: the border plus a 1px spread, in --focus (≥ 3:1 on card and paper). */
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }

@@ -31,9 +31,19 @@ function seed(): AppData {
   for (let d = 28; d <= 30; d++) data.days[`2026-09-${d}`] = day({ food: `Вересень ${d}`, kcal: 1600 });
   for (let d = 1; d <= 10; d++) {
     if (d === 4) continue;
-    data.days[`2026-10-${String(d).padStart(2, '0')}`] = day({ food: `Жовтень ${d}`, kcal: 1500 + d * 10, trained: d % 2 === 0 });
+    data.days[`2026-10-${String(d).padStart(2, '0')}`] = day({
+      food: `Жовтень ${d}`,
+      kcal: 1500 + d * 10,
+      trained: d % 2 === 0,
+    });
   }
-  data.days['2026-09-30'] = day({ food: 'Сирники', kcal: 1720, trained: true, types: ['Кардіо'], photos: ['ph1'] });
+  data.days['2026-09-30'] = day({
+    food: 'Сирники',
+    kcal: 1720,
+    trained: true,
+    types: ['Кардіо'],
+    photos: ['ph1'],
+  });
   data.weights = [{ date: '2026-10-05', kg: 65.4 }];
   return data;
 }
@@ -77,7 +87,9 @@ describe('CalendarScreen', () => {
     expect(today.getAttribute('aria-current')).toBe('date');
     // Future days are not buttons; the next month is out of reach.
     expect(screen.queryByRole('button', { name: /^11 жовтня/ })).toBeNull();
-    expect((screen.getByRole('button', { name: 'Наступний місяць' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Наступний місяць' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
   });
 
   it('reads ?date= and falls back to today for a future date', () => {
@@ -97,20 +109,36 @@ describe('CalendarScreen', () => {
     const card = dayCard();
     expect(within(card).getByRole('heading', { name: '5 жовтня 2026' })).toBeTruthy();
     expect(within(card).getByText('65,4 кг')).toBeTruthy();
-    expect(within(grid()).getByRole('button', { name: /^5 жовтня/ }).getAttribute('aria-pressed')).toBe('true');
+    expect(
+      within(grid())
+        .getByRole('button', { name: /^5 жовтня/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
-  it('moves between months with the arrows and by swiping', () => {
+  it('moves between months with the arrows and by swiping, keeping the selected day', () => {
     const memory = renderAt('/calendar?date=2026-10-08');
     fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
     expect(monthTitle()).toBe('Вересень 2026');
-    expect(memory.history.at(-1)).toBe('/calendar?date=2026-09-08');
+    // Only the view moved: same URL, same day card, nothing highlighted in September.
+    expect(memory.history).toEqual(['/calendar?date=2026-10-08']);
+    expect(within(dayCard()).getByRole('heading', { name: '8 жовтня 2026' })).toBeTruthy();
+    expect(within(grid()).queryAllByRole('button', { pressed: true })).toHaveLength(0);
 
-    const grid = screen.getByRole('group', { name: 'Вересень 2026' });
-    fireEvent.touchStart(grid, { touches: [{ clientX: 200, clientY: 100 }] });
-    fireEvent.touchEnd(grid, { changedTouches: [{ clientX: 100, clientY: 110 }] });
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    expect(monthTitle()).toBe('Серпень 2026');
+    fireEvent.click(screen.getByRole('button', { name: 'Наступний місяць' }));
+    expect(monthTitle()).toBe('Вересень 2026');
+
+    const sep = screen.getByRole('group', { name: 'Вересень 2026' });
+    fireEvent.touchStart(sep, { touches: [{ clientX: 200, clientY: 100 }] });
+    fireEvent.touchEnd(sep, { changedTouches: [{ clientX: 100, clientY: 110 }] });
     expect(monthTitle()).toBe('Жовтень 2026');
-    expect(memory.history.at(-1)).toBe('/calendar?date=2026-10-08');
+    expect(
+      within(grid())
+        .getByRole('button', { name: /^8 жовтня/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
 
     // Swiping left again would go to the future: ignored.
     const oct = screen.getByRole('group', { name: 'Жовтень 2026' });
@@ -122,7 +150,31 @@ describe('CalendarScreen', () => {
     fireEvent.touchStart(oct, { touches: [{ clientX: 100, clientY: 100 }] });
     fireEvent.touchEnd(oct, { changedTouches: [{ clientX: 160, clientY: 300 }] });
     expect(monthTitle()).toBe('Жовтень 2026');
-    expect(memory.history).toHaveLength(1);
+    expect(memory.history).toEqual(['/calendar?date=2026-10-08']);
+  });
+
+  it('tapping a day in a browsed month selects it there', () => {
+    const memory = renderAt('/calendar');
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    fireEvent.click(within(grid()).getByRole('button', { name: /^29 вересня/ }));
+    expect(memory.history).toEqual(['/calendar?date=2026-09-29']);
+    expect(monthTitle()).toBe('Вересень 2026');
+    expect(within(dayCard()).getByRole('heading', { name: '29 вересня 2026' })).toBeTruthy();
+    expect(
+      within(grid())
+        .getByRole('button', { name: /^29 вересня/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it("a new ?date= shows that day's month", () => {
+    const memory = renderAt('/calendar?date=2026-10-08');
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    expect(monthTitle()).toBe('Серпень 2026');
+    act(() => memory.navigate('/calendar?date=2026-09-30'));
+    expect(monthTitle()).toBe('Вересень 2026');
+    expect(within(dayCard()).getByText('Сирники')).toBeTruthy();
   });
 
   it('opens the day sheet for the selected day', () => {
@@ -148,6 +200,26 @@ describe('CalendarScreen', () => {
     expect(memory.history.at(-1)).toBe('/calendar?date=2026-09-30');
     expect(monthTitle()).toBe('Вересень 2026');
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+
+    // Browsed away, then the already selected day again: its month comes back.
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    expect(monthTitle()).toBe('Серпень 2026');
+    fireEvent.click(within(list).getByRole('button', { name: /^30 вересня/ }));
+    expect(monthTitle()).toBe('Вересень 2026');
+    expect(
+      within(grid())
+        .getByRole('button', { name: /^30 вересня/ })
+        .getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('names history rows in one lower-case sentence', () => {
+    renderAt('/calendar');
+    const list = screen.getByRole('list');
+    expect(
+      within(list).getByRole('button', { name: /^8 жовтня, 1\s580 ккал, Жовтень 8, тренування$/ }),
+    ).toBeTruthy();
+    expect(within(list).getByRole('button', { name: /^9 жовтня, .*, відпочинок$/ })).toBeTruthy();
   });
 
   it('follows data changes', () => {

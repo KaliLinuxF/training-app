@@ -3,6 +3,11 @@
   animation: estimate-in 220ms var(--ease-out);
 }
 
+/* The title takes focus when the result arrives; keep the keyboard ring tidy around the text. */
+.title {
+  border-radius: 6px;
+}
+
 .thumb {
   width: 56px;
   height: 56px;
@@ -81,7 +86,8 @@
 }
 
 .kcalInput:focus {
-  border-color: var(--acc);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
   background: var(--card);
 }
 

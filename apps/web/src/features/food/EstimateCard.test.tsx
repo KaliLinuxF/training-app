@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { createRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EstimateCard, EstimateLoading } from './EstimateCard';
 import { draftsToItems, sanitizeKcalInput, toDrafts, type DraftItem } from './model';
@@ -100,13 +100,61 @@ describe('EstimateCard', () => {
     expect(onRetry).toHaveBeenCalledOnce();
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it('nothing recognised without a comment: the advice fits text vs photo', () => {
+    const card = (photo: boolean) => (
+      <EstimateCard
+        drafts={[]}
+        comment=""
+        photo={photo}
+        preview={null}
+        remaining={null}
+        onEditKcal={() => undefined}
+        onRemove={() => undefined}
+        onAdd={() => undefined}
+        onCancel={() => undefined}
+        onRetry={() => undefined}
+      />
+    );
+    const { rerender } = render(card(false));
+    expect(screen.getByText('Не вдалося знайти їжу в описі — спробуй сформулювати інакше.')).toBeTruthy();
+    rerender(card(true));
+    expect(screen.getByText('Не вдалося знайти їжу на фото — спробуй описати текстом.')).toBeTruthy();
+  });
+
+  it('the title can take focus (programmatically only) and still names the card', () => {
+    const titleRef = createRef<HTMLSpanElement>();
+    render(
+      <EstimateCard
+        drafts={toDrafts(ITEMS)}
+        comment=""
+        preview={null}
+        remaining={null}
+        titleRef={titleRef}
+        onEditKcal={() => undefined}
+        onRemove={() => undefined}
+        onAdd={() => undefined}
+        onCancel={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+    expect(screen.getByRole('region', { name: 'Оцінка калорій' })).toBeTruthy();
+    expect(titleRef.current?.tabIndex).toBe(-1);
+    titleRef.current?.focus();
+    expect(document.activeElement).toBe(titleRef.current);
+    expect(screen.getByRole('heading', { name: 'Оцінка калорій' }).contains(titleRef.current)).toBe(true);
+  });
 });
 
 describe('EstimateLoading', () => {
-  it('announces progress and can be cancelled', () => {
+  it('shows progress and can be cancelled (FoodAssist announces it)', () => {
     const onCancel = vi.fn();
-    render(<EstimateLoading photo preview={null} onCancel={onCancel} />);
-    expect(screen.getByRole('status').textContent).toContain('Рахую калорії…');
+    const cancelRef = createRef<HTMLButtonElement>();
+    render(<EstimateLoading photo preview={null} onCancel={onCancel} cancelRef={cancelRef} />);
+    expect(screen.getByText('Рахую калорії…')).toBeTruthy();
+    // Not a live region of its own: one inserted with its text already inside is often not read.
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(cancelRef.current).toBe(screen.getByRole('button', { name: 'Скасувати' }));
     fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
     expect(onCancel).toHaveBeenCalledOnce();
   });

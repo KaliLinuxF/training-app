@@ -3,6 +3,8 @@ import { useCallback, useState } from 'react';
 /** Per-device appearance preference (not synced to the server). */
 export type ThemePref = 'auto' | 'light' | 'dark';
 
+// public/theme-boot.js repeats the key, the colours and applyTheme() to set a forced theme before
+// the first paint; src/pwa/theme-boot.test.ts keeps the two in step.
 const KEY = 'legko.theme';
 const PAPER = { light: '#F3F5F8', dark: '#12151A' } as const;
 

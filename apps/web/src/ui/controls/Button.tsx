@@ -11,7 +11,7 @@ import s from './Button.module.css';
 export type ButtonVariant = 'solid' | 'accent' | 'outline' | 'ghost';
 
 /**
- * - `sm` — 14/600, padding 10/14, r12, min-height 40 (44 for `accent`)
+ * - `sm` — 14/600, padding 10/14, r12, min-height 40 (44 for `accent`); tap area grown invisibly to 44
  * - `md` — 15/600, r14, min-height 50
  * - `lg` — 16/700, r16, min-height 56 (sheet footer «Зберегти»)
  */

@@ -7,8 +7,8 @@
  *   persisted on the device (IndexedDB) and queued for the server (works offline).
  * - `startSync()` — called by `AuthGate` after login; loads the device cache, then the server
  *   copy, and keeps flushing the queue. Returns a cleanup function.
- * - `flushNow()`, `resetLocal()`, `onUnauthorized()`, `hasDeviceCache()`, `clearSyncError()` —
- *   used by the auth layer and settings screens.
+ * - `flushNow()`, `resetLocal()`, `onUnauthorized()`, `hasDeviceCache()`, `refreshFromServer()`,
+ *   `clearSyncError()` — used by the auth layer and settings screens.
  *
  * Implementation: `state.ts` (zustand), `cache.ts` (IndexedDB), `sync.ts` (outbox + server).
  */
@@ -17,7 +17,15 @@ import { useDataStore, type SyncState } from './state';
 import { commitOps, importAll } from './sync';
 
 export { useDataStore, type DataStore, type SyncState } from './state';
-export { clearSyncError, flushNow, hasDeviceCache, onUnauthorized, resetLocal, startSync } from './sync';
+export {
+  clearSyncError,
+  flushNow,
+  hasDeviceCache,
+  onUnauthorized,
+  refreshFromServer,
+  resetLocal,
+  startSync,
+} from './sync';
 
 export const useAppData = (): AppData => useDataStore((s) => s.data);
 export const useSettings = (): Settings => useDataStore((s) => s.data.settings);

@@ -11,10 +11,13 @@ export interface MeasureInputTileProps extends Omit<
   /** Raw text («70,5»). */
   value: string;
   onChange: (value: string) => void;
-  /** Previous value as a hint («74»), or «—». */
+  /** Previous value as a hint («74»), or «—». A value is drawn darker than a plain placeholder (it is data). */
   placeholder?: string;
   unit?: string;
 }
+
+/** A placeholder with a digit in it is a previous measurement, not just a hint. */
+const isPreviousValue = (placeholder: string): boolean => /\d/.test(placeholder);
 
 /** Measurement input tile: label 13 muted, big 22/700 input with «см» suffix. The whole tile is the <label>. */
 export function MeasureInputTile({
@@ -35,7 +38,7 @@ export function MeasureInputTile({
           inputMode="decimal"
           autoComplete="off"
           enterKeyHint="next"
-          className={s.input}
+          className={cx(s.input, isPreviousValue(placeholder) && s.previous)}
           value={value}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}

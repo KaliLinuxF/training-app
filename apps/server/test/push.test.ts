@@ -1,5 +1,6 @@
 import { defaultSettings, type AppData } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
+import { getKv, KV } from '../src/db/kv';
 import { createSubscriptionRepo } from '../src/push/subscriptions';
 import { createTestServer, json } from './helpers';
 
@@ -53,6 +54,32 @@ describe('push routes', () => {
     });
     const data = await json<AppData>(await s.call('/api/data', { cookie }));
     expect(data.settings).toEqual({ ...defaultSettings(), timezone: 'Europe/Warsaw' });
+  });
+
+  it('stores the canonical zone and leaves settings alone for an alias of the stored one', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const subscribe = (timezone: string) =>
+      s.call('/api/push/subscribe', { cookie, body: { subscription: subscription(1), timezone } });
+    const settings = async () => (await json<AppData>(await s.call('/api/data', { cookie }))).settings;
+
+    // Chrome reports the legacy id for Kyiv: same zone as the default, nothing is written.
+    expect((await subscribe('Europe/Kiev')).status).toBe(200);
+    expect(getKv(s.db, KV.settings)).toBeNull();
+
+    await subscribe('Europe/Warsaw');
+    expect((await settings()).timezone).toBe('Europe/Warsaw');
+    expect((await subscribe('Europe/Kiev')).status).toBe(200);
+    expect((await settings()).timezone).toBe('Europe/Kyiv');
+
+    // A stored legacy spelling is not rewritten by the same zone under its new name.
+    await s.call('/api/ops', {
+      cookie,
+      body: { ops: [{ kind: 'settings.put', value: { ...defaultSettings(), timezone: 'Europe/Kiev' } }] },
+    });
+    const before = getKv(s.db, KV.settings);
+    expect((await subscribe('Europe/Kyiv')).status).toBe(200);
+    expect(getKv(s.db, KV.settings)).toBe(before);
   });
 
   it('validates subscriptions', async () => {

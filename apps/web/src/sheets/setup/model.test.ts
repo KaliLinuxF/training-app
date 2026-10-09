@@ -29,13 +29,22 @@ describe('setup sheet model', () => {
     expect(isSetupDirty(draft(), draft({ goal: '59,5' }))).toBe(true);
   });
 
-  it('requires goal and kcal goal within the server limits; current weight is optional', () => {
+  it('requires goal and kcal goal within GOAL_LIMITS (as in «Мої цілі»); current weight is optional', () => {
     expect(hasSetupErrors(validateSetup(draft()))).toBe(false);
     expect(validateSetup(draft({ goal: '' })).goal).toBe(FIELD_ERRORS.goalRequired);
-    expect(validateSetup(draft({ goal: '10' })).goal).toBe(FIELD_ERRORS.kg);
+    expect(validateSetup(draft({ goal: '29,5' })).goal).toBe(FIELD_ERRORS.goal);
+    expect(validateSetup(draft({ goal: '200,5' })).goal).toBe(FIELD_ERRORS.goal);
+    expect(validateSetup(draft({ goal: 'abc' })).goal).toBe(FIELD_ERRORS.goal);
+    expect(validateSetup(draft({ goal: '30' })).goal).toBeUndefined();
+    expect(validateSetup(draft({ goal: '200' })).goal).toBeUndefined();
     expect(validateSetup(draft({ kcalGoal: '' })).kcalGoal).toBe(FIELD_ERRORS.kcalGoalRequired);
-    expect(validateSetup(draft({ kcalGoal: '450' })).kcalGoal).toBe(FIELD_ERRORS.kcalGoal);
-    expect(validateSetup(draft({ kcalGoal: '10050' })).kcalGoal).toBe(FIELD_ERRORS.kcalGoal);
+    expect(validateSetup(draft({ kcalGoal: '750' })).kcalGoal).toBe(FIELD_ERRORS.kcalGoal);
+    expect(validateSetup(draft({ kcalGoal: '5050' })).kcalGoal).toBe(FIELD_ERRORS.kcalGoal);
+    expect(validateSetup(draft({ kcalGoal: '800' })).kcalGoal).toBeUndefined();
+    expect(validateSetup(draft({ kcalGoal: '5000' })).kcalGoal).toBeUndefined();
+    expect(FIELD_ERRORS.goal).toBe('Ціль — від 30 до 200 кг');
+    expect(FIELD_ERRORS.kcalGoal).toBe('Від 800 до 5 000 ккал на день');
+    // The current weight is a weigh-in: the data limits apply.
     expect(validateSetup(draft({ weight: '500' })).weight).toBe(FIELD_ERRORS.kg);
     expect(validateSetup(draft({ waist: '5' })).measure.invalid).toEqual(['waist']);
   });

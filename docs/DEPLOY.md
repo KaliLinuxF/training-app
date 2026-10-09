@@ -17,7 +17,7 @@ committed `HEAD` by `deploy/deploy.sh`.
 │  │ caddy:2.11.7-alpine         │  app:3000        │ training-app:latest (built here)      │    │
 │  │ publishes 80, 443, 443/udp  │ ───────────────► │ node 24 · uid 1000 · read-only rootfs │    │
 │  │ TLS (Let's Encrypt), HSTS,  │  docker network  │ API /api/* + static PWA + Web Push    │    │
-│  │ gzip/zstd                   │                  │ no published ports                    │    │
+│  │ gzip/zstd, bodies ≤ 17 MB   │                  │ no published ports · mem ≤ 512 MB     │    │
 │  │ vol caddy_data  (certs)     │                  │ ./data → /data                        │    │
 │  │ vol caddy_config            │                  │   legko.db (SQLite, WAL), backups/,   │    │
 │  └─────────────────────────────┘                  │   photos/                             │    │
@@ -57,7 +57,7 @@ Only Caddy publishes ports — Docker-published ports bypass ufw, so the app mus
 | ---------------------------------------- | -------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                      | enables the AI calorie estimate (text / photo); without it the UI hides it |
 | `FOOD_AI_MODEL`                          | optional model override for the estimate (default `claude-opus-5-5`)       |
-| `FOOD_DAILY_LIMIT`                       | estimates allowed per day (default `60`; `0` switches estimates off)       |
+| `FOOD_DAILY_LIMIT`                       | estimates per day, Kyiv time (default `60`; `0` switches them off)         |
 | `LOG_LEVEL`                              | `debug`, `info` (default), `warn`, `error` or `silent`                     |
 | `VAPID_SUBJECT`                          | Web Push contact (`https:` URL or `mailto:`), default `PUBLIC_ORIGIN`      |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | only to pin keys; by default they are generated once and kept in the DB    |
@@ -130,8 +130,9 @@ For scripting, `set-password --stdin` reads the password from one line of stdin 
   `AI calorie estimate enabled (model claude-opus-5-5, 60 per day)` or `… disabled (…)`.
 - The app container calls the Anthropic API (outbound HTTPS) with Claude Opus 5.5 (`FOOD_AI_MODEL`): structured JSON
   output, effort `low`, server-side refusal fallback; 60 s timeout, one retry. An estimate usually takes 5–20 s.
-- **Cost guard:** at most `FOOD_DAILY_LIMIT` model calls (default 60) per day in the user's time zone; the counter is
-  in the database (survives restarts). Over the limit → «Ліміт підрахунків на сьогодні вичерпано» until midnight.
+- **Cost guard:** at most `FOOD_DAILY_LIMIT` model calls (default 60) per day; the day is counted in Kyiv time
+  (`Europe/Kyiv`) whatever time zone the app is set to, so changing the zone cannot reset it. The counter is in the
+  database (survives restarts). Over the limit → «Ліміт підрахунків на сьогодні вичерпано» until midnight Kyiv time.
 - **Photos** arrive with the estimate (downscaled JPEG + thumbnail, made on the phone) and are stored in
   `data/photos/` before the model is called. Photos that no day references 24 h later are deleted daily at ~03:40
   Kyiv time (log line `photo gc: …`).
@@ -186,6 +187,28 @@ deploy/deploy.sh status               # containers + health, latest/previous ver
 
 Logs are Docker `json-file`, rotated at 10 MB × 3 files per container. Caddy writes no access log; the app logs
 one line per request (method, path, status, ms) and never bodies or cookies.
+
+## Limits and abuse protection
+
+- **Login throttle** — 5 failed logins per client address in 15 minutes (an IPv6 client counts as its whole /64),
+  and 20 failed logins in 15 minutes from all addresses together. Over either limit, logins answer 429
+  «Забагато спроб» until the oldest failure is 15 minutes old. Successful logins do not count. Devices that are
+  already signed in are not affected (sessions last 400 days), only new logins. When the overall limit is hit the
+  app logs `WARN 20 failed logins within 15 min from all addresses: every login is refused until they age out`.
+  The overall counter lives in the database, so a restart or a deploy does not clear it (the per-address one is in
+  memory). To lift the overall limit at once:
+
+  ```bash
+  ssh deploy@64.176.75.160 'cd /opt/training-app && docker compose exec -T app node -e "new (require(\"node:sqlite\").DatabaseSync)(\"/data/legko.db\").prepare(\"DELETE FROM kv WHERE key = ?\").run(\"login_failures\")"'
+  ```
+
+- **Request size** — Caddy refuses bodies over 17 MB (`request_body` in the `Caddyfile`). The app has its own cap per
+  route and answers 413 «Завеликий запит» above it: login 4 KiB, push subscription 64 KiB, AI estimate 4 MiB (photo),
+  sync ops and JSON import 16 MiB. Every other body is read only after the session check, so without a session a
+  client can make the app read no more than the 4 KiB of a login (and nothing once it is throttled).
+- **Memory** — the app container has `mem_limit: 512m` (Node sizes its heap from it, ≈ 260 MB; a 16 MB import peaks
+  at ≈ 180 MB). If it is ever exceeded, the kernel kills the app and Docker restarts it; the host keeps running.
+  To check: `docker inspect --format '{{.State.OOMKilled}} restarts={{.RestartCount}}' training-app-app-1` on the server.
 
 ## Backups
 
@@ -267,6 +290,8 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 | "data is not writable by uid 1000" | run the printed `chown` as root once                                     |
 | certificate / HTTPS errors         | `deploy/deploy.sh logs caddy`; DNS A record; ports 80/443 open in ufw    |
 | login always fails                 | password not set yet → `deploy/deploy.sh set-password` (the log says so) |
+| login says «Забагато спроб»        | too many failed logins: wait 15 min (see Limits and abuse protection)    |
+| app restarts on its own            | killed for memory? `OOMKilled` check in Limits and abuse protection      |
 | no «Порахувати» / «Фото» buttons   | `ANTHROPIC_API_KEY` missing in `.env` (or not applied with `up -d`)      |
 | AI estimates keep failing          | `deploy/deploy.sh logs` → `food estimate failed: …` / `key rejected`     |
 | disk filling up                    | `docker system df` on the server; deploys prune old images and cache     |

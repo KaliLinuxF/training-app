@@ -101,6 +101,17 @@ describe('HomeScreen', () => {
     expect(sheet()).toBeNull();
   });
 
+  it('«✕ Не було» does not claim success when the save is refused', () => {
+    const saveDay = vi.spyOn(dataActions, 'saveDay').mockImplementation(() => false);
+    setData();
+    render(<HomeScreen />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Не було' }));
+
+    expect(saveDay).toHaveBeenCalledTimes(1);
+    expect(useUiStore.getState().toast).toBeNull();
+  });
+
   it('shows the workout state and marks the pressed option', () => {
     setData({ days: { [TODAY]: day({ trained: false }) } });
     render(<HomeScreen />);

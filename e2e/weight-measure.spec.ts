@@ -1,8 +1,7 @@
-import { acceptNextDialog } from './support/app';
 import { expect, test } from './support/test';
 
 test.describe('weigh-in sheet', () => {
-  test('pre-fills the latest weight, validates, navigates days (asking before dropping a draft) and saves a past day', async ({
+  test('pre-fills the weigh-in before the day, validates, navigates days (asking before dropping a draft) and saves a past day', async ({
     app,
     page,
     server,
@@ -34,20 +33,23 @@ test.describe('weigh-in sheet', () => {
     await expect(sheet.getByRole('alert')).toHaveCount(0);
     await expect(save).toBeEnabled();
 
-    // Dirty draft: leaving the day asks; «Скасувати» keeps her on it.
-    page.once('dialog', (d) => void d.dismiss());
+    // Dirty draft: leaving the day asks in the app's own dialog; «Залишитись» keeps her on it.
+    const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
     await prev.click();
+    await expect(ask).toContainText('Перейти до іншого дня без збереження?');
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
     await expect(sheet).toContainText('14 жовтня 2026');
     await expect(kg).toHaveValue('65,2');
 
-    const asked = acceptNextDialog(page);
     await prev.click();
-    expect(await asked).toBe('Є незбережені зміни. Закрити без збереження?');
+    await ask.getByRole('button', { name: 'Перейти' }).click();
+    await expect(ask).toBeHidden();
     await expect(sheet).toContainText('13 жовтня 2026');
     await expect(sheet).toContainText('вівторок');
     await expect(sheet).not.toContainText('сьогодні');
     await expect(next).toBeEnabled();
-    // No weigh-in that day: the latest one is offered.
+    // No weigh-in that day: the one before it (12 Oct) is offered.
     await expect(kg).toHaveValue('65,4');
 
     // A clean draft moves without asking.
@@ -55,8 +57,14 @@ test.describe('weigh-in sheet', () => {
     await expect(sheet).toContainText('12 жовтня 2026');
     await expect(kg).toHaveValue('65,4');
     await expect(sheet).toContainText('Попереднє: 5 жовтня — 65,7 кг');
+    // Further back the offer follows the day: 11 Oct gets 5 Oct's weight, not the latest one.
+    await prev.click();
+    await expect(sheet).toContainText('11 жовтня 2026');
+    await expect(kg).toHaveValue('65,7');
+    await next.click();
     await next.click();
     await expect(sheet).toContainText('13 жовтня 2026');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
 
     await kg.fill('65,3');
     await app.save(sheet);

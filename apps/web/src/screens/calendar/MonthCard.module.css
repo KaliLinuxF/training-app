@@ -143,28 +143,3 @@ button.cell:active {
     transform: translateX(-14px);
   }
 }
-
-/* Legend swatches for the fill mode (10px rounded squares with a 1.5px border). */
-.legendItem {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.square {
-  flex-shrink: 0;
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  border: 1.5px solid;
-}
-
-.squareFood {
-  background: var(--acc2T);
-  border-color: var(--acc2);
-}
-
-.squareTrained {
-  background: var(--accT);
-  border-color: var(--acc);
-}

@@ -93,6 +93,20 @@ describe('getPushStatus', () => {
     expect(await getPushStatus()).toBe('needs-install');
   });
 
+  it('is "needs-install" in an iPhone browser tab even when it exposes the Push API', async () => {
+    vi.mocked(isIOS).mockReturnValue(true);
+    vi.mocked(isStandalone).mockReturnValue(false);
+    installEnv({ permission: 'granted', subscription: fakeSubscription('https://push.example/a', OTHER_KEY) });
+    expect(await getPushStatus()).toBe('needs-install');
+  });
+
+  it('reports the real state in the installed iPhone app', async () => {
+    vi.mocked(isIOS).mockReturnValue(true);
+    vi.mocked(isStandalone).mockReturnValue(true);
+    installEnv({ permission: 'granted', subscription: fakeSubscription('https://push.example/a', OTHER_KEY) });
+    expect(await getPushStatus()).toBe('enabled');
+  });
+
   it('is "unsupported" in an installed iPhone app without the Push API (iOS < 16.4)', async () => {
     vi.mocked(isIOS).mockReturnValue(true);
     vi.mocked(isStandalone).mockReturnValue(true);
@@ -163,6 +177,16 @@ describe('enablePush', () => {
     vi.mocked(isIOS).mockReturnValue(true);
     expect(await enablePush()).toBe('needs-install');
     expect(api.pushPublicKey).not.toHaveBeenCalled();
+  });
+
+  it('does not ask for permission in an iPhone browser tab that exposes the Push API', async () => {
+    vi.mocked(isIOS).mockReturnValue(true);
+    vi.mocked(isStandalone).mockReturnValue(false);
+    const { pushManager } = installEnv({ permission: 'default', grant: 'granted' });
+    expect(await enablePush()).toBe('needs-install');
+    expect(requestPermission()).not.toHaveBeenCalled();
+    expect(pushManager.subscribe).not.toHaveBeenCalled();
+    expect(api.pushSubscribe).not.toHaveBeenCalled();
   });
 
   it('rejects when the server cannot be reached', async () => {

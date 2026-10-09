@@ -2,6 +2,7 @@
 import { navigate } from 'wouter/use-browser-location';
 import { syncPushSubscription } from '../lib/push';
 import { isNavigateMessage, safeAppPath } from './protocol';
+import { reloadOnUpdate } from './update';
 
 /** Built by vite-plugin-pwa from `src/sw.ts` as a classic (IIFE) script. */
 const SW_URL = '/sw.js';
@@ -14,6 +15,10 @@ export function registerServiceWorker(): void {
   // Listen before registering so a notification tap that launched the app is not missed.
   navigator.serviceWorker.addEventListener('message', onWorkerMessage);
   navigator.serviceWorker.startMessages();
+
+  // A deployed version takes over at once (sw.ts); move the page onto it at the next quiet return.
+  // Set up before registering: it needs to know whether this page started under a worker.
+  reloadOnUpdate({ serviceWorker: navigator.serviceWorker, document });
 
   // Registering after `load` keeps the first render free of the precache download.
   if (document.readyState === 'complete') void register();

@@ -23,13 +23,16 @@ test.describe('first-run setup', () => {
     await expect(goal).toHaveValue('60');
     await expect(kcal).toHaveValue('1700');
 
-    // Validation: required goal, kcal range, weight range — each blocks «Почати».
+    // Validation: required goal, goal and kcal within the «Мої цілі» bounds, weight range — each blocks «Почати».
     await goal.fill('');
     await expect(setup.getByRole('alert')).toHaveText('Вкажи цільову вагу');
     await expect(start).toBeDisabled();
+    await goal.fill('25');
+    await expect(setup.getByRole('alert')).toHaveText('Ціль — від 30 до 200 кг');
+    await expect(start).toBeDisabled();
     await goal.fill('64');
     await kcal.fill('100');
-    await expect(setup.getByRole('alert')).toHaveText('Від 500 до 10 000 ккал на день');
+    await expect(setup.getByRole('alert')).toHaveText('Від 800 до 5 000 ккал на день');
     await expect(start).toBeDisabled();
     await kcal.fill('1800');
     await weight.fill('10');

@@ -6,16 +6,7 @@
  * overlap: a server copy can never miss ops that were acknowledged while it was in flight,
  * and replaying the still-pending outbox on top of it is always correct.
  */
-import {
-  appDataSchema,
-  applyOps,
-  emptyData,
-  isValidTimeZone,
-  opSchema,
-  type AppData,
-  type Op,
-  type Settings,
-} from '@legko/shared';
+import { appDataSchema, applyOps, emptyData, opSchema, type AppData, type Op } from '@legko/shared';
 import { api, ApiError } from '../lib/api';
 import { CACHE_KEYS, clearCache, loadCache, persist } from './cache';
 import { newOutboxId, normalizeAppData, parseCachedData, parseOutbox, type OutboxItem } from './normalize';
@@ -27,6 +18,13 @@ const RETRY_BASE_MS = 2_000;
 const RETRY_MAX_MS = 60_000;
 /** Safety net while ops are pending (timers can be lost while iOS suspends the app). */
 export const PENDING_POLL_MS = 30_000;
+/** A visible page with nothing pending re-reads the server this often (a desktop tab can stay open for days). */
+export const REFRESH_POLL_MS = 60_000;
+/**
+ * `focus` / `pageshow` this soon after the last load (they often arrive together with
+ * `visibilitychange`) do not start another one.
+ */
+export const FOCUS_REFRESH_GAP_MS = 5_000;
 
 export const SYNC_ERRORS = {
   invalidLocal: 'Некоректні дані — зміну не збережено',
@@ -55,7 +53,8 @@ let sessionId = 0;
 let detachTriggers: (() => void) | null = null;
 let loadedThisSession = false;
 let wantLoad = false;
-let timezoneChecked = false;
+/** When the last `GET /api/data` started (`Date.now()`); 0 before the first one. */
+let lastLoadAt = 0;
 
 let worker: Promise<void> | null = null;
 let rekick = false;
@@ -177,20 +176,24 @@ async function work(gen: number): Promise<void> {
 
 async function loadFromServer(gen: number): Promise<boolean> {
   patchSync({ syncing: true });
+  // Cleared before the request: a refresh asked for while it is in flight needs a newer copy.
+  wantLoad = false;
+  lastLoadAt = Date.now();
   let server: AppData;
   try {
     server = await api.getData();
   } catch (err) {
-    if (gen === generation) handleFailure(err);
+    if (gen === generation) {
+      wantLoad = true;
+      handleFailure(err);
+    }
     return false;
   }
   if (gen !== generation) return false;
   const data = applyOps(normalizeAppData(server), pendingOps());
-  wantLoad = false;
   loadedThisSession = true;
   setData(data, { loaded: true });
   markSuccess();
-  fixTimezone(data.settings);
   return true;
 }
 
@@ -278,48 +281,59 @@ function handleUnauthorized(): void {
   for (const listener of [...unauthorizedListeners]) listener();
 }
 
-function deviceTimeZone(): string | undefined {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Reminders fire in `settings.timezone`; keep it in line with the phone after travelling. */
-function fixTimezone(settings: Settings): void {
-  if (timezoneChecked) return;
-  timezoneChecked = true;
-  const tz = deviceTimeZone();
-  if (tz && tz !== settings.timezone && isValidTimeZone(tz)) {
-    enqueue([{ kind: 'settings.put', value: { ...settings, timezone: tz } }]);
-  }
-}
-
 // ---- session ---------------------------------------------------------------------------
 
+const isVisible = (): boolean => document.visibilityState === 'visible';
+
+/**
+ * Keeps the outbox flowing and the copy fresh: another device may have changed the data, and a
+ * save built on a stale copy would overwrite it. Pending ops always go first (the worker sends
+ * them before it re-reads the server).
+ */
 function attachTriggers(): () => void {
   const onOnline = () => {
     patchSync({ online: true });
     retryNow();
   };
   const onOffline = () => patchSync({ online: false });
+  /** Back in front (this is how iOS resumes a suspended app): send what is pending, then re-read. */
   const onVisibility = () => {
-    if (document.visibilityState !== 'visible') return;
+    if (!isVisible()) return;
     wantLoad = true;
     retryNow();
   };
-  const poll = setInterval(() => {
+  /** A desktop window focused again (the tab stayed visible all along). */
+  const onFocus = () => {
+    if (Date.now() - lastLoadAt < FOCUS_REFRESH_GAP_MS) return;
+    wantLoad = true;
+    retryNow();
+  };
+  /** A page restored from the back/forward cache (the first `pageshow` is the initial load). */
+  const onPageShow = (e: PageTransitionEvent) => {
+    if (e.persisted) onFocus();
+  };
+  const pendingPoll = setInterval(() => {
     if (outbox.length > 0) kick();
   }, PENDING_POLL_MS);
+  // `kick()` respects the backoff: a failing server is not hit more often than the retries allow.
+  const refreshPoll = setInterval(() => {
+    if (outbox.length > 0 || !isVisible()) return;
+    wantLoad = true;
+    kick();
+  }, REFRESH_POLL_MS);
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
+  window.addEventListener('focus', onFocus);
+  window.addEventListener('pageshow', onPageShow);
   document.addEventListener('visibilitychange', onVisibility);
   return () => {
     window.removeEventListener('online', onOnline);
     window.removeEventListener('offline', onOffline);
+    window.removeEventListener('focus', onFocus);
+    window.removeEventListener('pageshow', onPageShow);
     document.removeEventListener('visibilitychange', onVisibility);
-    clearInterval(poll);
+    clearInterval(pendingPoll);
+    clearInterval(refreshPoll);
   };
 }
 
@@ -379,7 +393,6 @@ export function startSync(): () => void {
   sessionId = id;
   active = true;
   loadedThisSession = false;
-  timezoneChecked = false;
   wantLoad = true;
   retryAt = 0;
   patchSync({ online: typeof navigator === 'undefined' ? true : navigator.onLine });
@@ -388,6 +401,16 @@ export function startSync(): () => void {
   return () => {
     if (sessionId === id) stopSession();
   };
+}
+
+/**
+ * Re-reads the server copy now (after anything pending is sent), e.g. after the server changed
+ * something on its own. A load already in flight is followed by a fresh one. No-op without a session.
+ */
+export function refreshFromServer(): void {
+  if (!active) return;
+  wantLoad = true;
+  retryNow();
 }
 
 /**
@@ -455,6 +478,7 @@ export async function resetLocal(): Promise<void> {
   blocked = false;
   attempt = 0;
   retryAt = 0;
+  lastLoadAt = 0;
   errorKind = null;
   useDataStore.setState({ data: emptyData(), sync: initialSyncState() });
   await clearCache();

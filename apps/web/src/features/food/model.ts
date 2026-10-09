@@ -1,6 +1,6 @@
 /**
- * Pure view logic of the food feature: estimate line formatting, editable item drafts,
- * «Часті страви» chips and error → message mapping. No React, no I/O.
+ * Pure view logic of the food feature: estimate line formatting, the composer, editable item
+ * drafts, «Часті страви» chips and screen-reader copy. No React, no I/O.
  */
 import {
   f0,
@@ -44,9 +44,51 @@ export function formatFoodLine(items: readonly FoodEstimateItem[]): string {
   return `${dishes} — ${f0(sumKcal(items))} ккал`;
 }
 
-/** What `onAdd` receives for a set of confirmed items. */
-export function buildFoodAdd(items: readonly FoodEstimateItem[], photoId: string | null): FoodAdd {
-  return { line: formatFoodLine(items), kcal: sumKcal(items), photoId, items: [...items] };
+/**
+ * What `onAdd` receives for a set of confirmed items. `consumed` is the «Що я їла» tail the
+ * estimate was made from ('' → the sheet appends the line). The sheet records `uses` on save.
+ */
+export function buildFoodAdd(
+  items: readonly FoodEstimateItem[],
+  photoId: string | null,
+  consumed = '',
+): FoodAdd {
+  return {
+    line: formatFoodLine(items),
+    consumed,
+    kcal: sumKcal(items),
+    photoId,
+    items: [...items],
+    uses: items.map((it) => ({ name: it.name, portion: it.portion, kcal: it.kcal })),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// «✨ Порахувати» composer
+
+export interface ComposerState {
+  open: boolean;
+  text: string;
+  /** The unestimated «Що я їла» tail it was pre-filled with ('' when there was none). */
+  prefill: string;
+}
+
+export const COMPOSER_CLOSED: ComposerState = { open: false, text: '', prefill: '' };
+
+/** The composer holds text she typed or changed herself (not just the pre-filled tail). */
+export function composerEdited(c: ComposerState): boolean {
+  const text = c.text.trim();
+  return text !== '' && text !== c.prefill.trim();
+}
+
+/** Opening the composer pre-fills the unestimated tail, unless it still holds her own text. */
+export function openComposer(c: ComposerState, tail: string): ComposerState {
+  return composerEdited(c) ? { ...c, open: true } : { open: true, text: tail, prefill: tail };
+}
+
+/** The tail an estimate of this text replaces on «Додати»: only when she left the pre-fill as it was. */
+export function consumedTail(c: ComposerState): string {
+  return c.prefill.trim() !== '' && !composerEdited(c) ? c.prefill : '';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -111,6 +153,10 @@ export interface FrequentDish {
 
 export const chipLabel = (f: Pick<FoodItem, 'name' | 'kcal'>): string => `${f.name} · ${f0(f.kcal)}`;
 
+/** Accessible name of a chip: «Додати «Кава з молоком», 60 ккал» (the visible «·» is not read out). */
+export const chipAddLabel = (f: Pick<FoodItem, 'name' | 'kcal'>): string =>
+  `Додати «${f.name.trim()}», ${f0(f.kcal)} ккал`;
+
 /** Top dishes by use count, then recency (`rankFoods`). */
 export function buildFrequentDishes(foods: readonly FoodItem[], limit = FREQUENT_LIMIT): FrequentDish[] {
   return rankFoods(foods)
@@ -132,6 +178,25 @@ export function pluralUk(n: number, one: string, few: string, many: string): str
   if (m10 === 1 && m100 !== 11) return one;
   if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
   return many;
+}
+
+/** Comment on a result with no food in it, when the model gave none. */
+export function emptyEstimateComment(photo: boolean): string {
+  return photo
+    ? 'Не вдалося знайти їжу на фото — спробуй описати текстом.'
+    : 'Не вдалося знайти їжу в описі — спробуй сформулювати інакше.';
+}
+
+/** Screen-reader announcement when an estimate arrives: «Знайдено 3 позиції, разом 385 ккал». */
+export function foundMessage(count: number, total: number): string {
+  if (count <= 0) return 'Нічого не знайдено';
+  return `Знайдено ${count} ${pluralUk(count, 'позицію', 'позиції', 'позицій')}, разом ${f0(total)} ккал`;
+}
+
+/** Announcement after «Додати» or a chip: «Додано «Борщ», 260 ккал» / «Додано 385 ккал». */
+export function addedMessage(add: Pick<FoodAdd, 'items' | 'kcal'>): string {
+  const only = add.items.length === 1 ? add.items[0] : undefined;
+  return only ? `Додано «${only.name.trim()}», ${f0(add.kcal)} ккал` : `Додано ${f0(add.kcal)} ккал`;
 }
 
 /** Hint under the result when few estimates are left today (≤ 10), else null. */

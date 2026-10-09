@@ -39,6 +39,8 @@
 .history {
   grid-template-columns: 96px minmax(0, 1fr) 78px;
   padding: 9px 0;
+  /* Each row opens its day: keep it a full 44px tap target. */
+  min-height: 44px;
   border-top: 1px solid var(--line2);
 }
 

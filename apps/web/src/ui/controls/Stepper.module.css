@@ -12,3 +12,18 @@
   font-size: 17px;
   font-weight: 700;
 }
+
+/*
+ * Narrow phones (320px: SE 1st gen, mini/SE with Display Zoom): «Мої цілі» rows must fit the card
+ * next to their label. Tighter gaps and a slightly smaller value keep both steppers inside; 360px+ is unchanged.
+ */
+@media (max-width: 359px) {
+  .stepper {
+    gap: 4px;
+  }
+
+  .value {
+    min-width: 80px;
+    font-size: 16px;
+  }
+}

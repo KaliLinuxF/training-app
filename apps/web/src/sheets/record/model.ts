@@ -1,23 +1,38 @@
 /**
  * Day / weigh-in / measurements sheet: draft initialisation, validation and the draft → ops
- * mapping. Ports the prototype's `openSheet()` and `save()` (Tracker.dc.html).
+ * mapping. Ports the prototype's `openSheet()` and `save()` (Tracker.dc.html), except that a save
+ * only writes what she changed (two devices must not erase each other's records).
  */
 import {
   isEmptyDay,
+  isEmptyMeasure,
   LIMITS,
   normalizeTypeNames,
   num,
+  opSchema,
   str,
   WORKOUT_TYPES,
   type AppData,
   type DayEntry,
+  type FoodUse,
   type ISODate,
+  type MeasureKey,
+  type MeasureValues,
   type Op,
 } from '@legko/shared';
-import type { FoodAdd } from '@/features/food';
+import { insertEstimate, type FoodAdd } from '@/features/food';
 import type { SheetMode, SheetPatch } from '@/store/ui';
-import { latestWeight } from '../helpers';
-import { kcalError, kgError, measureError, measureValues, type MeasureError, type MeasureTexts } from '../validation';
+import { weightBefore } from '../helpers';
+import {
+  FIELD_ERRORS,
+  kcalError,
+  kgError,
+  MEASURE_KEYS,
+  measureError,
+  textError,
+  type MeasureError,
+  type MeasureTexts,
+} from '../validation';
 
 export type RecordMode = Extract<SheetMode, 'day' | 'weight' | 'measure'>;
 
@@ -46,17 +61,18 @@ export interface RecordDraft extends MeasureTexts {
   photos: string[];
   /** «65,4» */
   weight: string;
+  /** «Часті страви» usage of the meals added in this sheet; recorded only when the day is saved. */
+  foodUses: FoodUse[];
 }
 
 /**
- * Port of `openSheet()`: the day entry, weigh-in and measurements of `date`; the weight sheet
- * pre-fills the latest weigh-in when the date has none; then the patch (e.g. `trained: true`).
+ * Port of `openSheet()`: the day entry, weigh-in and measurements of `date`; on a day without a
+ * weigh-in the weight sheet offers the one before that day; then the patch (e.g. `trained: true`).
  */
 export function initRecordDraft(data: AppData, date: ISODate, mode: RecordMode, patch?: SheetPatch): RecordDraft {
   const e = data.days[date];
   const w = data.weights.find((x) => x.date === date);
   const m = data.measures.find((x) => x.date === date);
-  const lastW = latestWeight(data);
   const draft: RecordDraft = {
     food: e?.food ?? '',
     kcal: str(e?.kcal),
@@ -64,10 +80,11 @@ export function initRecordDraft(data: AppData, date: ISODate, mode: RecordMode, 
     types: [...(e?.types ?? [])],
     notes: e?.notes ?? '',
     photos: [...(e?.photos ?? [])],
-    weight: w ? str(w.kg) : mode === 'weight' && lastW != null ? str(lastW) : '',
+    weight: w ? str(w.kg) : mode === 'weight' ? str(weightBefore(data, date)) : '',
     chest: str(m?.chest),
     waist: str(m?.waist),
     hips: str(m?.hips),
+    foodUses: [],
   };
   if (patch?.trained !== undefined) draft.trained = patch.trained;
   return draft;
@@ -76,19 +93,22 @@ export function initRecordDraft(data: AppData, date: ISODate, mode: RecordMode, 
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
+type DayField = 'food' | 'kcal' | 'trained' | 'types' | 'notes' | 'photos';
+const DAY_FIELDS: readonly DayField[] = ['food', 'kcal', 'trained', 'types', 'notes', 'photos'];
+
+function fieldChanged(a: RecordDraft, b: RecordDraft, key: DayField | 'weight' | MeasureKey): boolean {
+  const x = a[key];
+  const y = b[key];
+  return Array.isArray(x) && Array.isArray(y) ? !sameList(x, y) : x !== y;
+}
+
 /** Whether the draft differs from what was loaded (`baseline` = the draft without the open patch). */
 export function isRecordDirty(baseline: RecordDraft, draft: RecordDraft): boolean {
   return (
-    baseline.food !== draft.food ||
-    baseline.kcal !== draft.kcal ||
-    baseline.trained !== draft.trained ||
-    !sameList(baseline.types, draft.types) ||
-    baseline.notes !== draft.notes ||
-    !sameList(baseline.photos, draft.photos) ||
-    baseline.weight !== draft.weight ||
-    baseline.chest !== draft.chest ||
-    baseline.waist !== draft.waist ||
-    baseline.hips !== draft.hips
+    DAY_FIELDS.some((k) => fieldChanged(baseline, draft, k)) ||
+    fieldChanged(baseline, draft, 'weight') ||
+    MEASURE_KEYS.some((k) => fieldChanged(baseline, draft, k)) ||
+    baseline.foodUses.length !== draft.foodUses.length
   );
 }
 
@@ -96,23 +116,35 @@ export interface RecordErrors {
   kcal?: string;
   weight?: string;
   measure: MeasureError;
+  food?: string;
+  notes?: string;
+  types?: string;
 }
 
-/** Validates only the blocks the mode shows. */
+/** Validates only the blocks the mode shows, against the limits the server enforces. */
 export function validateRecord(draft: RecordDraft, mode: RecordMode): RecordErrors {
   const show = recordSections(mode);
   return {
     kcal: show.day ? kcalError(draft.kcal) : undefined,
     weight: show.weight ? kgError(draft.weight) : undefined,
     measure: show.measure ? measureError(draft) : { message: undefined, invalid: [] },
+    food: show.day ? textError(draft.food) : undefined,
+    notes: show.day ? textError(draft.notes) : undefined,
+    // Types are dropped unless trained, so only then do they count.
+    types: show.day && draft.trained === true && draft.types.length > LIMITS.types ? FIELD_ERRORS.types : undefined,
   };
 }
 
 export const hasRecordErrors = (e: RecordErrors): boolean =>
-  e.kcal !== undefined || e.weight !== undefined || e.measure.message !== undefined;
+  e.kcal !== undefined ||
+  e.weight !== undefined ||
+  e.measure.message !== undefined ||
+  e.food !== undefined ||
+  e.notes !== undefined ||
+  e.types !== undefined;
 
 /** The day entry the draft describes (`types` only when trained, photos only when there are some). */
-export function draftDayEntry(draft: RecordDraft): DayEntry {
+export function draftDayEntry(draft: Pick<RecordDraft, DayField>): DayEntry {
   const entry: DayEntry = {
     food: draft.food.trim(),
     kcal: num(draft.kcal),
@@ -124,27 +156,80 @@ export function draftDayEntry(draft: RecordDraft): DayEntry {
   return entry;
 }
 
+const sameDay = (a: DayEntry, b: DayEntry): boolean =>
+  a.food === b.food &&
+  a.kcal === b.kcal &&
+  a.trained === b.trained &&
+  sameList(a.types, b.types) &&
+  a.notes === b.notes &&
+  sameList(a.photos ?? [], b.photos ?? []);
+
+const sameMeasure = (a: MeasureValues, b: MeasureValues): boolean => MEASURE_KEYS.every((k) => a[k] === b[k]);
+
+export interface RecordSave {
+  /** What the sheet loaded (with the weight sheet's pre-fill, without the open patch). */
+  baseline: RecordDraft;
+  draft: RecordDraft;
+  /** The store at save time; it may have been refreshed from the server since the sheet opened. */
+  data: AppData;
+  date: ISODate;
+  mode: RecordMode;
+}
+
 /**
- * Port of `save()`: day mode → the day (or its removal) + weigh-in (set or delete) + measurements
- * (set or delete); weight mode → weigh-in only; measure mode → measurements only.
+ * Port of `save()`, written per field: whatever she changed in this sheet wins, everything else
+ * keeps what is stored *now*, and a section is written only when the result differs from the
+ * store. So a day saved on a stale device never deletes a weigh-in or measurements recorded
+ * elsewhere, nor rewrites the day's other fields. The weigh-in sheet always records its value
+ * (the offered weight means «this is the weight of that day»).
  */
-export function recordOps(draft: RecordDraft, date: ISODate, mode: RecordMode): Op[] {
+export function recordOps({ baseline, draft, data, date, mode }: RecordSave): Op[] {
   const show = recordSections(mode);
+  // What is stored for the date right now, as input text (no pre-fill, no patch).
+  const stored = initRecordDraft(data, date, 'day');
+  const changed = (k: DayField | 'weight' | MeasureKey): boolean => fieldChanged(baseline, draft, k);
   const ops: Op[] = [];
+
   if (show.day) {
-    const value = draftDayEntry(draft);
-    ops.push(isEmptyDay(value) ? { kind: 'day.delete', date } : { kind: 'day.put', date, value });
+    const merged: Pick<RecordDraft, DayField> = {
+      food: changed('food') ? draft.food : stored.food,
+      kcal: changed('kcal') ? draft.kcal : stored.kcal,
+      trained: changed('trained') ? draft.trained : stored.trained,
+      types: changed('types') ? draft.types : stored.types,
+      notes: changed('notes') ? draft.notes : stored.notes,
+      photos: changed('photos') ? draft.photos : stored.photos,
+    };
+    const value = draftDayEntry(merged);
+    if (!sameDay(value, draftDayEntry(stored))) {
+      ops.push(isEmptyDay(value) ? { kind: 'day.delete', date } : { kind: 'day.put', date, value });
+    }
   }
+
   if (show.weight) {
-    const kg = num(draft.weight);
-    ops.push(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
+    const storedKg = num(stored.weight);
+    const kg = mode === 'weight' || changed('weight') ? num(draft.weight) : storedKg;
+    if (kg !== storedKg) ops.push(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
   }
+
   if (show.measure) {
-    const value = measureValues(draft);
-    const empty = value.chest == null && value.waist == null && value.hips == null;
-    ops.push(empty ? { kind: 'measure.delete', date } : { kind: 'measure.put', date, value });
+    const pick = (k: MeasureKey): number | null => num(changed(k) ? draft[k] : stored[k]);
+    const value: MeasureValues = { chest: pick('chest'), waist: pick('waist'), hips: pick('hips') };
+    const before: MeasureValues = { chest: num(stored.chest), waist: num(stored.waist), hips: num(stored.hips) };
+    if (!sameMeasure(value, before)) {
+      ops.push(isEmptyMeasure(value) ? { kind: 'measure.delete', date } : { kind: 'measure.put', date, value });
+    }
   }
   return ops;
+}
+
+/**
+ * `food.use` for the meals added in this sheet, saved together with the day. A use the server
+ * would refuse (e.g. an over-long dish name) is left out rather than blocking the whole save.
+ */
+export function foodUseOps(draft: RecordDraft, date: ISODate): Op[] {
+  return draft.foodUses
+    .map((value): Op => ({ kind: 'food.use', date, value }))
+    .filter((op) => opSchema.safeParse(op).success);
 }
 
 // ---- workout types --------------------------------------------------------------------------
@@ -156,8 +241,10 @@ export function typeChoices(customTypes: readonly string[], selected: readonly s
   return normalizeTypeNames([...WORKOUT_TYPES, ...customTypes, ...selected]);
 }
 
+/** Selects or deselects a chip; never more than `LIMITS.types` at once. */
 export function toggleType(selected: readonly string[], type: string): string[] {
-  return selected.includes(type) ? selected.filter((t) => t !== type) : [...selected, type];
+  if (selected.includes(type)) return selected.filter((t) => t !== type);
+  return selected.length >= LIMITS.types ? [...selected] : [...selected, type];
 }
 
 export interface CustomTypeResult {
@@ -191,17 +278,20 @@ export function addCustomType(
 
 // ---- food assist ----------------------------------------------------------------------------
 
-/** «Додати» from FoodAssist: append the line, add the kcal, attach the photo (max 12 per day). */
+/**
+ * «Додати» from FoodAssist (an estimate or a «Часті страви» chip): the line replaces the meal
+ * text it was estimated from (or is appended on a new line), the kcal are added, the photo is
+ * attached (max 12 per day) and the dish usage waits for «Зберегти».
+ */
 export function applyFoodAdd(draft: RecordDraft, add: FoodAdd): RecordDraft {
-  const base = draft.food.replace(/\s+$/, '');
   const line = add.line.trim();
-  const food = !line ? draft.food : base ? `${base}\n${line}` : line;
+  const food = line ? insertEstimate(draft.food, line, add.consumed) : draft.food;
   const kcal = String((num(draft.kcal) ?? 0) + Math.max(0, Math.round(add.kcal)));
   const photos =
     add.photoId && !draft.photos.includes(add.photoId) && draft.photos.length < LIMITS.photosPerDay
       ? [...draft.photos, add.photoId]
       : draft.photos;
-  return { ...draft, food, kcal, photos };
+  return { ...draft, food, kcal, photos, foodUses: [...draft.foodUses, ...add.uses] };
 }
 
 export const removePhoto = (draft: RecordDraft, id: string): RecordDraft => ({

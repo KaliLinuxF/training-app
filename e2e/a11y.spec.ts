@@ -91,9 +91,9 @@ test.describe('iPhone ergonomics', () => {
     expect(below44(sizes)).toEqual([]);
   });
 
-  // FIXME(app finding «Tap targets below 44 px on iPhone»): SPEC §2 asks for tap targets ≥ 44px;
-  // these controls are 38–40px tall with no tap-area extension.
-  test.fixme('every control meets the 44px tap target', async ({ app, page }) => {
+  // 40px controls (small buttons, segments, the sheet ✕) grow their hit area invisibly with ::after,
+  // weekday buttons reach into the gaps of their 7-column row; «Історія калорій» rows are 44px tall.
+  test('every control meets the 44px tap target', async ({ app, page }) => {
     await mockFood(page);
     await app.goto('/');
     const sizes: Record<string, string> = {
@@ -111,6 +111,31 @@ test.describe('iPhone ergonomics', () => {
     );
     await app.goto('/reminders');
     sizes['theme segment «Авто»'] = await hitArea(page.getByRole('radio', { name: 'Авто' }));
+    sizes['workout weekday «Пн»'] = await hitArea(page.getByRole('button', { name: 'Понеділок' }).first());
     expect(below44(sizes)).toEqual([]);
+  });
+
+  test.describe('landscape', () => {
+    // Plus / Pro Max in landscape: wider than the 900px desktop breakpoint, but a touch screen.
+    test.use({ viewport: { width: 932, height: 430 }, screen: { width: 932, height: 430 } });
+
+    test('a phone in landscape keeps the phone shell: tab bar and bottom sheets', async ({ app, page }) => {
+      await app.goto('/');
+      expect(await page.evaluate(() => window.innerWidth)).toBeGreaterThanOrEqual(900);
+      // Tab bar «+» («Записати день»), not the sidebar's «+ Записати день».
+      await expect(page.getByRole('button', { name: 'Записати день', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: '+ Записати день', exact: true })).toHaveCount(0);
+
+      await app.recordButton().click();
+      const sheet = app.sheet('Запис дня');
+      await expect(sheet).toBeVisible();
+      // Bottom sheet (≤ 440px wide, docked to the bottom), not the centred 560px desktop modal.
+      await expect
+        .poll(async () => {
+          const box = await sheet.boundingBox();
+          return box && { narrow: box.width <= 440, bottom: Math.round(box.y + box.height) };
+        })
+        .toEqual({ narrow: true, bottom: 430 });
+    });
   });
 });

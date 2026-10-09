@@ -67,6 +67,14 @@
   color: var(--muted);
 }
 
+/* Why the last estimate failed (same look as the sheet's field errors). */
+.error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--accD);
+}
+
 .composer {
   display: flex;
   flex-direction: column;
@@ -80,7 +88,8 @@
 }
 
 .composer:focus-within {
-  border-color: var(--acc);
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .composerInput {
@@ -139,7 +148,10 @@
   }
 }
 
-/* Nothing to show (AI off, no frequent dishes): take no space in the sheet's field. */
-.root:empty {
+/*
+ * Nothing to show (AI off, no frequent dishes): take no space in the sheet's field. `.live` is the
+ * visually hidden status region, always rendered so that announcements are read out.
+ */
+.root:has(> .live:only-child) {
   display: none;
 }

@@ -1,9 +1,10 @@
-import type { MeasureKey } from '@legko/shared';
+import { GOAL_LIMITS, type MeasureKey } from '@legko/shared';
+import { useState } from 'react';
 import { useToday } from '@/lib/useToday';
 import { commit, useAppData } from '@/store/data';
 import { ui, type SheetState } from '@/store/ui';
-import { Button, Sheet } from '@/ui';
-import { KcalField, MeasureField, WeightField } from '../fields/fields';
+import { Sheet } from '@/ui';
+import { KcalField, MeasureField, SAVE_FAILED, SaveFooter, WeightField } from '../fields/fields';
 import { latestWeight, measurePlaceholders } from '../helpers';
 import { useDraft } from '../useDraft';
 import { useSheetGuard } from '../useSheetGuard';
@@ -28,9 +29,13 @@ export interface SetupSheetProps {
 export function SetupSheet({ state, open }: SetupSheetProps) {
   const data = useAppData();
   const today = useToday();
-  const { draft, baseline, update } = useDraft<SetupDraft>(state.key, () => {
-    const initial = initSetupDraft(data, today);
-    return { baseline: initial, draft: initial };
+  const { draft, dirty, update } = useDraft<SetupDraft>(state.key, {
+    init: () => {
+      const initial = initSetupDraft(data, today);
+      return { baseline: initial, draft: initial };
+    },
+    current: initSetupDraft(data, today),
+    differs: isSetupDirty,
   });
   const set = (patch: Partial<SetupDraft>) => update((d) => ({ ...d, ...patch }));
   const onMeasure = (key: MeasureKey, text: string) =>
@@ -40,14 +45,19 @@ export function SetupSheet({ state, open }: SetupSheetProps) {
       return next;
     });
 
+  // The draft the store refused to save; the message stays until she edits it.
+  const [refused, setRefused] = useState<SetupDraft | null>(null);
   const errors = validateSetup(draft);
   const invalid = hasSetupErrors(errors);
-  const { anchor, close } = useSheetGuard(isSetupDirty(baseline, draft));
+  const { anchor, close } = useSheetGuard(dirty, open);
   const lastW = latestWeight(data);
 
   const start = () => {
     if (!open || invalid) return;
-    commit(...setupOps(draft, data.settings, today));
+    if (!commit(...setupOps(draft, data.settings, today))) {
+      setRefused(draft);
+      return;
+    }
     ui.closeSheet();
     ui.flash('Збережено');
   };
@@ -58,9 +68,7 @@ export function SetupSheet({ state, open }: SetupSheetProps) {
       onClose={close}
       heading={SETUP_HEADING}
       footer={
-        <Button size="lg" fullWidth onClick={start} disabled={invalid}>
-          Почати
-        </Button>
+        <SaveFooter label="Почати" onSave={start} disabled={invalid} error={refused === draft ? SAVE_FAILED : undefined} />
       }
     >
       <span ref={anchor} hidden />
@@ -77,7 +85,8 @@ export function SetupSheet({ state, open }: SetupSheetProps) {
       <WeightField
         label="Цільова вага"
         name="goal"
-        step={0.5}
+        step={GOAL_LIMITS.kg.step}
+        range={GOAL_LIMITS.kg}
         value={draft.goal}
         onChange={(goal) => set({ goal })}
         base={data.settings.goal}
@@ -86,6 +95,7 @@ export function SetupSheet({ state, open }: SetupSheetProps) {
       <KcalField
         label="Калорії на день"
         name="kcalGoal"
+        range={GOAL_LIMITS.kcal}
         value={draft.kcalGoal}
         onChange={(kcalGoal) => set({ kcalGoal })}
         error={errors.kcalGoal}

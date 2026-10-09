@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { setPassword, type ScryptParams } from '../src/auth/password';
-import { createRateLimiter, LOGIN_RATE_LIMIT } from '../src/auth/rateLimit';
 import { createApp } from '../src/http/app';
 import type { AppEnv } from '../src/http/types';
 import { openDatabase } from '../src/db/open';
@@ -112,7 +111,6 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     photosDir,
     food: { estimator, dailyLimit: foodDailyLimit },
     now,
-    loginLimiter: createRateLimiter(LOGIN_RATE_LIMIT),
     version: 'test',
   });
 
@@ -165,4 +163,51 @@ export function fakeJpeg(size: number, fill = 7): Buffer {
   const bytes = Buffer.alloc(size, fill);
   bytes.set([0xff, 0xd8, 0xff, 0xe0]);
   return bytes;
+}
+
+export interface StreamedBody {
+  stream: ReadableStream<Uint8Array>;
+  /** Bytes the server has pulled from the stream so far. */
+  pulled(): number;
+}
+
+/**
+ * A request body of `totalBytes` with no Content-Length (like chunked uploads or HTTP/2 through
+ * Caddy), produced only when the server reads it: shows how much a route buffered.
+ */
+export function streamedBody(totalBytes: number, chunkBytes = 64 * 1024): StreamedBody {
+  let pulled = 0;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        if (pulled >= totalBytes) {
+          controller.close();
+          return;
+        }
+        const size = Math.min(chunkBytes, totalBytes - pulled);
+        pulled += size;
+        controller.enqueue(new Uint8Array(size).fill(0x20));
+      },
+    },
+    // Nothing is pulled ahead of a read.
+    { highWaterMark: 0 },
+  );
+  return { stream, pulled: () => pulled };
+}
+
+/** POSTs a streamed body straight to the app (`call()` always sends strings). */
+export function postStream(
+  server: TestServer,
+  path: string,
+  body: StreamedBody,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  return Promise.resolve(
+    server.app.request(path, {
+      method: 'POST',
+      headers: { Origin: ORIGIN, 'Content-Type': 'application/json', ...headers },
+      body: body.stream,
+      duplex: 'half',
+    }),
+  );
 }

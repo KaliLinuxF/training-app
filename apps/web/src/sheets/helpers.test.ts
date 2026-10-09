@@ -1,7 +1,16 @@
 import { emptyData } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { latestWeight, measurePlaceholders, sheetDateLabels, stepKcal, stepWeight, weightHint } from './helpers';
-import { digitsOnly } from './validation';
+import {
+  latestWeight,
+  measurePlaceholders,
+  sheetDateLabels,
+  stepBaseWeight,
+  stepKcal,
+  stepWeight,
+  weightBefore,
+  weightHint,
+} from './helpers';
+import { digitsOnly, FIELD_ERRORS, textError } from './validation';
 
 describe('sheet helpers', () => {
   const data = emptyData();
@@ -44,5 +53,34 @@ describe('sheet helpers', () => {
     expect(stepKcal('1650', -50)).toBe('1600');
     expect(stepKcal('20', -50)).toBe('0');
     expect(digitsOnly('1 650 ккал')).toBe('1650');
+  });
+
+  it('weigh-in before a date: what the weigh-in sheet offers on a past day without one', () => {
+    expect(weightBefore(data, '2026-10-05')).toBe(65.6);
+    expect(weightBefore(data, '2026-10-10')).toBe(65.6);
+    expect(weightBefore(data, '2026-10-11')).toBe(65.4);
+    expect(weightBefore(data, '2026-09-26')).toBeNull();
+    // ± starts there too; before the first weigh-in, from the latest one.
+    expect(stepBaseWeight(data, '2026-10-05')).toBe(65.6);
+    expect(stepBaseWeight(data, '2026-09-01')).toBe(65.4);
+    expect(stepBaseWeight(emptyData(), '2026-09-01')).toBeNull();
+  });
+
+  it('steppers stay within a range when one is given (the goals)', () => {
+    const kg = { min: 30, max: 200 };
+    expect(stepWeight('30', 60, -0.5, kg)).toBe('30,0');
+    expect(stepWeight('199,8', 60, 0.5, kg)).toBe('200,0');
+    expect(stepWeight('', 60, 0.5, kg)).toBe('60,5');
+    const kcal = { min: 800, max: 5000 };
+    expect(stepKcal('', 50, kcal)).toBe('800');
+    expect(stepKcal('5000', 50, kcal)).toBe('5000');
+    expect(stepKcal('1700', -50, kcal)).toBe('1650');
+  });
+
+  it('free text must fit the server limit once trimmed', () => {
+    expect(textError('а'.repeat(5000))).toBeUndefined();
+    expect(textError(`  ${'а'.repeat(5000)}  `)).toBeUndefined();
+    expect(textError('а'.repeat(5001))).toBe(FIELD_ERRORS.text);
+    expect(FIELD_ERRORS.text).toBe('Задовгий текст — не більше 5 000 символів');
   });
 });

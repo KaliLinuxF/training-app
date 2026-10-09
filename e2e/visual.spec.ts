@@ -63,7 +63,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
         await shot(page, info, '01-login');
         await page.route('**/api/auth/login', (r) =>
-          r.fulfill({ status: 401, json: { error: 'bad_password', message: 'Невірний пароль' } }),
+          r.fulfill({ status: 401, json: { error: 'bad_password', message: 'Неправильний пароль' } }),
         );
         await page.getByLabel('Пароль', { exact: true }).fill('wrong');
         await page.getByRole('button', { name: 'Увійти' }).click();
@@ -185,7 +185,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await setup.getByRole('textbox', { name: 'Цільова вага' }).fill('');
         await shot(page, info, '91-sheet-setup-error');
         await setup.getByRole('textbox', { name: 'Цільова вага' }).fill('60');
-        page.once('dialog', (d) => void d.accept());
         await setup.getByRole('button', { name: 'Закрити' }).click();
         await app.expectSheetClosed();
         await shot(page, info, '92-home-empty', true);

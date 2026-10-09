@@ -44,8 +44,7 @@ test.describe('offline', () => {
     await expect(app.region('Сьогодні')).toContainText('Тренування · Прес');
     await expect(page.getByText(OFFLINE_NOTE)).toBeVisible();
     await app.go('Нагадування');
-    // One save = the day + its (empty) weigh-in and measurements ops.
-    await expect(app.region('Дані')).toContainText(/Офлайн — \d+ змін[аи]? чека(є|ють) на інтернет/);
+    await expect(app.region('Дані')).toContainText('Офлайн — 1 зміна чекає на інтернет');
 
     // Calendar and progress work offline too.
     await app.go('Календар');
@@ -75,8 +74,11 @@ test.describe('offline', () => {
 
     // Logged out (local data wiped) and offline: the login screen says why it cannot sign in.
     await app.go('Нагадування');
-    page.once('dialog', (d) => void d.accept());
     await page.getByRole('button', { name: 'Вийти' }).click();
+    await page
+      .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
+      .getByRole('button', { name: 'Вийти', exact: true })
+      .click();
     await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
     await page.reload();
     await expect(

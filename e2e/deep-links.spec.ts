@@ -59,35 +59,43 @@ test.describe('deep links', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  // FIXME(app bug, see the e2e report «Notification deep link silently discards an unsaved draft»):
-  // `useSheetDeepLinks` calls `ui.openSheet()` directly, bypassing the sheet's discard guard.
-  test.fixme('a notification tap while a draft is open asks before dropping it', async ({ app, page }) => {
+  test('a notification tap while a draft is open asks before dropping it', async ({ app, page }) => {
     await app.goto('/');
     await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
     const day = app.sheet('Запис дня');
-    await day.getByRole('textbox', { name: 'Що я їла' }).fill('Вівсянка з бананом, кава, борщ — ще пишу…');
+    const food = day.getByRole('textbox', { name: 'Що я їла' });
+    await food.fill('Вівсянка з бананом, кава, борщ — ще пишу…');
 
-    let asked = false;
-    page.on('dialog', (d) => {
-      asked = true;
-      void d.dismiss();
-    });
+    // The in-app question (not a native confirm); «Залишитись» keeps the draft.
+    const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
     await page.evaluate(() => history.pushState(null, '', '/?sheet=day&trained=1'));
     await expect(page).toHaveURL(/\/$/);
-    expect(asked).toBe(true);
-    await expect(day.getByRole('textbox', { name: 'Що я їла' })).toHaveValue(
-      'Вівсянка з бананом, кава, борщ — ще пишу…',
-    );
+    await expect(ask).toContainText('Закрити без збереження?');
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
+    await expect(food).toHaveValue('Вівсянка з бананом, кава, борщ — ще пишу…');
+
+    // Agreeing opens the linked sheet; the draft is gone.
+    await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
+    await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await expect(app.sheet('Контрольне зважування')).toBeVisible();
+    await expect(app.sheet('Запис дня')).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test('a notification tap over an untouched sheet just opens the linked one', async ({ app, page }) => {
+    await app.goto('/');
+    await app.quickAction('Заміри').click();
+    await expect(app.sheet('Заміри тіла')).toBeVisible();
+    await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
+    await expect(app.sheet('Контрольне зважування')).toBeVisible();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
   });
 
   test.describe('brand-new account', () => {
     test.use({ seed: 'empty' });
 
-    // FIXME(app bug, see the e2e report «Deep link is replaced by the first-run setup sheet»):
-    // on a fresh device the first shell render already has settled data, so `useSetupAutoOpen`
-    // runs in the same commit as `useSheetDeepLinks` with a stale `sheetOpen === false` and opens
-    // «Налаштування» over the linked sheet — the comment in useSetupAutoOpen.ts promises the opposite.
-    test.fixme('the linked sheet goes first, the first-run setup follows when it closes', async ({ app }) => {
+    test('the linked sheet goes first, the first-run setup follows when it closes', async ({ app }) => {
       await app.goto('/?sheet=weight');
       const weigh = app.sheet('Контрольне зважування');
       await expect(weigh).toBeVisible();

@@ -1,6 +1,6 @@
 /**
  * Web Push on the client. Contract used by the Reminders screen (implemented by the PWA task):
- * - `needs-install` — iPhone in Safari: push only works from the home-screen app (iOS 16.4+).
+ * - `needs-install` — iPhone/iPad in a browser tab: push only works from the home-screen app (iOS 16.4+).
  * - `enabled`       — permission granted and this device is subscribed on the server.
  */
 import { DEFAULT_TIMEZONE } from '@legko/shared';
@@ -69,8 +69,15 @@ async function subscriptionFor(reg: ServiceWorkerRegistration, key: Uint8Array<A
   return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
 }
 
+/**
+ * iPhone/iPad in a browser tab (Safari, or Chrome/Firefox on iOS, all WebKit): push is delivered
+ * only to the home-screen app, whatever push globals the tab happens to expose.
+ */
+const needsInstall = (): boolean => isIOS() && !isStandalone();
+
 export async function getPushStatus(): Promise<PushStatus> {
-  if (!isPushSupported()) return isIOS() && !isStandalone() ? 'needs-install' : 'unsupported';
+  if (needsInstall()) return 'needs-install';
+  if (!isPushSupported()) return 'unsupported';
   if (Notification.permission === 'denied') return 'denied';
   if (Notification.permission === 'granted' && (await currentSubscription())) return 'enabled';
   return 'default';
@@ -82,7 +89,7 @@ export async function getPushStatus(): Promise<PushStatus> {
  * was granted but subscribing or registering on the server failed.
  */
 export async function enablePush(): Promise<PushStatus> {
-  if (!isPushSupported()) return getPushStatus();
+  if (needsInstall() || !isPushSupported()) return getPushStatus();
   // Must run before any other await: iOS shows the prompt only inside the user gesture.
   const permission = await Notification.requestPermission();
   if (permission === 'denied') return 'denied';

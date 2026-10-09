@@ -8,11 +8,15 @@
   border-radius: var(--r16);
   padding: 10px 12px;
   cursor: text;
-  transition: border-color 150ms ease;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .tile:focus-within {
-  border-color: var(--acc);
+  /* 2px focus ring: the border plus a 1px spread, in --focus (≥ 3:1 on card and paper). */
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
 }
 
 .label {
@@ -36,6 +40,11 @@
   outline: none;
   color: var(--ink);
   padding: 0;
+}
+
+/* The previous measurement («74») shown as the placeholder is real information: ≥ 4.5:1, unlike --faint. */
+.previous::placeholder {
+  color: var(--muted);
 }
 
 .input:focus-visible {

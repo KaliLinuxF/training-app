@@ -2,7 +2,7 @@
  * First-run setup sheet: current weight (saved as today's weigh-in), goal weight, daily kcal goal
  * and optional measurements. Saving marks the settings as onboarded.
  */
-import { LIMITS, num, str, type AppData, type ISODate, type Op, type Settings } from '@legko/shared';
+import { GOAL_LIMITS, num, str, type AppData, type ISODate, type Op, type Settings } from '@legko/shared';
 import {
   FIELD_ERRORS,
   kgError,
@@ -50,14 +50,18 @@ export interface SetupErrors {
   measure: MeasureError;
 }
 
+const within = (n: number | null, { min, max }: { min: number; max: number }): boolean =>
+  n != null && n >= min && n <= max;
+
+/** Goals use the same bounds as the «Мої цілі» steppers (`GOAL_LIMITS`), narrower than the data limits. */
 function goalError(text: string): string | undefined {
-  return text.trim() ? kgError(text) : FIELD_ERRORS.goalRequired;
+  if (!text.trim()) return FIELD_ERRORS.goalRequired;
+  return within(num(text), GOAL_LIMITS.kg) ? undefined : FIELD_ERRORS.goal;
 }
 
 function kcalGoalError(text: string): string | undefined {
   if (!text.trim()) return FIELD_ERRORS.kcalGoalRequired;
-  const n = num(text);
-  return n == null || n < LIMITS.goalKcal.min || n > LIMITS.goalKcal.max ? FIELD_ERRORS.kcalGoal : undefined;
+  return within(num(text), GOAL_LIMITS.kcal) ? undefined : FIELD_ERRORS.kcalGoal;
 }
 
 export function validateSetup(draft: SetupDraft): SetupErrors {

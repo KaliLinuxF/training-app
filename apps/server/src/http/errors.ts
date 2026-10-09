@@ -6,7 +6,7 @@ import type { z } from 'zod';
 /** User-facing (Ukrainian) messages; the `error` code is what clients branch on. */
 export const MESSAGES = {
   unauthorized: 'Потрібно увійти',
-  badPassword: 'Невірний пароль',
+  badPassword: 'Неправильний пароль',
   rateLimited: 'Забагато спроб. Спробуй пізніше',
   badJson: 'Некоректний JSON',
   tooLarge: 'Завеликий запит',

@@ -1,11 +1,9 @@
-import { defaultReminders, defaultSettings, emptyData, f0, LIMITS, type Settings } from '@legko/shared';
+import { defaultReminders, defaultSettings, emptyData, f0, GOAL_LIMITS, LIMITS, type Settings } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/lib/api';
 import {
   addCustomType,
   errorText,
-  GOAL_KCAL,
-  GOAL_KG,
   goalRows,
   notifView,
   parseBackup,
@@ -48,15 +46,31 @@ describe('reminder copy', () => {
 });
 
 describe('goals', () => {
-  it('steps and clamps', () => {
-    expect(stepValue(60, 1, GOAL_KG)).toBe(60.5);
-    expect(stepValue(60.1, 1, GOAL_KG)).toBe(60.6);
-    expect(stepValue(30, -1, GOAL_KG)).toBe(30);
-    expect(stepValue(199.8, 1, GOAL_KG)).toBe(200);
-    expect(stepValue(25, 1, GOAL_KG)).toBe(30);
-    expect(stepValue(1700, -1, GOAL_KCAL)).toBe(1650);
-    expect(stepValue(800, -1, GOAL_KCAL)).toBe(800);
-    expect(stepValue(5000, 1, GOAL_KCAL)).toBe(5000);
+  const KG = GOAL_LIMITS.kg;
+  const KCAL = GOAL_LIMITS.kcal;
+
+  it('steps and clamps to the shared goal limits', () => {
+    expect(KG).toEqual({ min: 30, max: 200, step: 0.5 });
+    expect(KCAL).toEqual({ min: 800, max: 5000, step: 50 });
+    expect(stepValue(60, 1, KG)).toBe(60.5);
+    expect(stepValue(60.1, 1, KG)).toBe(60.6);
+    expect(stepValue(30, -1, KG)).toBe(30);
+    expect(stepValue(199.8, 1, KG)).toBe(200);
+    expect(stepValue(30.2, -1, KG)).toBe(30);
+    expect(stepValue(1700, -1, KCAL)).toBe(1650);
+    expect(stepValue(800, -1, KCAL)).toBe(800);
+    expect(stepValue(5000, 1, KCAL)).toBe(5000);
+  });
+
+  it('moves a value from outside the limits one ordinary step towards them, never jumping', () => {
+    expect(stepValue(25, 1, KG)).toBe(25.5);
+    expect(stepValue(25, -1, KG)).toBe(25);
+    expect(stepValue(250, -1, KG)).toBe(249.5);
+    expect(stepValue(250, 1, KG)).toBe(250);
+    expect(stepValue(6000, -1, KCAL)).toBe(5950);
+    expect(stepValue(6000, 1, KCAL)).toBe(6000);
+    expect(stepValue(500, 1, KCAL)).toBe(550);
+    expect(stepValue(500, -1, KCAL)).toBe(500);
   });
 
   it('formats the rows like the prototype', () => {
@@ -72,6 +86,15 @@ describe('goals', () => {
     expect(kg?.canDecrement).toBe(false);
     expect(kg?.canIncrement).toBe(true);
     expect(kcal?.canIncrement).toBe(false);
+  });
+
+  it('offers only the way back into the limits for a goal outside them', () => {
+    const outside = settings({ goal: 25, kcalGoal: 6000 });
+    const [kg, kcal] = goalRows(outside);
+    expect(kg).toMatchObject({ canDecrement: false, canIncrement: true });
+    expect(kcal).toMatchObject({ canDecrement: true, canIncrement: false });
+    expect(stepGoal(outside, 'kcalGoal', -1).kcalGoal).toBe(5950);
+    expect(stepGoal(outside, 'goal', 1).goal).toBe(25.5);
   });
 
   it('updates settings immutably', () => {
@@ -99,7 +122,7 @@ describe('notifications panel', () => {
     });
     expect(notifView('needs-install')).toMatchObject({
       sub: 'На iPhone нагадування працюють, коли Легко додано на початковий екран',
-      cta: 'Як увімкнути',
+      cta: 'Як?',
       action: 'install',
       disabled: false,
     });

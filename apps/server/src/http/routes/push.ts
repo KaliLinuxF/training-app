@@ -8,6 +8,7 @@ import {
 } from '@legko/shared';
 import type { Context, Hono } from 'hono';
 import { TEST_MESSAGE } from '../../push/messages';
+import { BODY_LIMITS, limitBody } from '../bodyLimit';
 import { apiError, badRequest, describeIssue, MESSAGES, readJson } from '../errors';
 import type { AppEnv } from '../types';
 import type { RouteDeps } from './deps';
@@ -26,7 +27,7 @@ export function registerPushRoutes(app: Hono<AppEnv>, { push, data, auth, logger
     return c.json(body);
   });
 
-  app.post(API.pushSubscribe, auth, async (c) => {
+  app.post(API.pushSubscribe, auth, limitBody(BODY_LIMITS.small), async (c) => {
     if (!push) return unavailable(c);
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);
@@ -41,13 +42,14 @@ export function registerPushRoutes(app: Hono<AppEnv>, { push, data, auth, logger
       { endpoint: subscription.endpoint, p256dh: subscription.keys.p256dh, auth: subscription.keys.auth },
       userAgentOf(c),
     );
-    // Reminders fire in the phone's zone: follow it when the device reports a new one.
-    if (timezone && data.setTimezone(timezone))
-      logger.info(`settings.timezone set to ${timezone} by push subscribe`);
+    // Reminders fire in the zone of the device that receives them: follow it when it reports a
+    // different zone (an alias of the stored one, e.g. Europe/Kiev for Europe/Kyiv, is not).
+    const stored = timezone ? data.setTimezone(timezone) : null;
+    if (stored) logger.info(`settings.timezone set to ${stored} by push subscribe`);
     return c.json(OK);
   });
 
-  app.post(API.pushUnsubscribe, auth, async (c) => {
+  app.post(API.pushUnsubscribe, auth, limitBody(BODY_LIMITS.small), async (c) => {
     if (!push) return unavailable(c);
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);

@@ -25,6 +25,9 @@ body {
 
 #root {
   min-height: 100dvh;
+  /* A notched iPhone in landscape: keep the app clear of the Dynamic Island and the rounded corners. */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 
 input,
@@ -40,6 +43,7 @@ button {
   touch-action: manipulation;
 }
 
+/* Decorative («—», «0»); a placeholder that carries real data needs a darker colour (MeasureInputTile). */
 input::placeholder,
 textarea::placeholder {
   color: var(--faint);
@@ -51,7 +55,7 @@ textarea::placeholder {
 }
 
 :focus-visible {
-  outline: 2px solid var(--acc);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
 

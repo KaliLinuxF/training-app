@@ -35,6 +35,10 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # The host has 2 GB: if the app ever runs away with memory, the kernel kills and Docker restarts
+    # it (restart: unless-stopped) instead of the whole box going into swap. Node sizes its heap
+    # from this limit (≈ 260 MB), enough for a 16 MB import.
+    mem_limit: 512m
     cap_drop:
       - ALL
     security_opt:

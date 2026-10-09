@@ -3,7 +3,10 @@ import { useSyncExternalStore } from 'react';
 /** iPhone/iPad, including iPadOS that reports itself as a Mac. */
 export function isIOS(): boolean {
   if (typeof navigator === 'undefined') return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
 }
 
 /** Running as an installed app (home-screen icon), not in a browser tab. */
@@ -15,8 +18,12 @@ export function isStandalone(): boolean {
   );
 }
 
-/** Layout breakpoint: sidebar + two columns at or above this width, tab bar below it. */
-export const DESKTOP_QUERY = '(min-width: 900px)';
+/**
+ * Desktop shell (sidebar + two columns): wide enough AND a mouse/trackpad. Width alone is not enough —
+ * a Plus/Pro Max iPhone in landscape is 932–956px wide but must keep the phone shell (tab bar, bottom sheets).
+ * A CSS media query that switches to the desktop layout (ContentGrid) must use the same condition.
+ */
+export const DESKTOP_QUERY = '(min-width: 900px) and (hover: hover) and (pointer: fine)';
 
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(

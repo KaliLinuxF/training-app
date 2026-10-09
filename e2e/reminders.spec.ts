@@ -1,4 +1,5 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import type { App } from './support/app';
 import { expect, test } from './support/test';
 
 /** A «label — value» row of the Home control card (the label span and its row). */
@@ -161,13 +162,109 @@ test.describe('reminders & settings', () => {
     const sheet = app.sheet('Запис дня');
     await sheet.getByRole('button', { name: 'Було', exact: true }).click();
     await expect(sheet.getByRole('button', { name: 'Пілатес', exact: true })).toBeVisible();
-    // «Було» is an unsaved change: Escape asks before closing.
-    page.once('dialog', (d) => void d.accept());
+    // «Було» is an unsaved change: Escape asks (in the app's own dialog) before closing.
     await page.keyboard.press('Escape');
+    await page
+      .getByRole('alertdialog', { name: 'Є незбережені зміни' })
+      .getByRole('button', { name: 'Закрити', exact: true })
+      .click();
     await app.expectSheetClosed();
 
     await types.getByRole('button', { name: 'Видалити «Пілатес»' }).click();
     await expect(types.getByText('Пілатес')).toHaveCount(0);
     await expect.poll(async () => (await server.getData()).settings.customTypes).toEqual([]);
+  });
+
+  test('a goal outside the stepper range moves one ordinary step back, without a jump', async ({
+    app,
+    server,
+  }) => {
+    // Older data or a restored backup can hold a goal outside the steppers' 800–5000 kcal / 30–200 kg.
+    const data = await server.getData();
+    await server.importData({ ...data, settings: { ...data.settings, goal: 25, kcalGoal: 6000 } });
+    await app.goto('/reminders');
+    const goals = app.region('Мої цілі');
+    const kcal = goals.getByRole('group', { name: 'Калорії на день' });
+    const goal = goals.getByRole('group', { name: 'Цільова вага' });
+    await expect(kcal.locator('output')).toHaveText('6 000 ккал');
+    await expect(kcal.getByRole('button', { name: 'Збільшити калорії на день' })).toBeDisabled();
+    await kcal.getByRole('button', { name: 'Зменшити калорії на день' }).click();
+    await expect(kcal.locator('output')).toHaveText('5 950 ккал');
+
+    await expect(goal.getByRole('button', { name: 'Зменшити цільову вагу' })).toBeDisabled();
+    await goal.getByRole('button', { name: 'Збільшити цільову вагу' }).click();
+    await expect(goal.locator('output')).toHaveText('25,5 кг');
+    await expect
+      .poll(async () => {
+        const { goal: g, kcalGoal } = (await server.getData()).settings;
+        return { g, kcalGoal };
+      })
+      .toEqual({ g: 25.5, kcalGoal: 5950 });
+  });
+});
+
+test.describe('reminders layout', () => {
+  /** Right edge of the card's content box (inside the 18px padding and the 1px border). */
+  const innerRight = async (card: Locator) => {
+    const box = await card.boundingBox();
+    if (!box) throw new Error('card is not visible');
+    return box.x + box.width - 19;
+  };
+
+  const expectStepperInside = async (app: App, at: string) => {
+    const goals = app.region('Мої цілі');
+    const right = await innerRight(goals);
+    for (const name of ['Збільшити цільову вагу', 'Збільшити калорії на день']) {
+      const box = await goals.getByRole('button', { name }).boundingBox();
+      if (!box) throw new Error(`«${name}» is not visible @${at}`);
+      expect(box.x + box.width, `«${name}» @${at}`).toBeLessThanOrEqual(right + 0.5);
+    }
+  };
+
+  /** Text taller than ~1.5 font sizes has wrapped onto a second line. */
+  const lines = (el: Element) => {
+    const fontSize = parseFloat(getComputedStyle(el).fontSize);
+    return Math.round(el.getBoundingClientRect().height / (fontSize * 1.25));
+  };
+
+  test('on a 320px phone the goal steppers stay inside their card and the panel title on one line', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone widths');
+    await page.setViewportSize({ width: 320, height: 700 });
+    await app.goto('/reminders');
+    await expectStepperInside(app, '320px');
+
+    // iPhone Safari tab: the panel explains the home-screen install.
+    const panel = app.region('Сповіщення на телефон');
+    const title = panel.getByRole('heading', { name: 'Сповіщення на телефон' });
+    expect(await title.evaluate(lines)).toBe(1);
+    await panel.getByRole('button', { name: 'Як?' }).click();
+    await expect(app.sheet('Встановлення на iPhone')).toBeVisible();
+  });
+
+  test('on her iPhone (390px) the panel keeps the prototype row: title on one line, «Як?» beside it', async ({
+    app,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone widths');
+    await app.goto('/reminders');
+    const panel = app.region('Сповіщення на телефон');
+    const title = panel.getByRole('heading', { name: 'Сповіщення на телефон' });
+    const cta = panel.getByRole('button', { name: 'Як?' });
+    expect(await title.evaluate(lines)).toBe(1);
+    const [titleBox, ctaBox] = await Promise.all([title.boundingBox(), cta.boundingBox()]);
+    if (!titleBox || !ctaBox) throw new Error('panel is not visible');
+    expect(ctaBox.x).toBeGreaterThan(titleBox.x + titleBox.width);
+    await expectStepperInside(app, '390px');
+  });
+
+  test('in a narrow desktop window the goal steppers stay inside their column', async ({ app, page }, info) => {
+    test.skip(info.project.name !== 'desktop', 'desktop shell only');
+    for (const width of [900, 960, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await app.goto('/reminders');
+      await expectStepperInside(app, `${width}px`);
+    }
   });
 });
