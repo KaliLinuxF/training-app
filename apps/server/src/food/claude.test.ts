@@ -14,11 +14,15 @@ import { describe, expect, it } from 'vitest';
 import { createLogger, type Logger } from '../logger';
 import {
   buildEstimateRequest,
+  buildRecalcRequest,
   createAnthropicClient,
   createClaudeEstimator,
   FALLBACK_BETA,
   MAX_TOKENS,
   readEstimateResponse,
+  readRecalcResponse,
+  RECALC_SYSTEM_PROMPT,
+  recalcList,
   REQUEST_TIMEOUT_MS,
   SYSTEM_PROMPT,
   toFoodAiError,
@@ -26,7 +30,7 @@ import {
   type EstimateRequest,
   type FoodAiClient,
 } from './claude';
-import { FoodAiError, type FoodEstimateInput, type RawEstimate } from './estimator';
+import { FoodAiError, type FoodEstimateInput, type FoodRecalcInput, type RawEstimate } from './estimator';
 
 const MODEL = 'claude-opus-5-5';
 const API_KEY = 'sk-ant-test-not-a-real-key';
@@ -35,6 +39,15 @@ const TEXT = 'вівсянка з бананом, кава з молоком';
 
 const textInput: FoodEstimateInput = { text: TEXT, imageBase64: null };
 const photoInput: FoodEstimateInput = { text: '', imageBase64: IMAGE };
+
+/** What she corrected on the result card: the oatmeal is on milk and bigger, the coffee has no portion. */
+const CORRECTED = [
+  { name: 'Вівсянка на молоці з бананом', portion: '300 г' },
+  { name: 'Кава з молоком', portion: '' },
+];
+const CORRECTED_LIST = '1. Вівсянка на молоці з бананом — 300 г\n2. Кава з молоком';
+const recalcInput: FoodRecalcInput = { items: CORRECTED, imageBase64: null };
+const recalcPhotoInput: FoodRecalcInput = { items: CORRECTED, imageBase64: IMAGE };
 
 const output: RawEstimate = {
   items: [
@@ -232,6 +245,89 @@ describe('readEstimateResponse', () => {
   });
 });
 
+describe('buildRecalcRequest', () => {
+  it('uses the estimate settings and output schema, with the recalculation system prompt', () => {
+    const req = buildRecalcRequest(recalcInput, MODEL);
+    const base = buildEstimateRequest(textInput, MODEL);
+    expect(req).toEqual({ ...base, system: RECALC_SYSTEM_PROMPT, messages: req.messages });
+    expect(req.output_config).toEqual({ effort: 'low', format: base.output_config.format });
+    expect(req).toMatchObject({ betas: [FALLBACK_BETA], fallbacks: 'default', max_tokens: MAX_TOKENS });
+    for (const key of ['thinking', 'temperature', 'top_p', 'top_k', 'tool_choice', 'tools', 'stream']) {
+      expect(req, key).not.toHaveProperty(key);
+    }
+  });
+
+  it('lists her items as a numbered list «1. name — portion» in one text block without a photo', () => {
+    const [msg, ...rest] = buildRecalcRequest(recalcInput, MODEL).messages;
+    expect(rest).toEqual([]);
+    expect(msg?.role).toBe('user');
+    expect(msg?.content).toEqual([
+      { type: 'text', text: `My corrected items:\n<items>\n${CORRECTED_LIST}\n</items>` },
+    ]);
+  });
+
+  it('sends the stored photo as an image block before the list when there is one', () => {
+    expect(buildRecalcRequest(recalcPhotoInput, MODEL).messages[0]?.content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: IMAGE } },
+      {
+        type: 'text',
+        text: `A photo of what I ate. My corrected items:\n<items>\n${CORRECTED_LIST}\n</items>`,
+      },
+    ]);
+  });
+
+  it('keeps one line per item, numbered in order', () => {
+    expect(
+      recalcList([
+        { name: 'Сирники\nзі сметаною', portion: '3 шт.\t(≈ 250 г)' },
+        { name: ' Чай ', portion: '   ' },
+      ]),
+    ).toBe('1. Сирники зі сметаною — 3 шт. (≈ 250 г)\n2. Чай');
+    const thirty = Array.from({ length: 30 }, (_, i) => ({ name: `Страва ${i + 1}`, portion: '100 г' }));
+    const lines = recalcList(thirty).split('\n');
+    expect(lines).toHaveLength(30);
+    expect(lines[29]).toBe('30. Страва 30 — 100 г');
+  });
+
+  it('has a stable prompt that makes her names and portions authoritative', () => {
+    const prompts = new Set(
+      [recalcInput, recalcPhotoInput, { items: [{ name: 'Борщ', portion: '' }], imageBase64: null }].map(
+        (input) => buildRecalcRequest(input, MODEL).system,
+      ),
+    );
+    expect([...prompts]).toEqual([RECALC_SYSTEM_PROMPT]);
+    expect(RECALC_SYSTEM_PROMPT.startsWith(SYSTEM_PROMPT)).toBe(true);
+    for (const phrase of [
+      'corrected the items herself',
+      'exactly one item for each numbered line, in the same order',
+      'name and portion copied unchanged',
+      'Never rename, merge, split, reorder, drop or add items',
+      'exactly that food in exactly that portion',
+      'use it only to understand how the food was prepared: oil, butter, sauces, dressing, cooking method',
+    ]) {
+      expect(RECALC_SYSTEM_PROMPT).toContain(phrase);
+    }
+    expect(SYSTEM_PROMPT).not.toContain('Recalculation');
+    expect(buildEstimateRequest(photoInput, MODEL).system).toBe(SYSTEM_PROMPT);
+  });
+});
+
+describe('readRecalcResponse', () => {
+  it('returns one kcal per sent item, by index', () => {
+    expect(readRecalcResponse(message(), 2)).toEqual({ kcal: [320, 60], comment: '' });
+  });
+
+  it('fails with ai_failed when the model returns a different number of items', () => {
+    expect(() => readRecalcResponse(message(), 3)).toThrow(FoodAiError);
+    expect(() => readRecalcResponse(message(), 1)).toThrow(/model returned 2 items for 1/);
+  });
+
+  it('checks stop_reason first', () => {
+    expect(() => readRecalcResponse(message({ stop_reason: 'max_tokens' }), 2)).toThrow(/max_tokens/);
+    expect(() => readRecalcResponse(message({ parsed_output: null }), 2)).toThrow(FoodAiError);
+  });
+});
+
 describe('toFoodAiError (typed SDK errors)', () => {
   it.each([
     [
@@ -335,6 +431,48 @@ describe('createClaudeEstimator (fake client)', () => {
     const { client } = fakeClient(() => message({ stop_reason: 'refusal', parsed_output: null }));
     const estimator = createClaudeEstimator({ apiKey: API_KEY, model: MODEL, client });
     await expect(estimator.estimate(textInput)).rejects.toMatchObject({ code: 'ai_failed' });
+    await expect(estimator.recalculate(recalcInput)).rejects.toMatchObject({ code: 'ai_failed' });
+  });
+
+  it('recalculates with the recalculation request and returns one kcal per sent item', async () => {
+    const { client, calls } = fakeClient(() => message());
+    const estimator = createClaudeEstimator({ apiKey: API_KEY, model: 'claude-test-model', client });
+    expect(await estimator.recalculate(recalcPhotoInput)).toEqual({ kcal: [320, 60], comment: '' });
+    expect(await estimator.recalculate(recalcInput)).toEqual({ kcal: [320, 60], comment: '' });
+    expect(calls).toEqual([
+      buildRecalcRequest(recalcPhotoInput, 'claude-test-model'),
+      buildRecalcRequest(recalcInput, 'claude-test-model'),
+    ]);
+  });
+
+  it('rejects a recalculation with a different number of items, logging counts only', async () => {
+    const logger = captureLogger();
+    const { client } = fakeClient(() => message());
+    const estimator = createClaudeEstimator({ apiKey: API_KEY, model: MODEL, client, logger });
+    const three: FoodRecalcInput = {
+      items: [...CORRECTED, { name: 'Мед', portion: '1 ч. л.' }],
+      imageBase64: IMAGE,
+    };
+    await expect(estimator.recalculate(three)).rejects.toMatchObject({
+      code: 'ai_failed',
+      reason: 'model returned 2 items for 3',
+    });
+    expect(logger.lines.filter((l) => l.includes('food recalculation failed'))).toHaveLength(1);
+    for (const line of logger.lines) {
+      expect(line).not.toContain(IMAGE);
+      for (const { name } of three.items) expect(line).not.toContain(name);
+    }
+  });
+
+  it('a rejected key is logged once across estimates and recalculations', async () => {
+    const logger = captureLogger();
+    const { client } = fakeClient(() => {
+      throw new AuthenticationError(401, apiError(401, 'authentication_error'), undefined, headers);
+    });
+    const estimator = createClaudeEstimator({ apiKey: API_KEY, model: MODEL, client, logger });
+    await expect(estimator.estimate(textInput)).rejects.toMatchObject({ code: 'ai_unavailable' });
+    await expect(estimator.recalculate(recalcInput)).rejects.toMatchObject({ code: 'ai_unavailable' });
+    expect(logger.lines.filter((l) => l.includes('Anthropic key rejected'))).toHaveLength(1);
   });
 });
 
@@ -399,6 +537,35 @@ describe('with the real SDK client and a fake fetch (no network)', () => {
     expect(req?.body).not.toHaveProperty('temperature');
     const [first] = req?.body.messages as { content: { type: string }[] }[];
     expect(first?.content.map((b) => b.type)).toEqual(['image', 'text']);
+  });
+
+  it('serialises a recalculation with the photo and her numbered list, and reads kcal by index', async () => {
+    const reply = {
+      items: [
+        { name: 'Вівсянка з бананом', portion: '300 г', kcal: 395.4 },
+        { name: 'Кава', portion: '1 чашка', kcal: 45 },
+      ],
+      comment: 'Молоко у вівсянці враховано',
+    };
+    const { client, captured } = sdkWith(() => jsonResponse(200, apiMessage(JSON.stringify(reply))));
+    const estimator = createClaudeEstimator({ apiKey: API_KEY, model: MODEL, client });
+    expect(await estimator.recalculate(recalcPhotoInput)).toEqual({
+      kcal: [395, 45],
+      comment: 'Молоко у вівсянці враховано',
+    });
+
+    const [req] = captured;
+    expect(req?.headers.get('anthropic-beta')?.split(',')).toContain(FALLBACK_BETA);
+    expect(req?.body).toMatchObject({
+      model: MODEL,
+      max_tokens: 8000,
+      fallbacks: 'default',
+      system: RECALC_SYSTEM_PROMPT,
+      output_config: { effort: 'low', format: { type: 'json_schema' } },
+    });
+    const [first] = req?.body.messages as { content: { type: string; text?: string }[] }[];
+    expect(first?.content.map((b) => b.type)).toEqual(['image', 'text']);
+    expect(first?.content[1]?.text).toContain(CORRECTED_LIST);
   });
 
   it('maps HTTP failures through the typed SDK errors', async () => {

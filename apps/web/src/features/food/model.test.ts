@@ -10,8 +10,6 @@ import {
   COMPOSER_CLOSED,
   composerEdited,
   consumedTail,
-  draftsToItems,
-  draftsTotal,
   emptyEstimateComment,
   estimateItems,
   formatFoodLine,
@@ -19,9 +17,9 @@ import {
   openComposer,
   parseKcal,
   pluralUk,
+  recalculatedMessage,
   remainingHint,
   sanitizeKcalInput,
-  toDrafts,
 } from './model';
 
 const NBSP_GROUP = (1650).toLocaleString('uk-UA').replace(/\d/g, '').charAt(0);
@@ -121,20 +119,6 @@ describe('kcal input', () => {
     expect(parseKcal('320')).toBe(320);
     expect(parseKcal('99999')).toBe(20000);
     expect(parseKcal('3,5')).toBe(35);
-  });
-
-  it('drafts round-trip and total', () => {
-    const drafts = toDrafts([
-      { name: ' Борщ ', portion: '300 г', kcal: 260 },
-      { name: 'Хліб', portion: '', kcal: 160 },
-    ]);
-    expect(drafts.map((d) => d.kcalText)).toEqual(['260', '160']);
-    const edited = [{ ...drafts[0]!, kcalText: '300' }, { ...drafts[1]!, kcalText: '' }];
-    expect(draftsTotal(edited)).toBe(300);
-    expect(draftsToItems(edited)).toEqual([
-      { name: 'Борщ', portion: '300 г', kcal: 300 },
-      { name: 'Хліб', portion: '', kcal: 0 },
-    ]);
   });
 });
 
@@ -239,6 +223,8 @@ describe('copy helpers', () => {
       { name: 'Хліб', portion: '', kcal: 125 },
     ];
     expect(addedMessage({ items: two, kcal: 385 })).toBe('Додано 385 ккал');
+    expect(recalculatedMessage(520)).toBe('Перераховано: разом 520 ккал');
+    expect(recalculatedMessage(1650)).toBe(`Перераховано: разом 1${NBSP_GROUP}650 ккал`);
   });
 
   it('nothing found: the advice fits what was sent', () => {

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   defaultSettings,
+  LIMITS,
   photoIdSchema,
   photoThumbUrl,
   photoUrl,
@@ -15,6 +16,8 @@ import {
   type FoodEstimate,
   type FoodEstimateInput,
   type FoodEstimator,
+  type FoodRecalcInput,
+  type FoodRecalculation,
 } from '../src/food/estimator';
 import { createPhotoStore, PHOTO_GC_GRACE_MS, PHOTO_MAX_BYTES } from '../src/photos/store';
 import { createTestServer, fakeJpeg, json, type TestServerOptions } from './helpers';
@@ -35,15 +38,25 @@ interface FakeEstimator extends FoodEstimator {
   inputs: FoodEstimateInput[];
   /** What the next calls do; default: resolve with `result`. */
   next: (() => FoodEstimate | Promise<FoodEstimate>) | null;
+  recalcInputs: FoodRecalcInput[];
+  /** What the next recalculations do; default: 100, 200, 300… kcal by position. */
+  nextRecalc: ((input: FoodRecalcInput) => FoodRecalculation | Promise<FoodRecalculation>) | null;
 }
 
 function fakeEstimator(): FakeEstimator {
   const fake: FakeEstimator = {
     inputs: [],
     next: null,
+    recalcInputs: [],
+    nextRecalc: null,
     async estimate(input) {
       fake.inputs.push(input);
       return fake.next ? fake.next() : result;
+    },
+    async recalculate(input) {
+      fake.recalcInputs.push(input);
+      if (fake.nextRecalc) return fake.nextRecalc(input);
+      return { kcal: input.items.map((_, i) => 100 * (i + 1)), comment: 'Перераховано' };
     },
   };
   return fake;
@@ -259,6 +272,184 @@ describe('POST /api/food/estimate', () => {
     const res = await estimate({ date: '2026-10-09', text: 'борщ' });
     expect(res.status).toBe(500);
     expect(await json(res)).toMatchObject({ error: 'internal' });
+  });
+});
+
+describe('POST /api/food/estimate (recalculate mode)', () => {
+  const DATE = '2026-10-09';
+  const UNKNOWN_PHOTO = 'AAAAAAAAAAAAAAAAAAAAAA';
+  /** What she corrected on the result card: a different dish and grams, a drink without a portion. */
+  const corrected = [
+    { name: 'Вівсянка на молоці з бананом', portion: '300 г' },
+    { name: 'Кава без цукру', portion: '' },
+  ];
+
+  it('prices her corrected items without a photo and echoes them verbatim, in order', async () => {
+    const { estimate, estimator, photoRows } = await setup();
+    const res = await estimate({
+      date: DATE,
+      items: [
+        { name: '  Вівсянка на молоці з бананом ', portion: ' 300 г ' },
+        { name: 'Кава без цукру', portion: '' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(await json<FoodEstimateResponse>(res)).toEqual({
+      photoId: null,
+      items: [
+        { name: 'Вівсянка на молоці з бананом', portion: '300 г', kcal: 100 },
+        { name: 'Кава без цукру', portion: '', kcal: 200 },
+      ],
+      totalKcal: 300,
+      comment: 'Перераховано',
+    });
+    expect(estimator.recalcInputs).toEqual([{ items: corrected, imageBase64: null }]);
+    expect(estimator.inputs).toHaveLength(0);
+    expect(photoRows()).toBe(0);
+  });
+
+  it('sends the stored photo for context and returns its id without storing it again', async () => {
+    const { estimate, estimator, photosDir, photoRows } = await setup();
+    const id = (await json<FoodEstimateResponse>(await estimate({ date: DATE, image }))).photoId ?? '';
+    expect(photoRows()).toBe(1);
+
+    const res = await estimate({ date: DATE, items: corrected, photoId: id });
+    expect(res.status).toBe(200);
+    const body = await json<FoodEstimateResponse>(res);
+    expect(body.photoId).toBe(id);
+    expect(body.items).toEqual([
+      { ...corrected[0], kcal: 100 },
+      { ...corrected[1], kcal: 200 },
+    ]);
+    expect(estimator.recalcInputs).toEqual([{ items: corrected, imageBase64: image.full }]);
+    expect(photoRows()).toBe(1);
+    expect(readdirSync(photosDir).sort()).toEqual([`${id}.jpg`, `${id}_t.jpg`].sort());
+  });
+
+  it('does not use text: items mean recalculation', async () => {
+    const { estimate, estimator } = await setup();
+    expect((await estimate({ date: DATE, text: 'вівсянка', items: corrected })).status).toBe(200);
+    expect(estimator.recalcInputs).toEqual([{ items: corrected, imageBase64: null }]);
+    expect(estimator.inputs).toHaveLength(0);
+  });
+
+  it('clamps the new kcal to the API limits', async () => {
+    const { estimate, estimator } = await setup();
+    estimator.nextRecalc = () => ({ kcal: [99_999, -40.2], comment: '' });
+    const body = await json<FoodEstimateResponse>(await estimate({ date: DATE, items: corrected }));
+    expect(body.items.map((item) => item.kcal)).toEqual([LIMITS.kcal.max, 0]);
+    expect(body.totalKcal).toBe(LIMITS.kcal.max);
+  });
+
+  it('502 ai_failed when the estimator does not return one kcal per item', async () => {
+    const { estimate, estimator, status } = await setup();
+    for (const kcal of [[300], [300, 50, 10]]) {
+      estimator.nextRecalc = () => ({ kcal, comment: '' });
+      const res = await estimate({ date: DATE, items: corrected });
+      expect(res.status).toBe(502);
+      expect(await json(res)).toEqual({ error: 'ai_failed', message: expect.any(String) });
+    }
+    expect((await status()).remainingToday).toBe(58);
+  });
+
+  it.each([
+    ['ai_unavailable', 503],
+    ['ai_failed', 502],
+  ] as const)('maps FoodAiError %s to %i', async (code, httpStatus) => {
+    const { estimate, estimator } = await setup();
+    estimator.nextRecalc = () => {
+      throw new FoodAiError(code, 'test');
+    };
+    const res = await estimate({ date: DATE, items: corrected });
+    expect(res.status).toBe(httpStatus);
+    expect(await json(res)).toEqual({ error: code, message: expect.any(String) });
+  });
+
+  it('404 not_found JSON for an unknown photo, without calling the model or spending the budget', async () => {
+    const { estimate, estimator, status, photoRows } = await setup();
+    const res = await estimate({ date: DATE, items: corrected, photoId: UNKNOWN_PHOTO });
+    expect(res.status).toBe(404);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    expect(await json(res)).toEqual({ error: 'not_found', message: 'Фото не знайдено' });
+    expect(estimator.recalcInputs).toHaveLength(0);
+    expect(photoRows()).toBe(0);
+    expect((await status()).remainingToday).toBe(60);
+  });
+
+  it('404 once the daily clean-up has removed the photo', async () => {
+    const { s, estimate, photosDir } = await setup();
+    const id = (await json<FoodEstimateResponse>(await estimate({ date: DATE, image }))).photoId ?? '';
+    createPhotoStore(s.db, photosDir).collectGarbage(s.clock.now + PHOTO_GC_GRACE_MS + 1);
+    const res = await estimate({ date: DATE, items: corrected, photoId: id });
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ['items together with a new photo', { items: corrected, image }],
+    ['photoId without items', { text: 'борщ', photoId: UNKNOWN_PHOTO }],
+    ['photoId with a new photo', { image, photoId: UNKNOWN_PHOTO }],
+    ['an empty list', { items: [] }],
+    [
+      'more than 30 items',
+      { items: Array.from({ length: 31 }, () => ({ name: 'Хліб', portion: '1 скибка' })) },
+    ],
+    ['a blank name', { items: [{ name: '   ', portion: '100 г' }] }],
+    ['a name too long', { items: [{ name: 'я'.repeat(LIMITS.foodName + 1), portion: '' }] }],
+    ['a portion too long', { items: [{ name: 'Хліб', portion: 'г'.repeat(LIMITS.portion + 1) }] }],
+    ['an item without a portion', { items: [{ name: 'Хліб' }] }],
+    ['items that are not a list', { items: 'Хліб — 1 скибка' }],
+    ['a malformed photoId', { items: corrected, photoId: '../../legko.db' }],
+    ['no date', { date: undefined, items: corrected }],
+  ])('rejects %s with bad_request', async (_name, fields) => {
+    const { estimate, estimator, status, photoRows } = await setup();
+    const res = await estimate({ date: DATE, ...fields });
+    expect(res.status).toBe(400);
+    expect(await json(res)).toMatchObject({ error: 'bad_request' });
+    expect(estimator.inputs).toHaveLength(0);
+    expect(estimator.recalcInputs).toHaveLength(0);
+    expect(photoRows()).toBe(0);
+    expect((await status()).remainingToday).toBe(60);
+  });
+
+  it('answers 503 ai_unavailable when the feature is disabled', async () => {
+    const { estimate } = await setup({ estimator: null });
+    const res = await estimate({ date: DATE, items: corrected, photoId: UNKNOWN_PHOTO });
+    expect(res.status).toBe(503);
+    expect(await json(res)).toMatchObject({ error: 'ai_unavailable' });
+  });
+
+  it('requires a session and passes the mutation guard', async () => {
+    const { estimate, estimator } = await setup();
+    const anon = await estimate({ date: DATE, items: corrected }, { cookie: null });
+    expect(anon.status).toBe(401);
+    expect(await json(anon)).toMatchObject({ error: 'unauthorized' });
+    const foreign = await estimate({ date: DATE, items: corrected }, { origin: 'https://evil.example' });
+    expect(foreign.status).toBe(403);
+    expect(await json(foreign)).toMatchObject({ error: 'forbidden_origin' });
+    expect(estimator.recalcInputs).toHaveLength(0);
+  });
+
+  it('counts each recalculation as one estimate, failed ones too, then 429', async () => {
+    const { estimate, estimator, status, photoRows } = await setup({ foodDailyLimit: 3 });
+    const id = (await json<FoodEstimateResponse>(await estimate({ date: DATE, image }))).photoId ?? '';
+    expect((await estimate({ date: DATE, items: corrected, photoId: id })).status).toBe(200);
+    expect(await status()).toEqual({ enabled: true, remainingToday: 1 });
+    estimator.nextRecalc = () => {
+      throw new FoodAiError('ai_failed', 'test');
+    };
+    expect((await estimate({ date: DATE, items: corrected, photoId: id })).status).toBe(502);
+    expect(await status()).toEqual({ enabled: true, remainingToday: 0 });
+
+    const res = await estimate({ date: DATE, items: corrected, photoId: id });
+    expect(res.status).toBe(429);
+    expect(await json(res)).toEqual({
+      error: 'rate_limited',
+      message: 'Ліміт підрахунків на сьогодні вичерпано',
+    });
+    expect(res.headers.get('Retry-After')).toBe(String(12 * 3600));
+    expect(estimator.recalcInputs).toHaveLength(2);
+    expect(photoRows()).toBe(1);
   });
 });
 

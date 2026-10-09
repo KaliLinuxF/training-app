@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/lib/api';
-import { estimateErrorMessage, isAbort, PhotoError } from './errors';
+import { estimateErrorMessage, isAbort, isPhotoGone, PhotoError } from './errors';
 
 describe('estimateErrorMessage', () => {
   it('maps server error codes to Ukrainian messages', () => {
@@ -19,6 +19,13 @@ describe('estimateErrorMessage', () => {
       'Не вдалося порахувати — спробуй ще раз або опиши детальніше (з грамами)',
     );
     expect(estimateErrorMessage(failed, 'photo')).toBe('Не вдалося розпізнати — спробуй описати текстом');
+    // Her corrected rows: the way out is a clearer name or amount, or her own number.
+    expect(estimateErrorMessage(failed, 'recalc')).toBe(
+      'Не вдалося перерахувати — уточни назву чи вагу або вкажи калорії вручну',
+    );
+    expect(estimateErrorMessage(new ApiError(429, 'rate_limited', 'x'), 'recalc')).toBe(
+      'Ліміт підрахунків на сьогодні вичерпано',
+    );
   });
 
   it('falls back on the HTTP status when a proxy answered without JSON', () => {
@@ -38,6 +45,16 @@ describe('estimateErrorMessage', () => {
   it('anything else gets a generic message', () => {
     expect(estimateErrorMessage(new Error('boom'), 'text')).toBe('Не вдалося порахувати — спробуй ще раз');
     expect(estimateErrorMessage(new TypeError('Failed to fetch'), 'text')).toBe('Немає зʼєднання з сервером');
+  });
+});
+
+describe('isPhotoGone', () => {
+  it('is the server’s 404 for a photo it no longer has, nothing else', () => {
+    expect(isPhotoGone(new ApiError(404, 'not_found', 'Фото не знайдено'))).toBe(true);
+    expect(isPhotoGone(new ApiError(404, 'internal', 'Not Found'))).toBe(false);
+    expect(isPhotoGone(new ApiError(400, 'bad_request', 'x'))).toBe(false);
+    expect(isPhotoGone(new ApiError(0, 'network', 'x'))).toBe(false);
+    expect(isPhotoGone(new Error('not_found'))).toBe(false);
   });
 });
 

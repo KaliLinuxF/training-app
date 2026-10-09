@@ -20,9 +20,12 @@ import { silentLogger, type Logger } from '../logger';
 import {
   FoodAiError,
   sanitizeEstimate,
+  sanitizeRecalculation,
   type FoodEstimate,
   type FoodEstimateInput,
   type FoodEstimator,
+  type FoodRecalcInput,
+  type FoodRecalculation,
   type RawEstimate,
 } from './estimator';
 
@@ -50,6 +53,19 @@ How to answer:
 - If the photo shows no food or drink, return no items and the comment «Схоже, на фото немає їжі».
 - Report estimates only: no diet advice, judgement or moralising.`;
 
+/**
+ * For «✨ Перерахувати»: she has corrected the items, so the model only prices them. Also stable;
+ * the extra section overrides the identification rules of the base prompt.
+ */
+export const RECALC_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
+
+Recalculation:
+In this request she has already reviewed an estimate and corrected the items herself. Her numbered list is final, and these rules take precedence over the ones above:
+- Return exactly one item for each numbered line, in the same order, with her name and portion copied unchanged. Never rename, merge, split, reorder, drop or add items, even if the photo seems to show something else.
+- kcal: the energy of exactly that food in exactly that portion. Where a line has no portion, assume a typical home portion in Ukraine.
+- If a photo is attached, use it only to understand how the food was prepared: oil, butter, sauces, dressing, cooking method. Count such additions into the item they belong to unless she lists them as a line of their own.
+- comment: an empty string, or one short Ukrainian sentence when it helps her, e.g. when a portion is ambiguous.`;
+
 /** What the model must produce; kept permissive — `sanitizeEstimate` enforces the API limits. */
 const modelOutputSchema = z.object({
   items: z.array(
@@ -71,33 +87,59 @@ function userText({ text, imageBase64 }: FoodEstimateInput): string {
   return text ? `A photo of what I ate. My description:\n${meal}` : 'A photo of what I ate.';
 }
 
-/** The image (if any) goes before the text, as the vision docs recommend. */
-export function userContent(input: FoodEstimateInput): (BetaImageBlockParam | BetaTextBlockParam)[] {
-  const text: BetaTextBlockParam = { type: 'text', text: userText(input) };
-  if (input.imageBase64 === null) return [text];
-  return [
-    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: input.imageBase64 } },
-    text,
-  ];
+/** One line of the numbered list: line breaks inside her values would break the numbering. */
+const oneLine = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+/** «1. Вівсянка з бананом — 250 г»; a line without a portion is just the name. */
+export function recalcList(items: FoodRecalcInput['items']): string {
+  return items
+    .map(({ name, portion }, i) => {
+      const what = oneLine(portion) ? `${oneLine(name)} — ${oneLine(portion)}` : oneLine(name);
+      return `${i + 1}. ${what}`;
+    })
+    .join('\n');
 }
+
+function recalcText({ items, imageBase64 }: FoodRecalcInput): string {
+  const lead = imageBase64 === null ? 'My corrected items:' : 'A photo of what I ate. My corrected items:';
+  return `${lead}\n<items>\n${recalcList(items)}\n</items>`;
+}
+
+/** The image (if any) goes before the text, as the vision docs recommend. */
+function withImage(text: string, imageBase64: string | null): (BetaImageBlockParam | BetaTextBlockParam)[] {
+  const block: BetaTextBlockParam = { type: 'text', text };
+  if (imageBase64 === null) return [block];
+  return [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } }, block];
+}
+
+export const userContent = (input: FoodEstimateInput) => withImage(userText(input), input.imageBase64);
+
+const recalcContent = (input: FoodRecalcInput) => withImage(recalcText(input), input.imageBase64);
 
 /**
  * Opus 5.5 runs adaptive thinking by default and rejects `thinking: disabled`, so `thinking`,
  * sampling parameters and `tool_choice` are deliberately absent; `effort: 'low'` keeps it quick.
+ * Both modes share everything but the system prompt and the user message (same output schema).
  */
-export function buildEstimateRequest(input: FoodEstimateInput, model: string) {
+function buildRequest(model: string, system: string, content: (BetaImageBlockParam | BetaTextBlockParam)[]) {
   return {
     model,
     max_tokens: MAX_TOKENS,
     betas: [FALLBACK_BETA],
     fallbacks: 'default',
-    system: SYSTEM_PROMPT,
+    system,
     output_config: { effort: 'low', format: outputFormat },
-    messages: [{ role: 'user', content: userContent(input) }],
+    messages: [{ role: 'user', content }],
   } satisfies MessageCreateParamsNonStreaming;
 }
 
-export type EstimateRequest = ReturnType<typeof buildEstimateRequest>;
+export const buildEstimateRequest = (input: FoodEstimateInput, model: string) =>
+  buildRequest(model, SYSTEM_PROMPT, userContent(input));
+
+export const buildRecalcRequest = (input: FoodRecalcInput, model: string) =>
+  buildRequest(model, RECALC_SYSTEM_PROMPT, recalcContent(input));
+
+export type EstimateRequest = ReturnType<typeof buildRequest>;
 export type EstimateMessage = Pick<
   ParsedBetaMessage<RawEstimate>,
   'stop_reason' | 'stop_details' | 'parsed_output'
@@ -108,8 +150,8 @@ export interface FoodAiClient {
   beta: { messages: { parse(params: EstimateRequest): PromiseLike<EstimateMessage> } };
 }
 
-/** Checks `stop_reason` before touching the output, then cleans the output up. */
-export function readEstimateResponse(message: EstimateMessage): FoodEstimate {
+/** Checks `stop_reason` before touching the output; returns the raw structured output. */
+function structuredOutput(message: EstimateMessage): RawEstimate {
   switch (message.stop_reason) {
     case 'end_turn':
       break;
@@ -121,8 +163,16 @@ export function readEstimateResponse(message: EstimateMessage): FoodEstimate {
       throw new FoodAiError('ai_failed', `unexpected stop_reason ${String(message.stop_reason)}`);
   }
   if (!message.parsed_output) throw new FoodAiError('ai_failed', 'no structured output in the response');
-  return sanitizeEstimate(message.parsed_output);
+  return message.parsed_output;
 }
+
+/** Checks `stop_reason`, then cleans the output up. */
+export const readEstimateResponse = (message: EstimateMessage): FoodEstimate =>
+  sanitizeEstimate(structuredOutput(message));
+
+/** Checks `stop_reason`, then requires exactly `expected` items and takes their kcal by index. */
+export const readRecalcResponse = (message: EstimateMessage, expected: number): FoodRecalculation =>
+  sanitizeRecalculation(structuredOutput(message), expected);
 
 /** First line, at most 160 characters: enough to diagnose, never a dump. */
 const short = (message: string): string => (message.split('\n')[0] ?? '').slice(0, 160);
@@ -189,24 +239,33 @@ export function createClaudeEstimator({
   const api = client ?? createAnthropicClient(apiKey, logger);
   let keyRejected = false;
 
-  return {
-    async estimate(input) {
-      try {
-        const estimate = readEstimateResponse(
-          await api.beta.messages.parse(buildEstimateRequest(input, model)),
-        );
-        keyRejected = false;
-        return estimate;
-      } catch (err) {
-        const error = toFoodAiError(err);
-        if (error.code === 'ai_unavailable') {
-          if (!keyRejected) logger.error(`Anthropic key rejected (${error.reason}): check ANTHROPIC_API_KEY`);
-          keyRejected = true;
-        } else {
-          logger.warn(`food estimate failed: ${error.reason}`);
-        }
-        throw error;
+  /** One model call; every failure becomes a logged `FoodAiError`. */
+  async function call<T>(
+    what: 'estimate' | 'recalculation',
+    request: EstimateRequest,
+    read: (message: EstimateMessage) => T,
+  ): Promise<T> {
+    try {
+      const result = read(await api.beta.messages.parse(request));
+      keyRejected = false;
+      return result;
+    } catch (err) {
+      const error = toFoodAiError(err);
+      if (error.code === 'ai_unavailable') {
+        if (!keyRejected) logger.error(`Anthropic key rejected (${error.reason}): check ANTHROPIC_API_KEY`);
+        keyRejected = true;
+      } else {
+        logger.warn(`food ${what} failed: ${error.reason}`);
       }
-    },
+      throw error;
+    }
+  }
+
+  return {
+    estimate: (input) => call('estimate', buildEstimateRequest(input, model), readEstimateResponse),
+    recalculate: (input) =>
+      call('recalculation', buildRecalcRequest(input, model), (message) =>
+        readRecalcResponse(message, input.items.length),
+      ),
   };
 }

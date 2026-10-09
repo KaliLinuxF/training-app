@@ -13,8 +13,11 @@ export class PhotoError extends Error {
   }
 }
 
-/** What the estimate was made from: the advice after a failure depends on it. */
-export type EstimateSource = 'text' | 'photo';
+/**
+ * What the estimate was made from: the advice after a failure depends on it. `recalc`: her
+ * corrected rows sent back for new kcal («✨ Перерахувати»).
+ */
+export type EstimateSource = 'text' | 'photo' | 'recalc';
 
 export const ESTIMATE_MESSAGES = {
   rate_limited: 'Ліміт підрахунків на сьогодні вичерпано',
@@ -23,6 +26,8 @@ export const ESTIMATE_MESSAGES = {
   ai_failed_text: 'Не вдалося порахувати — спробуй ще раз або опиши детальніше (з грамами)',
   /** …or of a photo: describing the meal in words is the way out. */
   ai_failed_photo: 'Не вдалося розпізнати — спробуй описати текстом',
+  /** …or of her corrected rows: the names and amounts are hers to make clearer. */
+  ai_failed_recalc: 'Не вдалося перерахувати — уточни назву чи вагу або вкажи калорії вручну',
   payload_too_large: 'Фото завелике',
   network: 'Немає зʼєднання з сервером',
   unauthorized: 'Сесія закінчилась — увійди ще раз',
@@ -38,7 +43,7 @@ export function estimateErrorMessage(err: unknown, source: EstimateSource): stri
   if (err instanceof ApiError) {
     switch (err.code) {
       case 'ai_failed':
-        return source === 'photo' ? ESTIMATE_MESSAGES.ai_failed_photo : ESTIMATE_MESSAGES.ai_failed_text;
+        return ESTIMATE_MESSAGES[`ai_failed_${source}`];
       case 'rate_limited':
       case 'ai_unavailable':
       case 'payload_too_large':
@@ -55,6 +60,14 @@ export function estimateErrorMessage(err: unknown, source: EstimateSource): stri
   }
   if (err instanceof TypeError) return ESTIMATE_MESSAGES.network;
   return ESTIMATE_MESSAGES.fallback;
+}
+
+/**
+ * The photo a recalculation sent for context is no longer on the server: the card stayed open
+ * past the daily clean-up of photos no day references.
+ */
+export function isPhotoGone(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404 && err.code === 'not_found';
 }
 
 /** The request was aborted on purpose («Скасувати», sheet closed). */

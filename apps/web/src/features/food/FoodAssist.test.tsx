@@ -106,7 +106,7 @@ describe('FoodAssist', () => {
     await screen.findByRole('heading', { name: 'Оцінка калорій' });
     expect(screen.getByText('Порції приблизні.')).toBeTruthy();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Хліб ккал' }), { target: { value: '160' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Калорії позиції 2' }), { target: { value: '160' } });
     fireEvent.click(screen.getByRole('button', { name: 'Додати 420 ккал' }));
 
     const items = [
@@ -396,5 +396,339 @@ describe('FoodAssist', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Спробувати ще' }));
     expect(composer().value).toBe('стіл');
     expect(document.activeElement).toBe(composer());
+  });
+});
+
+describe('FoodAssist: correcting the estimate', () => {
+  const PLATE: FoodEstimateResponse = {
+    photoId: 'ph_0123456789abcdef',
+    items: [
+      { name: 'Гречка', portion: '200 г', kcal: 220 },
+      { name: 'Котлета куряча', portion: '1 шт', kcal: 180 },
+      { name: 'Салат з огірків', portion: '100 г', kcal: 45 },
+    ],
+    totalKcal: 445,
+    comment: 'Порції приблизні.',
+  };
+
+  /** The server in recalculate mode: the sent items, same order, with new kcal. */
+  const priced = (req: FoodEstimateRequest, kcal: number[]): FoodEstimateResponse => ({
+    photoId: req.photoId ?? null,
+    items: (req.items ?? []).map((it, i) => ({ name: it.name, portion: it.portion, kcal: kcal[i] ?? 0 })),
+    totalKcal: kcal.reduce((a, b) => a + b, 0),
+    comment: '',
+  });
+
+  const textbox = (name: string) => screen.getByRole('textbox', { name }) as HTMLInputElement;
+  const recalc = () => screen.getByRole('button', { name: /Перерахувати|Рахую…/ }) as HTMLButtonElement;
+  const edit = (name: string, value: string) => fireEvent.change(textbox(name), { target: { value } });
+
+  async function estimatePlate(estimate: EstimateFn) {
+    const api = setup(estimate, { photo: PHOTO });
+    pickFile(new File(['jpeg'], 'IMG_0042.jpg', { type: 'image/jpeg' }));
+    await screen.findByRole('heading', { name: 'Оцінка калорій' });
+    return api;
+  }
+
+  it('grams rescale at once; a renamed dish is recalculated with the photo for context; «Додати» uses her names', async () => {
+    resetFoodStatus({ enabled: true, remainingToday: 5 });
+    const { estimate, onAdd, pending } = await estimatePlate(async (req) =>
+      req.items ? priced(req, [170, 310, 50]) : PLATE,
+    );
+    expect(screen.getByText('Сьогодні ще 4 підрахунки')).toBeTruthy();
+
+    // Same dish, new grams: proportional kcal on the device, nothing sent.
+    edit('Порція позиції 1', '150 г');
+    expect(textbox('Калорії позиції 1').value).toBe('165');
+    expect(screen.getByText('перераховано за вагою')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Перерахувати' })).toBeNull();
+
+    // Another dish: marked, and the model is asked once she taps «Перерахувати».
+    edit('Назва позиції 2', 'Котлета свиняча');
+    edit('Порція позиції 2', '120 г');
+    expect(screen.getByText('змінено')).toBeTruthy();
+    expect(estimate).toHaveBeenCalledOnce();
+
+    fireEvent.click(recalc());
+    expect(estimate).toHaveBeenCalledTimes(2);
+    expect(estimate).toHaveBeenLastCalledWith(
+      {
+        date: TODAY,
+        items: [
+          { name: 'Гречка', portion: '150 г' },
+          { name: 'Котлета свиняча', portion: '120 г' },
+          { name: 'Салат з огірків', portion: '100 г' },
+        ],
+        photoId: 'ph_0123456789abcdef',
+      },
+      expect.any(AbortSignal),
+    );
+    expect(recalc().textContent).toBe('Рахую…');
+    expect(live().textContent).toBe('Рахую калорії…');
+    expect(pending()).toBe(true);
+
+    await waitFor(() => expect(textbox('Калорії позиції 2').value).toBe('310'));
+    // Only the changed row takes the model's number.
+    expect(textbox('Калорії позиції 1').value).toBe('165');
+    expect(textbox('Калорії позиції 3').value).toBe('45');
+    expect(screen.queryByText('змінено')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Перерахувати' })).toBeNull();
+    expect(live().textContent).toBe('Перераховано: разом 520 ккал');
+    // It counted against today's budget.
+    expect(screen.getByText('Сьогодні ще 3 підрахунки')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Додати 520 ккал' }));
+    const items = [
+      { name: 'Гречка', portion: '150 г', kcal: 165 },
+      { name: 'Котлета свиняча', portion: '120 г', kcal: 310 },
+      { name: 'Салат з огірків', portion: '100 г', kcal: 45 },
+    ];
+    expect(onAdd).toHaveBeenCalledWith({
+      line: 'Гречка (150 г), котлета свиняча (120 г), салат з огірків (100 г) — 520 ккал',
+      consumed: '',
+      kcal: 520,
+      photoId: 'ph_0123456789abcdef',
+      items,
+      uses: items,
+    });
+    expect(store.commit).not.toHaveBeenCalled();
+  });
+
+  it('a row she adds is priced too; a text estimate is recalculated without a photo', async () => {
+    const { estimate } = setup(async (req) => (req.items ? priced(req, [260, 80, 25]) : RESULT));
+    fireEvent.click(toggle());
+    fireEvent.change(composer(), { target: { value: 'борщ і хліб' } });
+    fireEvent.click(submit());
+    await screen.findByRole('heading', { name: 'Оцінка калорій' });
+
+    fireEvent.click(screen.getByRole('button', { name: '+ позиція' }));
+    expect(document.activeElement).toBe(textbox('Назва позиції 3'));
+    edit('Назва позиції 3', 'Сметана');
+    edit('Порція позиції 3', '1 ложка');
+    fireEvent.click(recalc());
+    expect(estimate).toHaveBeenLastCalledWith(
+      {
+        date: TODAY,
+        items: [
+          { name: 'Борщ', portion: '300 г' },
+          { name: 'Хліб', portion: '1 скибка' },
+          { name: 'Сметана', portion: '1 ложка' },
+        ],
+      },
+      expect.any(AbortSignal),
+    );
+    await waitFor(() => expect(textbox('Калорії позиції 3').value).toBe('25'));
+    expect(screen.getByRole('button', { name: 'Додати 365 ккал' })).toBeTruthy();
+  });
+
+  it('a failed recalculation keeps her rows, explains inline and in the toast', async () => {
+    const { notify } = await estimatePlate(async (req) => {
+      if (req.items) throw new ApiError(502, 'ai_failed', 'x');
+      return PLATE;
+    });
+    edit('Назва позиції 2', 'Котлета свиняча');
+    fireEvent.click(recalc());
+    const message = 'Не вдалося перерахувати — уточни назву чи вагу або вкажи калорії вручну';
+    await waitFor(() => expect(notify).toHaveBeenCalledWith(message));
+    expect(screen.getByRole('alert').textContent).toBe(message);
+    expect(textbox('Назва позиції 2').value).toBe('Котлета свиняча');
+    expect(textbox('Калорії позиції 2').value).toBe('180');
+    expect(screen.getByText('змінено')).toBeTruthy();
+    // Ready for another try; «Додати» works with what is on screen.
+    expect(recalc().textContent).toBe('✨ Перерахувати');
+    expect(screen.getByRole('button', { name: 'Додати 445 ккал' })).toBeTruthy();
+  });
+
+  it('an answer for other items than she sent is not applied', async () => {
+    const { notify } = await estimatePlate(async (req) =>
+      req.items ? { ...priced(req, [1]), items: [{ name: 'Гречка', portion: '200 г', kcal: 1 }] } : PLATE,
+    );
+    edit('Назва позиції 2', 'Котлета свиняча');
+    fireEvent.click(recalc());
+    await waitFor(() => expect(notify).toHaveBeenCalledWith('Не вдалося порахувати — спробуй ще раз'));
+    expect(textbox('Калорії позиції 1').value).toBe('220');
+    expect(textbox('Калорії позиції 2').value).toBe('180');
+  });
+
+  it('the daily limit hit on recalculation locks «Перерахувати» under her focus; one line says why', async () => {
+    const LIMIT = 'Ліміт підрахунків на сьогодні вичерпано';
+    const { notify, estimate } = await estimatePlate(async (req) => {
+      if (req.items) throw new ApiError(429, 'rate_limited', 'limit');
+      return PLATE;
+    });
+    edit('Назва позиції 2', 'Котлета свиняча');
+    recalc().focus();
+    fireEvent.click(recalc());
+    await waitFor(() => expect(notify).toHaveBeenCalledWith(LIMIT));
+
+    // Locked, but never natively disabled: her focus stays on it instead of falling to <body>.
+    expect(recalc().getAttribute('aria-disabled')).toBe('true');
+    expect(recalc().disabled).toBe(false);
+    expect(document.activeElement).toBe(recalc());
+    fireEvent.click(recalc());
+    expect(estimate).toHaveBeenCalledTimes(2);
+
+    // One line in the sheet, like a 429 on the first estimate: the card's alert doubles as the
+    // hint every locked button is described by.
+    expect(screen.getAllByText(LIMIT)).toHaveLength(1);
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe(LIMIT);
+    expect(alert.id).not.toBe('');
+    expect(recalc().getAttribute('aria-describedby')).toBe(alert.id);
+    expect(screen.getByRole('button', { name: 'Порахувати калорії за фото' }).getAttribute('aria-describedby')).toBe(
+      alert.id,
+    );
+    // «Додати» still adds what is on screen.
+    expect(screen.getByRole('button', { name: 'Додати 445 ккал' }).hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('out of estimates after the first one: a single «Ліміт…» line, not one more in the card', async () => {
+    resetFoodStatus({ enabled: true, remainingToday: 1 });
+    await estimatePlate(async () => PLATE);
+    edit('Назва позиції 2', 'Котлета свиняча');
+    const line = screen.getByText('Ліміт підрахунків на сьогодні вичерпано');
+    expect(screen.getAllByText('Ліміт підрахунків на сьогодні вичерпано')).toHaveLength(1);
+    expect(recalc().getAttribute('aria-disabled')).toBe('true');
+    expect(recalc().getAttribute('aria-describedby')).toBe(line.id);
+  });
+
+  it('offline: «Перерахувати» is locked and described by the hint', async () => {
+    const { rerender } = await estimatePlate(async () => PLATE);
+    edit('Назва позиції 2', 'Котлета свиняча');
+    store.online = false;
+    rerender({});
+    expect(recalc().getAttribute('aria-disabled')).toBe('true');
+    expect(recalc().getAttribute('aria-describedby')).toBe(screen.getByText('Потрібен інтернет').id);
+  });
+
+  it('going offline while «Рахую…» keeps her focus on the button when the request fails', async () => {
+    const answer = deferred<FoodEstimateResponse>();
+    const { rerender, estimate } = await estimatePlate((req) => (req.items ? answer.promise : Promise.resolve(PLATE)));
+    edit('Назва позиції 2', 'Котлета свиняча');
+    recalc().focus();
+    fireEvent.click(recalc());
+    store.online = false;
+    rerender({});
+    await act(async () => answer.reject(new ApiError(0, 'network', 'offline')));
+
+    expect(screen.getByRole('alert').textContent).toBe('Немає зʼєднання з сервером');
+    expect(recalc().textContent).toBe('✨ Перерахувати');
+    expect(recalc().getAttribute('aria-disabled')).toBe('true');
+    expect(recalc().disabled).toBe(false);
+    expect(document.activeElement).toBe(recalc());
+    fireEvent.click(recalc());
+    expect(estimate).toHaveBeenCalledTimes(2);
+  });
+
+  it('a failed recalculation announces nothing stale in the status region', async () => {
+    let fail = false;
+    await estimatePlate(async (req) => {
+      if (!req.items) return PLATE;
+      if (fail) throw new ApiError(502, 'ai_failed', 'x');
+      return priced(req, [310, 50]);
+    });
+    expect(live().textContent).toBe('Знайдено 3 позиції, разом 445 ккал');
+    fireEvent.click(screen.getByRole('button', { name: 'Прибрати «Гречка»' }));
+    edit('Назва позиції 1', 'Котлета свиняча');
+    fireEvent.click(recalc());
+    await waitFor(() => expect(live().textContent).toBe('Перераховано: разом 355 ккал'));
+
+    // A second one fails: the card's alert says so; neither the first estimate («Знайдено 3…»,
+    // out of date) nor the last total is read out again.
+    fail = true;
+    edit('Назва позиції 2', 'Салат з помідорів');
+    fireEvent.click(recalc());
+    expect(live().textContent).toBe('Рахую калорії…');
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(live().textContent).toBe('');
+  });
+
+  it('«Додати» waits while «Рахую…», then adds her dish with the new kcal', async () => {
+    const answer = deferred<FoodEstimateResponse>();
+    let sent: FoodEstimateRequest | undefined;
+    const { onAdd, estimate } = await estimatePlate(async (req) => {
+      if (!req.items) return PLATE;
+      sent = req;
+      return answer.promise;
+    });
+    edit('Назва позиції 2', 'Котлета свиняча');
+    fireEvent.click(recalc());
+
+    const add = screen.getByRole('button', { name: 'Додати 445 ккал' });
+    expect(add.getAttribute('aria-disabled')).toBe('true');
+    expect(add.getAttribute('aria-describedby')).toBe(recalc().id);
+    fireEvent.click(add);
+    // Not the old dish's 180 kcal under her new name (nor in «Часті страви»), and the request she
+    // asked for is not thrown away.
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Оцінка калорій' })).toBeTruthy();
+    expect(estimate).toHaveBeenCalledTimes(2);
+
+    await act(async () => answer.resolve(priced(sent as FoodEstimateRequest, [220, 310, 45])));
+    fireEvent.click(screen.getByRole('button', { name: 'Додати 575 ккал' }));
+    expect(onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kcal: 575,
+        uses: [
+          { name: 'Гречка', portion: '200 г', kcal: 220 },
+          { name: 'Котлета свиняча', portion: '1 шт', kcal: 310 },
+          { name: 'Салат з огірків', portion: '100 г', kcal: 45 },
+        ],
+      }),
+    );
+  });
+
+  it('a photo cleaned up on the server meanwhile: priced again without it, and not added with the day', async () => {
+    const gone = new ApiError(404, 'not_found', 'Фото не знайдено');
+    const { estimate, notify, onAdd } = await estimatePlate(async (req) => {
+      if (!req.items) return PLATE;
+      if (req.photoId) throw gone;
+      return priced(req, [220, 310, 45]);
+    });
+    edit('Назва позиції 2', 'Котлета свиняча');
+    fireEvent.click(recalc());
+    await waitFor(() => expect(textbox('Калорії позиції 2').value).toBe('310'));
+
+    const items = [
+      { name: 'Гречка', portion: '200 г' },
+      { name: 'Котлета свиняча', portion: '1 шт' },
+      { name: 'Салат з огірків', portion: '100 г' },
+    ];
+    expect(estimate.mock.calls.slice(1).map(([req]) => req)).toEqual([
+      { date: TODAY, items, photoId: 'ph_0123456789abcdef' },
+      { date: TODAY, items },
+    ]);
+    expect(notify).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    // The next one does not ask about the photo again.
+    edit('Назва позиції 3', 'Салат з помідорів');
+    fireEvent.click(recalc());
+    await waitFor(() => expect(estimate).toHaveBeenCalledTimes(4));
+    expect(estimate.mock.lastCall?.[0].photoId).toBeUndefined();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Перерахувати|Рахую…/ })).toBeNull());
+
+    // Its file is gone: the day must not point at it.
+    fireEvent.click(screen.getByRole('button', { name: /^Додати \d+ ккал$/ }));
+    expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ photoId: null }));
+  });
+
+  it('«Скасувати» while recalculating drops the request and the card', async () => {
+    const answer = deferred<FoodEstimateResponse>();
+    let signal: AbortSignal | undefined;
+    const { onAdd, pending } = await estimatePlate(async (req, s) => {
+      if (!req.items) return PLATE;
+      signal = s;
+      return answer.promise;
+    });
+    edit('Назва позиції 2', 'Котлета свиняча');
+    fireEvent.click(recalc());
+    fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByRole('heading', { name: 'Оцінка калорій' })).toBeNull();
+    expect(pending()).toBe(false);
+    await act(async () => answer.resolve(PLATE));
+    expect(screen.queryByRole('heading', { name: 'Оцінка калорій' })).toBeNull();
+    expect(onAdd).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,23 @@
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { foodEstimateRequestSchema, type FoodEstimateResponse } from '../packages/shared/src/index';
 import type { App } from './support/app';
 import { TODAY } from './support/env';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
 import { expect, test } from './support/test';
 
 const TODAY_FOOD = 'Вівсянка з бананом, кава';
+
+/** A plate with weighed and counted items: grams can be rescaled on the device, «1 шт» cannot. */
+const PLATE_ESTIMATE: FoodEstimateResponse = {
+  photoId: PHOTO_ID,
+  items: [
+    { name: 'Гречка', portion: '200 г', kcal: 220 },
+    { name: 'Котлета куряча', portion: '1 шт', kcal: 180 },
+    { name: 'Салат з огірків', portion: '100 г', kcal: 45 },
+  ],
+  totalKcal: 445,
+  comment: '',
+};
 
 async function openToday(app: App): Promise<Locator> {
   await app.goto('/');
@@ -16,7 +29,18 @@ async function openToday(app: App): Promise<Locator> {
 
 const estimateCard = (sheet: Locator) => sheet.getByRole('region', { name: 'Оцінка калорій' });
 
-const countButton = (sheet: Locator) => sheet.getByRole('button', { name: 'Порахувати калорії', exact: true });
+/** Fields of estimate row `n` (1-based): every row is editable. */
+const rowField = (card: Locator, field: 'Назва' | 'Порція' | 'Калорії', n: number) =>
+  card.getByRole('textbox', { name: `${field} позиції ${n}`, exact: true });
+
+async function expectRow(card: Locator, n: number, row: { name: string; portion: string; kcal: string }) {
+  await expect(rowField(card, 'Назва', n)).toHaveValue(row.name);
+  await expect(rowField(card, 'Порція', n)).toHaveValue(row.portion);
+  await expect(rowField(card, 'Калорії', n)).toHaveValue(row.kcal);
+}
+
+const countButton = (sheet: Locator) =>
+  sheet.getByRole('button', { name: 'Порахувати калорії', exact: true });
 
 /** Text of the visually hidden status region that announces progress, results and additions. */
 const announced = (sheet: Locator, text: string) => sheet.getByRole('status').filter({ hasText: text });
@@ -56,15 +80,17 @@ test.describe('AI calorie estimate (mocked)', () => {
     await estimateText(sheet, 'борщ 300 г і дві скибки житнього хліба');
     const card = estimateCard(sheet);
     await expect(card).toContainText('2 позиції · можна виправити');
-    await expect(card).toContainText('Борщ300 г');
-    await expect(card).toContainText('Хліб житній2 скибки');
+    await expectRow(card, 1, { name: 'Борщ', portion: '300 г', kcal: '180' });
+    await expectRow(card, 2, { name: 'Хліб житній', portion: '2 скибки', kcal: '140' });
     await expect(card).toContainText('Разом320 ккал');
     expect(mocks.estimates).toEqual([{ date: TODAY, text: 'борщ 300 г і дві скибки житнього хліба' }]);
     // The result is announced and focus moves onto it (the composer she was in is gone).
     await expect(announced(sheet, 'Знайдено 2 позиції, разом 320 ккал')).toHaveCount(1);
-    await expect(card.getByRole('heading', { name: 'Оцінка калорій' }).locator('[tabindex="-1"]')).toBeFocused();
+    await expect(
+      card.getByRole('heading', { name: 'Оцінка калорій' }).locator('[tabindex="-1"]'),
+    ).toBeFocused();
 
-    await card.getByRole('textbox', { name: 'Хліб житній ккал' }).fill('160');
+    await rowField(card, 'Калорії', 2).fill('160');
     await expect(card).toContainText('Разом340 ккал');
     await card.getByRole('button', { name: 'Додати 340 ккал' }).click();
     await expect(card).toBeHidden();
@@ -190,7 +216,7 @@ test.describe('AI calorie estimate (mocked)', () => {
       .setInputFiles({ name: 'plate.jpg', mimeType: 'image/jpeg', buffer: FOOD_JPEG });
 
     const card = estimateCard(sheet);
-    await expect(card).toContainText('Сирники зі сметаною3 шт');
+    await expectRow(card, 1, { name: 'Сирники зі сметаною', portion: '3 шт', kcal: '420' });
     await expect(card).toContainText('Сметана — приблизно 2 ложки');
     await loaded(card.getByRole('img', { name: 'Фото їжі' }));
 
@@ -231,6 +257,102 @@ test.describe('AI calorie estimate (mocked)', () => {
     await app.go('Календар');
     const day = app.region('14 жовтня 2026');
     await loaded(day.locator(`img[src="/api/photos/${PHOTO_ID}/thumb"]`));
+  });
+
+  test('from a photo: new grams rescale at once, a corrected dish is recalculated, «Додати» keeps her names', async ({
+    app,
+    page,
+    server,
+  }) => {
+    const mocks = await mockFood(page, { estimate: PLATE_ESTIMATE });
+    // Recalculations (`items` in the body) get their own answer; the photo estimate falls through to mockFood.
+    const recalcs: unknown[] = [];
+    await page.route('**/api/food/estimate', async (route) => {
+      const body = route.request().postDataJSON() as {
+        items?: { name: string; portion: string }[];
+        photoId?: string;
+      };
+      if (!body.items) return route.fallback();
+      recalcs.push(body);
+      const kcal = [170, 310, 50];
+      const items = body.items.map((it, i) => ({ ...it, kcal: kcal[i] ?? 0 }));
+      const answer: FoodEstimateResponse = {
+        photoId: body.photoId ?? null,
+        items,
+        totalKcal: items.reduce((sum, it) => sum + it.kcal, 0),
+        comment: '',
+      };
+      await route.fulfill({ json: answer });
+    });
+
+    const sheet = await openToday(app);
+    await sheet
+      .locator('input[type="file"][accept="image/*"]')
+      .setInputFiles({ name: 'plate.jpg', mimeType: 'image/jpeg', buffer: FOOD_JPEG });
+    const card = estimateCard(sheet);
+    await expectRow(card, 2, { name: 'Котлета куряча', portion: '1 шт', kcal: '180' });
+    await expect(card).toContainText('Разом445 ккал');
+
+    // Same dish, new grams: proportional kcal on the device, no request.
+    await rowField(card, 'Порція', 1).fill('150 г');
+    await expect(rowField(card, 'Калорії', 1)).toHaveValue('165');
+    await expect(card).toContainText('перераховано за вагою');
+    await expect(card).toContainText('Разом390 ккал');
+    await expect(card.getByRole('button', { name: 'Перерахувати' })).toHaveCount(0);
+
+    // Another dish and amount: marked «змінено» until the model prices it.
+    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
+    await rowField(card, 'Порція', 2).fill('120 г');
+    await expect(card.getByText('змінено', { exact: true })).toBeVisible();
+    await card.getByRole('button', { name: 'Перерахувати' }).click();
+
+    await expect(rowField(card, 'Калорії', 2)).toHaveValue('310');
+    await expect(card).toContainText('Разом520 ккал');
+    await expect(announced(sheet, 'Перераховано: разом 520 ккал')).toHaveCount(1);
+    await expect(card.getByText('змінено', { exact: true })).toHaveCount(0);
+    await expect(card.getByRole('button', { name: 'Перерахувати' })).toHaveCount(0);
+    // Only the changed row took the model's number.
+    await expectRow(card, 1, { name: 'Гречка', portion: '150 г', kcal: '165' });
+    await expectRow(card, 3, { name: 'Салат з огірків', portion: '100 г', kcal: '45' });
+
+    // One photo estimate (the grams edit asked nothing), then one recalculation of her rows with the photo.
+    expect(mocks.estimates).toHaveLength(1);
+    expect(recalcs).toEqual([
+      {
+        date: TODAY,
+        items: [
+          { name: 'Гречка', portion: '150 г' },
+          { name: 'Котлета свиняча', portion: '120 г' },
+          { name: 'Салат з огірків', portion: '100 г' },
+        ],
+        photoId: PHOTO_ID,
+      },
+    ]);
+
+    await card.getByRole('button', { name: 'Додати 520 ккал' }).click();
+    await expect(card).toBeHidden();
+    const line = 'Гречка (150 г), котлета свиняча (120 г), салат з огірків (100 г) — 520 ккал';
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveValue(`${TODAY_FOOD}\n${line}`);
+    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toHaveValue('520');
+    await app.save(sheet);
+
+    // «Часті страви» learn her corrected dish, not the model's first guess.
+    await expect
+      .poll(async () => {
+        const d = await server.getData();
+        return {
+          food: d.days[TODAY]?.food,
+          photos: d.days[TODAY]?.photos,
+          corrected: d.foods.find((f) => f.name === 'Котлета свиняча'),
+          guessed: d.foods.some((f) => f.name === 'Котлета куряча'),
+        };
+      })
+      .toEqual({
+        food: `${TODAY_FOOD}\n${line}`,
+        photos: [PHOTO_ID],
+        corrected: { name: 'Котлета свиняча', portion: '120 г', kcal: 310, count: 1, lastUsed: TODAY },
+        guessed: false,
+      });
   });
 
   test('a failed estimate shows the error and keeps the typed text', async ({ app, page }) => {
@@ -330,6 +452,179 @@ test.describe('AI calorie estimate (mocked)', () => {
     await app.save(sheet);
     await expect.poll(async () => (await server.getData()).days[TODAY]?.kcal).toBe(420);
     expect((await server.getData()).days[TODAY]?.photos).toBeUndefined();
+  });
+});
+
+interface RecalcBody {
+  date: string;
+  items: { name: string; portion: string }[];
+  photoId?: string;
+}
+
+/** A recalculation answer for `kcal` that the client receives; `null` = an error response. */
+type RecalcAnswer = { kcal: number[] } | { status: number; body: { error: string; message: string } };
+
+/**
+ * Recalculate-mode requests (`items` in the body) get `answer`; the photo estimate falls through
+ * to `mockFood`. `gate`, when given, holds every recalculation until it resolves.
+ */
+async function mockRecalc(page: Page, answer: RecalcAnswer, gate?: Promise<void>): Promise<RecalcBody[]> {
+  const sent: RecalcBody[] = [];
+  await page.route('**/api/food/estimate', async (route) => {
+    const body = route.request().postDataJSON() as Partial<RecalcBody>;
+    if (!body.items) return route.fallback();
+    sent.push(body as RecalcBody);
+    if (gate) await gate;
+    if ('status' in answer) return route.fulfill({ status: answer.status, json: answer.body });
+    const items = body.items.map((it, i) => ({ ...it, kcal: answer.kcal[i] ?? 0 }));
+    const res: FoodEstimateResponse = {
+      photoId: body.photoId ?? null,
+      items,
+      totalKcal: items.reduce((sum, it) => sum + it.kcal, 0),
+      comment: '',
+    };
+    await route.fulfill({ json: res });
+  });
+  return sent;
+}
+
+async function estimatePlate(app: App): Promise<{ sheet: Locator; card: Locator }> {
+  const sheet = await openToday(app);
+  await sheet
+    .locator('input[type="file"][accept="image/*"]')
+    .setInputFiles({ name: 'plate.jpg', mimeType: 'image/jpeg', buffer: FOOD_JPEG });
+  const card = estimateCard(sheet);
+  await expect(card).toContainText('Разом445 ккал');
+  return { sheet, card };
+}
+
+const recalcButton = (card: Locator) => card.getByRole('button', { name: /Перерахувати|Рахую…/ });
+
+test.describe('Correcting a photo estimate', () => {
+  test('removed, added, blank and self-priced rows: the body fits the server schema and kcal land by position', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const sent = await mockRecalc(page, { kcal: [300, 70, 110, 200] });
+    const { card } = await estimatePlate(app);
+
+    // She did not eat the buckwheat.
+    await card.getByRole('button', { name: 'Прибрати «Гречка»' }).click();
+    // Comma decimals in kilograms against grams: 45 × 150 / 100, on the device.
+    await rowField(card, 'Порція', 2).fill('0,15 кг');
+    await expect(rowField(card, 'Калорії', 2)).toHaveValue('68');
+    // Another dish.
+    await rowField(card, 'Назва', 1).fill('Котлета свиняча');
+    await rowField(card, 'Порція', 1).fill('~120 г');
+    // A missing row the model prices, one she prices herself, one left blank.
+    await card.getByRole('button', { name: '+ позиція' }).click();
+    await expect(rowField(card, 'Назва', 3)).toBeFocused();
+    await rowField(card, 'Назва', 3).fill('Сметана');
+    await rowField(card, 'Порція', 3).fill('2 ст. л.');
+    await card.getByRole('button', { name: '+ позиція' }).click();
+    await rowField(card, 'Назва', 4).fill('Хліб');
+    await rowField(card, 'Калорії', 4).fill('90');
+    await card.getByRole('button', { name: '+ позиція' }).click();
+    await expect(card.getByText('змінено', { exact: true })).toHaveCount(2);
+
+    await recalcButton(card).click();
+    await expect(rowField(card, 'Калорії', 1)).toHaveValue('300');
+    expect(sent).toHaveLength(1);
+    expect(foodEstimateRequestSchema.safeParse(sent[0]).success).toBe(true);
+    expect(sent[0]).toEqual({
+      date: TODAY,
+      items: [
+        { name: 'Котлета свиняча', portion: '~120 г' },
+        { name: 'Салат з огірків', portion: '0,15 кг' },
+        { name: 'Сметана', portion: '2 ст. л.' },
+        { name: 'Хліб', portion: '' },
+      ],
+      photoId: PHOTO_ID,
+    });
+    // Rescaled and self-priced rows keep their numbers; the blank row is not counted.
+    await expectRow(card, 2, { name: 'Салат з огірків', portion: '0,15 кг', kcal: '68' });
+    await expectRow(card, 3, { name: 'Сметана', portion: '2 ст. л.', kcal: '110' });
+    await expectRow(card, 4, { name: 'Хліб', portion: '', kcal: '90' });
+    await expectRow(card, 5, { name: '', portion: '', kcal: '' });
+    await expect(card).toContainText('Разом568 ккал');
+
+    await card.getByRole('button', { name: 'Додати 568 ккал' }).click();
+    await expect(app.page.getByRole('textbox', { name: 'Що я їла' })).toHaveValue(
+      `${TODAY_FOOD}\nКотлета свиняча (~120 г), салат з огірків (0,15 кг), сметана (2 ст. л.), хліб — 568 ккал`,
+    );
+  });
+
+  test('a double tap sends one recalculation; a row edited while it runs keeps her edit', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const sent = await mockRecalc(page, { kcal: [221, 310, 90] }, gate);
+    const { sheet, card } = await estimatePlate(app);
+
+    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
+    await rowField(card, 'Назва', 3).fill('Салат з помідорів');
+    await recalcButton(card).dblclick();
+    await expect(recalcButton(card)).toHaveText('Рахую…');
+    await expect(announced(sheet, 'Рахую калорії…')).toHaveCount(1);
+    // «Додати» waits for the numbers she asked for (not the old dish's kcal under her new name).
+    await expect(card.getByRole('button', { name: 'Додати 445 ккал' })).toBeDisabled();
+    // Changed again while the model works on the previous name.
+    await rowField(card, 'Назва', 3).fill('Салат з помідорів і сметаною');
+    release();
+
+    await expect(rowField(card, 'Калорії', 2)).toHaveValue('310');
+    await expect(card.getByRole('button', { name: 'Додати 575 ккал' })).toBeEnabled();
+    await expectRow(card, 1, { name: 'Гречка', portion: '200 г', kcal: '220' });
+    await expectRow(card, 3, { name: 'Салат з помідорів і сметаною', portion: '100 г', kcal: '45' });
+    await expect(card.getByText('змінено', { exact: true })).toHaveCount(1);
+    await expect(recalcButton(card)).toHaveText('✨ Перерахувати');
+    expect(sent).toHaveLength(1);
+  });
+
+  test('a failed recalculation explains itself and announces nothing stale', async ({ app, page }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    await mockRecalc(page, { status: 502, body: { error: 'ai_failed', message: 'Не вдалося' } });
+    const { sheet, card } = await estimatePlate(app);
+    await card.getByRole('button', { name: 'Прибрати «Гречка»' }).click();
+    await rowField(card, 'Назва', 1).fill('Котлета свиняча');
+    await recalcButton(card).click();
+
+    const message = 'Не вдалося перерахувати — уточни назву чи вагу або вкажи калорії вручну';
+    await expect(card.getByRole('alert')).toHaveText(message);
+    await expect(app.toast(message)).toBeVisible();
+    await expect(card.getByText('змінено', { exact: true })).toHaveCount(1);
+    await expect(recalcButton(card)).toHaveText('✨ Перерахувати');
+    // The polite status must not read out the first estimate again («Знайдено 3 позиції, разом 445 ккал»):
+    // she has removed a row since, and the alert already says what happened.
+    await expect(sheet.getByRole('status').filter({ hasText: 'Знайдено' })).toHaveCount(0);
+  });
+
+  test('the daily limit hit on recalculation locks the button without dropping her focus', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    await mockRecalc(page, {
+      status: 429,
+      body: { error: 'rate_limited', message: 'Ліміт підрахунків на сьогодні вичерпано' },
+    });
+    const { sheet, card } = await estimatePlate(app);
+    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
+    await recalcButton(card).focus();
+    await page.keyboard.press('Enter');
+
+    await expect(card.getByRole('alert')).toHaveText('Ліміт підрахунків на сьогодні вичерпано');
+    await expect(recalcButton(card)).toBeDisabled();
+    // «Додати» still adds what is on screen.
+    await expect(card.getByRole('button', { name: 'Додати 445 ккал' })).toBeEnabled();
+    // Focus was on «Перерахувати»: it must not fall to <body> (VoiceOver loses her place).
+    await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(false);
+    // One line about the limit in the sheet, like a 429 on the first estimate.
+    await expect(sheet.getByText('Ліміт підрахунків на сьогодні вичерпано', { exact: true })).toHaveCount(1);
   });
 });
 

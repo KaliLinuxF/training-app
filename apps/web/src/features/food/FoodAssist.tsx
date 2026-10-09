@@ -15,15 +15,16 @@ import { useFoodEstimate, type EstimateDeps, type EstimatePhase } from './estima
 import { focusFirst, focusIsAround } from './focus';
 import { useFoodStatus } from './foodStatus';
 import { FrequentDishes } from './FrequentDishes';
+import { draftsToItems } from './drafts';
 import {
   addedMessage,
   buildFoodAdd,
   COMPOSER_CLOSED,
   composerEdited,
   consumedTail,
-  draftsToItems,
   foundMessage,
   openComposer,
+  recalculatedMessage,
   type ComposerState,
 } from './model';
 import { unestimatedTail } from './tail';
@@ -100,6 +101,8 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
   const blocked = !online || exhausted;
   const hint = !online ? 'Потрібен інтернет' : exhausted ? 'Ліміт підрахунків на сьогодні вичерпано' : null;
   const error = phase.kind === 'idle' ? phase.error : undefined;
+  // A 429 on «Перерахувати»: the card's alert says it and takes over the hint's id (one line).
+  const hintInCard = phase.kind === 'result' && phase.recalc.error === hint;
   const composerShown = composer.open && phase.kind === 'idle';
   const view: View =
     phase.kind === 'loading' ? 'loading' : phase.kind === 'result' ? 'result' : composerShown ? 'composer' : 'actions';
@@ -171,8 +174,12 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
   };
 
   const addEstimate = () => {
-    if (phase.kind !== 'result' || !phase.drafts.length) return;
-    const add = buildFoodAdd(draftsToItems(phase.drafts), phase.photoId, phase.consumed);
+    // Not while «Рахую…»: the rows still carry the old dish's kcal (the card's button waits too).
+    if (phase.kind !== 'result' || phase.recalc.pending !== null) return;
+    // Her corrected names and portions: «Часті страви» learn them, not the model's first guess.
+    const items = draftsToItems(phase.drafts);
+    if (!items.length) return;
+    const add = buildFoodAdd(items, phase.photoId, phase.consumed);
     onAdd(add);
     announceAdded(add);
     est.reset();
@@ -230,7 +237,7 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
               onChange={onFile}
             />
           </div>
-          {hint && hint !== error && (
+          {hint && hint !== error && !hintInCard && (
             <p id={hintId} className={s.hint}>
               {hint}
             </p>
@@ -284,8 +291,13 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
               preview={phase.preview}
               remaining={status.remainingToday}
               titleRef={titleRef}
-              onEditKcal={est.editKcal}
+              recalculating={phase.recalc.pending !== null}
+              recalcError={phase.recalc.error}
+              blockedHint={hint ? { id: hintId, text: hint } : undefined}
+              onEdit={est.editItem}
+              onAddItem={est.addItem}
               onRemove={est.removeItem}
+              onRecalculate={est.recalculate}
               onAdd={addEstimate}
               onCancel={est.reset}
               onRetry={retry}
@@ -307,6 +319,13 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
 /** Polite status for screen readers; errors go to the inline role=alert instead. */
 function liveMessage(phase: EstimatePhase, added: Announcement | null): Announcement | null {
   if (phase.kind === 'loading') return { key: `l${phase.id}`, text: 'Рахую калорії…' };
-  if (phase.kind === 'result') return { key: `r${phase.id}`, text: foundMessage(phase.found.count, phase.found.total) };
-  return added;
+  if (phase.kind !== 'result') return added;
+  // «✨ Перерахувати»: progress, then the new total; until the first one, what the estimate found.
+  const { pending, done, error } = phase.recalc;
+  if (pending !== null) return { key: `l${pending}`, text: 'Рахую калорії…' };
+  if (done) return { key: `d${done.id}`, text: recalculatedMessage(done.total) };
+  // Failed: the card's alert says so. What the estimate first found is out of date by now, and a
+  // new key would read it out again.
+  if (error !== undefined) return null;
+  return { key: `r${phase.id}`, text: foundMessage(phase.found.count, phase.found.total) };
 }

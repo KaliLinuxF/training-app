@@ -20,6 +20,7 @@ export const MESSAGES = {
   notJpeg: 'Фото має бути у форматі JPEG',
   photoTooLarge: 'Фото завелике',
   badPhotoId: 'Некоректний ідентифікатор фото',
+  photoNotFound: 'Фото не знайдено',
   internal: 'Помилка сервера',
 } as const;
 

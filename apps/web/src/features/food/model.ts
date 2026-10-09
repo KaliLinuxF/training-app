@@ -1,6 +1,7 @@
 /**
- * Pure view logic of the food feature: estimate line formatting, the composer, editable item
- * drafts, «Часті страви» chips and screen-reader copy. No React, no I/O.
+ * Pure view logic of the food feature: estimate line formatting, the composer, kcal input and
+ * estimate normalisation, «Часті страви» chips and screen-reader copy. No React, no I/O.
+ * The editable result rows are in `drafts.ts`.
  */
 import {
   f0,
@@ -92,19 +93,7 @@ export function consumedTail(c: ComposerState): string {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Editable estimate items
-
-/** An estimate row while she reviews it: kcal is kept as the raw input text. */
-export interface DraftItem {
-  id: string;
-  name: string;
-  portion: string;
-  kcalText: string;
-}
-
-export function toDrafts(items: readonly FoodEstimateItem[]): DraftItem[] {
-  return items.map((it, i) => ({ id: `i${i}`, name: it.name, portion: it.portion, kcalText: String(it.kcal) }));
-}
+// Estimate items (the editable rows themselves live in `drafts.ts`)
 
 /** Keeps digits only, at most 5 of them (the kcal input). */
 export function sanitizeKcalInput(text: string): string {
@@ -116,14 +105,6 @@ export function parseKcal(text: string): number {
   const digits = sanitizeKcalInput(text);
   if (!digits) return 0;
   return Math.min(LIMITS.kcal.max, Math.max(LIMITS.kcal.min, parseInt(digits, 10)));
-}
-
-export function draftsToItems(drafts: readonly DraftItem[]): FoodEstimateItem[] {
-  return drafts.map((d) => ({ name: d.name.trim(), portion: d.portion.trim(), kcal: parseKcal(d.kcalText) }));
-}
-
-export function draftsTotal(drafts: readonly DraftItem[]): number {
-  return drafts.reduce((acc, d) => acc + parseKcal(d.kcalText), 0);
 }
 
 /** Server items can (in theory) exceed the op limits; trim them so `food.use` stays valid. */
@@ -191,6 +172,11 @@ export function emptyEstimateComment(photo: boolean): string {
 export function foundMessage(count: number, total: number): string {
   if (count <= 0) return 'Нічого не знайдено';
   return `Знайдено ${count} ${pluralUk(count, 'позицію', 'позиції', 'позицій')}, разом ${f0(total)} ккал`;
+}
+
+/** Screen-reader announcement after «✨ Перерахувати»: «Перераховано: разом 520 ккал». */
+export function recalculatedMessage(total: number): string {
+  return `Перераховано: разом ${f0(total)} ккал`;
 }
 
 /** Announcement after «Додати» or a chip: «Додано «Борщ», 260 ккал» / «Додано 385 ккал». */
