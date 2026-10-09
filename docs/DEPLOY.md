@@ -14,7 +14,7 @@ committed `HEAD` by `deploy/deploy.sh`.
 │  compose project "training-app"  (/opt/training-app)                                           │
 │                                                                                                │
 │  ┌─ caddy ─────────────────────┐  reverse_proxy   ┌─ app ─────────────────────────────────┐    │
-│  │ caddy:2.11.7-alpine         │  app:3000        │ training-app:latest (built here)      │    │
+│  │ caddy:2.11.7-alpine         │  legko-app:3000  │ training-app:latest (built here)      │    │
 │  │ publishes 80, 443, 443/udp  │ ───────────────► │ node 24 · uid 1000 · read-only rootfs │    │
 │  │ TLS (Let's Encrypt), HSTS,  │  docker network  │ API /api/* + static PWA + Web Push    │    │
 │  │ gzip/zstd, bodies ≤ 17 MB   │                  │ no published ports · mem ≤ 512 MB     │    │
