@@ -95,6 +95,7 @@ describe('buildHomeModel — empty data (new user)', () => {
     expect(model.today).toEqual({
       food: 'Не записано',
       kcal: '—',
+      goal: expect.objectContaining({ state: 'empty', pct: 0 }),
       trained: null,
       training: 'ще не відмічено',
     });
@@ -156,9 +157,11 @@ describe('buildHomeModel — with data', () => {
     expect(model.today).toEqual({
       food: 'Записано',
       kcal: `${KCAL_1650} ккал`,
+      goal: expect.objectContaining({ state: 'ok' }),
       trained: true,
       training: 'Кардіо, Прес',
     });
+    expect(model.today.goal.text.replace(/\s/g, ' ')).toBe('Залишилось 50 з 1 700 ккал');
   });
 
   it('computes this week from Monday, against the last value before it', () => {

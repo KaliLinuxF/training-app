@@ -149,7 +149,14 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
               onPendingChange={onFoodPending}
             />
           </Field>
-          <KcalField label="Калорії за день" name="kcal" value={draft.kcal} onChange={(kcal) => set({ kcal })} error={errors.kcal} />
+          <KcalField
+            label="Калорії за день"
+            name="kcal"
+            value={draft.kcal}
+            onChange={(kcal) => set({ kcal })}
+            error={errors.kcal}
+            goal={data.settings.kcalGoal}
+          />
         </>
       )}
       {show.weight && (

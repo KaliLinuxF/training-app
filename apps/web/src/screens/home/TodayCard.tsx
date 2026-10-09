@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { KcalGoalLine } from '@/features/goal';
 import { Button, Card, CardHeader, Tile, TrainingToggle } from '@/ui';
 import type { HomeToday } from './homeModel';
 import s from './TodayCard.module.css';
@@ -28,8 +29,15 @@ export function TodayCard({ today, onOpen, onTrained }: TodayCardProps) {
       />
       <div className={s.tiles}>
         <Tile variant="entry" label="Харчування" value={today.food} onClick={onOpen} />
-        <Tile variant="entry" label="Калорії" value={today.kcal} onClick={onOpen} />
+        <Tile
+          variant="entry"
+          label="Калорії"
+          value={today.kcal}
+          tone={today.goal.state === 'over' ? 'acc' : undefined}
+          onClick={onOpen}
+        />
       </div>
+      <KcalGoalLine view={today.goal} />
       <div className={s.training}>
         <p id={trainingId} className={s.trainingLabel}>
           Тренування · <span className={s.trainingState}>{today.training}</span>

@@ -1,6 +1,7 @@
 /** Form blocks shared by the record and setup sheets (prototype lines 457–492). */
-import { fN, type MeasureKey } from '@legko/shared';
+import { fN, num, type MeasureKey } from '@legko/shared';
 import { useId } from 'react';
+import { KcalGoalLine, kcalGoalView } from '@/features/goal';
 import { MEASURE_LABELS } from '@/lib/stats';
 import { Button, Field, MeasureInputTile, NumberStepperField } from '@/ui';
 import { stepKcal, stepWeight, type StepRange } from '../helpers';
@@ -95,13 +96,16 @@ export interface KcalFieldProps {
   range?: StepRange;
   error: string | undefined;
   name?: string;
+  /** Daily kcal goal: shows a live «Залишилось … / Перевищено …» line under the field. */
+  goal?: number;
 }
 
 /** «Калорії за день» — kcal input with −50 / +50 (md), digits only. */
-export function KcalField({ label, value, onChange, range, error, name }: KcalFieldProps) {
+export function KcalField({ label, value, onChange, range, error, name, goal }: KcalFieldProps) {
   const errId = useId();
+  const hint = goal != null && !error ? <KcalGoalLine view={kcalGoalView(num(value), goal)} /> : undefined;
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       <NumberStepperField
         size="md"
         unit="ккал"

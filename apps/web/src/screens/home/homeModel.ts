@@ -18,6 +18,7 @@ import {
   type MeasureKey,
   type ReminderKind,
 } from '@legko/shared';
+import { kcalGoalView, type KcalGoalView } from '@/features/goal';
 import {
   changeTone,
   dueReminders,
@@ -73,6 +74,8 @@ export interface HomeToday {
   food: string;
   /** «1 650 ккал» | «—» */
   kcal: string;
+  /** Today's kcal against settings.kcalGoal (bar + «Залишилось …» / «Перевищено …»). */
+  goal: KcalGoalView;
   trained: boolean | null;
   /** Types joined, «Було», «Не було» or «ще не відмічено». */
   training: string;
@@ -245,6 +248,7 @@ function buildToday(data: AppData, today: ISODate): HomeToday {
   return {
     food: hasFood ? 'Записано' : 'Не записано',
     kcal: entry && ok(entry.kcal) ? `${f0(entry.kcal)} ккал` : DASH,
+    goal: kcalGoalView(entry?.kcal, data.settings.kcalGoal),
     trained: entry?.trained ?? null,
     training: trainingLabel(entry),
   };
