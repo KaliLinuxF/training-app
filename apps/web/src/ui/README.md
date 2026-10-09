@@ -301,24 +301,66 @@ const shown = useRetained(sheet);    // keeps the content during the exit animat
 </Sheet>
 ```
 
-`SheetProps { open, onClose, heading, dateNav?, footer?, children?, onExited? }`;
-`SheetDateNav { date, weekday, onPrev, onNext, canPrev?, canNext?, prevLabel? = 'Попередній день', nextLabel? = 'Наступний день' }`.
+`SheetProps { open, onClose, heading, dateNav?, footer?, children?, onExited?, size? }`;
+`SheetDateNav { date, weekday, onPrev, onNext, canPrev?, canNext?, prevLabel? = 'Попередній день', nextLabel? = 'Наступний день' }`;
+`size: 'default' | 'compact'` (default `'default'`).
 
 - Portal into `<body>`; backdrop `--backdrop` (z 60), padded by `--safe-left` / `--safe-right` (landscape iPhone). Panel
   `--paper`, column, scrolls as a whole.
 - Mobile: bottom-aligned, `max-width 440`, radius `--r28 --r28 0 0`, `max-height 92dvh`, slides up 280ms
   `--ease-out`. Desktop (`useIsDesktop()`): centred, `max-width 560`, radius `--r28`, `max-height min(720px, 92dvh)`.
+- `size="compact"` — a small window (one food position): phones `max-height 86dvh`; desktop `max-width 440` (as tall
+  as any desktop sheet: `max-height min(720px, 92dvh)`). Everything else (header, body, footer) is the same.
 - Sticky header (padding `10px 18px 0`, gap 12): 40×5 `--line3` handle; heading 14/500 muted (`<h2>`, the dialog's
   name) + 40px round `--line` «✕» («Закрити», 44px tap area); optional `dateNav` (card-surface `StepNav`, date display 22/700
   −0.02em, weekday 13 muted, padding-bottom 10). Without `dateNav` the header gets `padding-bottom: 10px`.
 - Body: padding `4px 18px 18px`, column gap 18 — put `<Field>`s here.
 - Sticky footer: padding `12px 18px calc(20px + safe-bottom)`, `--line` top border.
 - Closes on Escape, backdrop click (press must start on the backdrop), «✕», and (phones) dragging the header down.
-- Focus moves to the dialog on open, Tab is trapped inside, focus returns to the opener after closing.
+- Focus moves to the dialog on open — unless the content already took it (`autoFocus`, or focused inside the tap so
+  the iPhone keyboard opens), then it stays there. Tab is trapped inside, focus returns to the opener after closing.
 - Locks page scroll iOS-safely (`html.scroll-locked` + fixed body at the current offset, restored afterwards).
-- Stays mounted for `SHEET_EXIT_MS` (240ms) after `open` turns false, then calls `onExited`.
+- Stays mounted for `SHEET_EXIT_MS` (240ms) after `open` turns false, then calls `onExited`. Meanwhile its backdrop
+  stays an invisible shield over everything under it (only the panel stops taking presses), so the second tap of a
+  double tap on «Зберегти» / «Готово» lands on nothing — not on the page, not on the sheet below. A press on the shield
+  doesn't close anything or move focus.
 
 `useRetained(value)` returns `value`, or the last non-null value after it became `null`.
+
+### Stacked sheets (a second window over a sheet)
+
+No extra props: render another `<Sheet>` — usually inside the first sheet's content — and open it. The AI estimate's
+item editor over «Запис дня»:
+
+```tsx
+const shownItem = useRetained(editing);        // keeps the editor filled while it slides out
+<Sheet open={editing !== null} onClose={closeEditor} heading="Позиція" size="compact" footer={…}>
+  {shownItem && <ItemFields key={shownItem.key} … />}
+</Sheet>
+```
+
+- Drawn above the sheet under it: `z-index` 60 + 2 per level (capped at 68 — below the photo viewer 70, the toast 80
+  and `ui.confirm()` 90), later in `<body>`. Its backdrop is two coats of `--backdrop` (over the sheet below ≈ 0.66 light,
+  0.80 dark), so that sheet and its solid «Зберегти» recede. Phones: slides up from the bottom with `max-height 86dvh`,
+  so the sheet underneath peeks out above it; the bottom-aligned footers coincide («Готово» over «Зберегти»). Desktop:
+  centred modal exactly as tall as a desktop sheet may be (`min-height` = `max-height` = `min(720px, 92dvh)`), so its
+  footer covers the footer of the sheet below instead of sitting right above it, whatever its content (a compact one is
+  narrower: only the ends of the footer below show at its sides, under the double dim).
+- Only the top sheet reacts to Escape, backdrop presses and drag-down. Every sheet under it is `inert` (no focus, no
+  taps, hidden from VoiceOver) until the top one starts closing — during its exit animation the sheet below is live again
+  (focus goes back there), while taps still land on the top sheet's backdrop until it has gone (see above).
+- One shared, ref-counted scroll lock: the page stays locked until the last sheet is gone, then the scroll position is
+  restored once.
+- Focus moves into the top sheet and Tab is trapped there. As soon as it starts closing, focus goes back to the element
+  that opened it in the sheet below (the row, «+ позиція»), or to that sheet's panel when the opener is gone (the row was
+  deleted). It is not pulled back again when the top sheet unmounts, and not taken from `ui.confirm()` while it is open.
+  To land somewhere else (the row just added), focus it in a `useEffect` of the commit that closes the top sheet, or
+  after `flushSync`: the sheet below stops being inert in that commit's layout phase, and focus the top sheet no
+  longer holds is left alone. (Not straight in the click handler before the close has rendered: inert then.)
+- A sheet rendered inside another sheet's content stacks above it even when both mount in the same render; sibling
+  sheets stack in the order they open. Logic: `sheet/stack.ts`.
+- React events from the inner sheet still bubble to its React parents (portals do that): don't wrap the inner `<Sheet>`
+  in elements with click / key handlers.
 
 ## App shell (`@/shell/AppShell`)
 

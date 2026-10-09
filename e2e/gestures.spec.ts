@@ -1,4 +1,5 @@
 import type { Locator, Page } from '@playwright/test';
+import { mockFood } from './support/food';
 import { expect, test } from './support/test';
 
 /**
@@ -81,5 +82,46 @@ test.describe('touch gestures (iPhone)', () => {
     await touchDrag(page, start, { x: start.x, y: start.y + 300 });
     await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
     await app.expectSheetClosed();
+  });
+
+  test('dragging the item editor down closes only it; with changes it asks and snaps back', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page);
+    await app.goto('/');
+    await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
+    const day = app.sheet('Запис дня');
+    await day.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
+    await day.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ і хліб');
+    await day.getByRole('button', { name: 'Порахувати', exact: true }).click();
+    const card = day.getByRole('region', { name: 'Оцінка калорій' });
+    const borshch = card.getByRole('button', { name: /^Борщ, / });
+
+    await borshch.click();
+    const editor = page.getByRole('dialog', { name: 'Позиція', exact: true });
+    const heading = editor.getByRole('heading', { name: 'Позиція' });
+    let start = await center(heading);
+    await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+    await expect(editor).toBeHidden();
+    // The day sheet under it stays, live again, with focus back on the row.
+    await expect(day).toBeVisible();
+    await expect(borshch).toBeFocused();
+
+    // A changed draft: the question, «Залишитись» slides the editor back with her change.
+    await borshch.click();
+    await editor.getByRole('textbox', { name: 'Скільки', exact: true }).fill('150');
+    start = await center(heading);
+    await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+    const ask = page.getByRole('alertdialog', { name: 'Скасувати зміни?' });
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
+    await expect.poll(() => editor.evaluate((el) => el.style.transform)).toBe('');
+    await expect(editor.getByRole('textbox', { name: 'Скільки', exact: true })).toHaveValue('150');
+
+    // Dragging the dimmed day sheet above the editor does nothing to either.
+    await touchDrag(page, { x: 40, y: 90 }, { x: 40, y: 420 });
+    await expect(editor).toBeVisible();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
   });
 });

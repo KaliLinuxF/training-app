@@ -5,11 +5,24 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Page, TestInfo } from '@playwright/test';
+import type { Locator, Page, TestInfo } from '@playwright/test';
+import type { FoodEstimateResponse } from '../packages/shared/src/index';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
 import { expect, test } from './support/test';
 
 const OUT = fileURLToPath(new URL('./__screenshots__/', import.meta.url));
+
+/** A plate with weighed and counted positions (the item editor's shots). */
+const EDITOR_ESTIMATE: FoodEstimateResponse = {
+  photoId: PHOTO_ID,
+  items: [
+    { name: 'Гречка', portion: '200 г', kcal: 220 },
+    { name: 'Котлета куряча', portion: '1 шт', kcal: 180 },
+    { name: 'Салат з огірків', portion: '100 г', kcal: 45 },
+  ],
+  totalKcal: 445,
+  comment: 'Олія в салаті — приблизно 1 ложка',
+};
 
 /**
  * Saves a screenshot. `fullPage` on desktop captures the whole page at once; on the phone the
@@ -172,6 +185,70 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await expect(app.sheet('Встановлення на iPhone')).toBeVisible();
         await shot(page, info, '80-sheet-install');
       }
+    });
+
+    test('estimate list and item editor', async ({ app, page }, info) => {
+      await mockFood(page, { estimate: EDITOR_ESTIMATE });
+      await app.goto('/');
+      await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
+      const day = app.sheet('Запис дня');
+      await day.locator('input[type="file"][accept="image/*"]').setInputFiles({
+        name: 'plate.jpg',
+        mimeType: 'image/jpeg',
+        buffer: FOOD_JPEG,
+      });
+      const card = day.getByRole('region', { name: 'Оцінка калорій' });
+      await expect(card).toContainText('Разом445 ккал');
+      await card.scrollIntoViewIfNeeded();
+      // The clean list: one tappable row per position.
+      await shot(page, info, '531-estimate-list');
+
+      // A position the model priced.
+      await card.getByRole('button', { name: /^Котлета куряча, / }).click();
+      const editor = page.getByRole('dialog', { name: 'Позиція', exact: true });
+      await expect(editor).toBeVisible();
+      await shot(page, info, '532-editor-row');
+      if (info.project.name === 'iphone') {
+        await editor.evaluate((el) => el.scrollTo(0, el.scrollHeight));
+        await shot(page, info, '532-editor-row-bottom');
+        await editor.evaluate((el) => el.scrollTo(0, 0));
+      }
+
+      // Another dish: the model has to price it.
+      await editor.getByRole('textbox', { name: 'Що це', exact: true }).fill('Котлета свиняча');
+      await expect(editor.getByText('змінено — уточни калорії')).toBeVisible();
+      await shot(page, info, '533-editor-changed-name');
+      // What changed is in view, not under the sticky footer: «✨ Перерахувати» is in the footer next
+      // to «Готово», and the stale number above it (on the phone its note and «Вписати вручну» too).
+      const footer = editor.getByRole('button', { name: 'Готово', exact: true }).locator('xpath=../..');
+      await expect(footer.getByRole('button', { name: 'Перерахувати' })).toBeInViewport();
+      const footerTop = await footer.evaluate((el) => el.getBoundingClientRect().top);
+      const bottomOf = (l: Locator) => l.evaluate((el) => el.getBoundingClientRect().bottom);
+      expect(await bottomOf(editor.getByText(/^180\s*ккал$/))).toBeLessThanOrEqual(footerTop);
+      if (info.project.name === 'iphone') {
+        expect(await bottomOf(editor.getByText('змінено — уточни калорії'))).toBeLessThanOrEqual(footerTop);
+        expect(await bottomOf(editor.getByRole('button', { name: 'Вписати вручну' }))).toBeLessThanOrEqual(
+          footerTop,
+        );
+      }
+      await editor.getByRole('button', { name: 'Закрити', exact: true }).click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Скасувати зміни' }).click();
+      await expect(editor).toBeHidden();
+
+      // A new position: «Часті страви» under the name, then one of them picked.
+      await card.getByRole('button', { name: '+ позиція' }).click();
+      const added = page.getByRole('dialog', { name: 'Нова позиція', exact: true });
+      await expect(added).toBeVisible();
+      await shot(page, info, '535-editor-new');
+      await added.getByRole('textbox', { name: 'Що це', exact: true }).fill('ка');
+      await shot(page, info, '534-editor-suggestion');
+      await added.getByRole('button', { name: /^Кава з молоком, / }).click();
+      await expect(added).toContainText('як у «Частих стравах»');
+      await shot(page, info, '536-editor-dish-picked');
+      await added.getByRole('button', { name: 'Додати позицію' }).click();
+      await expect(added).toBeHidden();
+      await card.scrollIntoViewIfNeeded();
+      await shot(page, info, '537-estimate-list-after');
     });
 
     test.describe('brand-new account', () => {

@@ -115,6 +115,78 @@ test.describe('iPhone ergonomics', () => {
     expect(below44(sizes)).toEqual([]);
   });
 
+  test('the estimate list and the item editor: 44px targets, no zoom on focus', async ({ app, page }) => {
+    await mockFood(page);
+    await app.goto('/');
+    await page.getByRole('button', { name: 'Відкрити день' }).click();
+    const sheet = app.sheet('Запис дня');
+    await sheet.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
+    await sheet.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ 300 г і 2 скибки хліба');
+    await sheet.getByRole('button', { name: 'Порахувати', exact: true }).click();
+    const card = sheet.getByRole('region', { name: 'Оцінка калорій' });
+    const sizes: Record<string, string> = {
+      'estimate row': await hitArea(card.getByRole('button', { name: /^Борщ, / })),
+      '«+ позиція»': await hitArea(card.getByRole('button', { name: '+ позиція' })),
+    };
+
+    await card.getByRole('button', { name: /^Хліб житній, / }).click();
+    const editor = page.getByRole('dialog', { name: 'Позиція', exact: true });
+    await expect(editor).toBeVisible();
+    // Measured with the panel scrolled to its top: the sticky footer covers nothing above it.
+    const top = async (name: string, locator: Locator) => {
+      await editor.evaluate((el) => el.scrollTo(0, 0));
+      sizes[name] = await locator.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const hits = (x: number, y: number) => {
+          const t = document.elementFromPoint(x, y);
+          return !!t && (t === el || el.contains(t));
+        };
+        const reach = (dx: number, dy: number) => {
+          let n = 0;
+          while (n < 30 && hits(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+          return n;
+        };
+        return `${reach(-1, 0) + reach(1, 0) + 1}×${reach(0, -1) + reach(0, 1) + 1}`;
+      });
+    };
+    await top('editor ✕', editor.getByRole('button', { name: 'Закрити', exact: true }));
+    await top('−', editor.getByRole('button', { name: 'Зменшити' }));
+    await top('+', editor.getByRole('button', { name: 'Збільшити' }));
+    await top('unit chip «мл»', editor.getByRole('button', { name: 'мл', exact: true }));
+    await top('multiplier «½»', editor.getByRole('button', { name: /^½/ }));
+    await top('«Порція текстом»', editor.getByRole('button', { name: 'Порція текстом' }));
+    await top('«Вписати вручну»', editor.getByRole('button', { name: 'Вписати вручну' }));
+    sizes['«Видалити позицію»'] = await hitArea(editor.getByRole('button', { name: 'Видалити позицію' }));
+    sizes['«Готово»'] = await hitArea(editor.getByRole('button', { name: 'Готово', exact: true }));
+    expect(below44(sizes)).toEqual([]);
+
+    // Every field the editor can show: name, amount, free-text portion, kcal by hand.
+    expect(await inputsBelow16px(page)).toEqual([]);
+    await editor.getByRole('button', { name: 'Вписати вручну' }).click();
+    await editor.getByRole('button', { name: 'Порція текстом' }).click();
+    expect(await inputsBelow16px(page)).toEqual([]);
+  });
+
+  test('the narrowest unit chip «г» in the item editor is 44px wide', async ({ app, page }) => {
+    await mockFood(page);
+    await app.goto('/');
+    await page.getByRole('button', { name: 'Відкрити день' }).click();
+    const sheet = app.sheet('Запис дня');
+    await sheet.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
+    await sheet.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ 300 г');
+    await sheet.getByRole('button', { name: 'Порахувати', exact: true }).click();
+    await sheet
+      .getByRole('region', { name: 'Оцінка калорій' })
+      .getByRole('button', { name: /^Борщ, / })
+      .click();
+    const editor = page.getByRole('dialog', { name: 'Позиція', exact: true });
+    await editor.evaluate((el) => el.scrollTo(0, 0));
+    const size = await hitArea(editor.getByRole('button', { name: 'г', exact: true }));
+    expect(below44({ 'unit chip «г»': size })).toEqual([]);
+  });
+
   test.describe('landscape', () => {
     // Plus / Pro Max in landscape: wider than the 900px desktop breakpoint, but a touch screen.
     test.use({ viewport: { width: 932, height: 430 }, screen: { width: 932, height: 430 } });

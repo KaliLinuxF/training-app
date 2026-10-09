@@ -1,0 +1,424 @@
+/*
+ * Item editor («Позиція»): the kit <Sheet size="compact"> body (padding 4px 18px 18px, gap 18) with
+ * three blocks — what it is, how much, how many kcal — and «Видалити позицію» apart at the bottom.
+ * Large controls: 54px fields, 52px − / +, 44px chips; every field 16px+ (iOS zooms smaller ones).
+ * Kept short so the kcal stay in view above the sticky footer: one row of unit chips (scrolling
+ * sideways on a phone), the text-portion switch on the «Скільки» label line, and «✨ Перерахувати»
+ * in the footer next to «Готово».
+ */
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Text fields: the kit's sheet field look (card, 1px line, r16), with the kit's 2px focus ring. */
+.input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 54px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.input:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+/* The border above shows focus instead of the global ring. */
+.input:focus-visible {
+  outline: none;
+}
+
+.name {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.portionText {
+  font-weight: 500;
+}
+
+/* «Часті страви» that match what she typed, and «повернути: <назва>». */
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Name and «· kcal» are two flex items: the gap is the space between them (a leading space would
+   be trimmed), and a long name is cut with «…» while the kcal stay. */
+.suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 150ms ease;
+}
+
+.suggestion:active {
+  transform: scale(0.98);
+}
+
+.suggestionName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestionKcal {
+  flex: none;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.restore {
+  border-color: var(--accLine);
+  background: var(--accT);
+  color: var(--accD);
+}
+
+/* «Скільки»: a kit <Field> (column, gap 10, label 13/600 muted) whose label line also holds
+   «Порція текстом» / «Вказати кількістю» on the right. */
+.howMuch {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.howMuchHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--muted);
+}
+
+/* A quiet text link on the 18px label line. Its 45px tap area reaches 17px up (into the 18px gap
+   above the block) and 10px down (exactly the gap to the − / + row), so it covers no other control. */
+.modeLink {
+  position: relative;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r12);
+  background: transparent;
+  color: var(--accD);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.modeLink::after {
+  content: '';
+  position: absolute;
+  inset: -17px -10px -10px;
+}
+
+/* Amount: 52px − / + around a big number with its unit inside on the right. */
+.amount {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  gap: 8px;
+  align-items: center;
+}
+
+.step {
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    opacity 150ms ease;
+}
+
+.step:active:not([aria-disabled='true']) {
+  transform: scale(0.96);
+}
+
+/* Locked (aria-disabled, so a tap down to the minimum keeps her focus on it). */
+.step[aria-disabled='true'] {
+  color: var(--faint);
+  cursor: default;
+}
+
+.amountWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.amountInput {
+  height: 52px;
+  padding: 0 72px 0 12px;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.unit {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* Unit chips: one row. Where they do not fit (a phone) it scrolls sideways, edge to edge of the
+   sheet (the body's 18px side padding moves inside the row), snapping to a chip. 4px above and
+   below leave room for the focus ring (2px + 2px offset), which the scrolling row would clip. */
+.unitsScroll {
+  margin: -4px -18px;
+  padding: 4px 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 18px;
+  scrollbar-width: none;
+}
+
+.unitsScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.units {
+  flex-wrap: nowrap;
+  width: max-content;
+  gap: 8px;
+}
+
+.units .chip {
+  flex: none;
+  scroll-snap-align: start;
+}
+
+.multipliers {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* 44px wide at least: the one-letter «г» too. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 0 14px;
+}
+
+.multipliers .chip {
+  padding: 0 6px;
+}
+
+.chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chip:disabled:active {
+  transform: none;
+}
+
+/* Kcal: a big number (an input after «Вписати вручну»). */
+.kcal {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.kcalUnit {
+  font-family: var(--font);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+
+.kcalField {
+  position: relative;
+}
+
+.kcalInput {
+  height: 64px;
+  padding: 0 64px 0 14px;
+  font-family: var(--display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.kcalField .kcalUnit {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.note {
+  margin: -4px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* «змінено — уточни калорії»: waits for the model, the card's «змінено» tag. */
+.noteTag {
+  align-self: flex-start;
+  margin-top: -2px;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: var(--accT);
+  color: var(--accD);
+  font-weight: 600;
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--accD);
+}
+
+.manual {
+  align-self: flex-start;
+  color: var(--accD);
+  font-weight: 600;
+}
+
+/* «Видалити позицію»: on its own under a divider, an outline button in the app's alert colour
+   (errors use --accD too) — not one more text link next to «Вписати вручну». */
+.danger {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.remove {
+  color: var(--accD);
+}
+
+/* Footer: «Готово» alone, or «✨ Перерахувати» and «Готово» side by side (both 56px, the kit's
+   large button). Each takes half; a longer label («Додати позицію») takes what it needs. */
+.footer {
+  display: flex;
+  gap: 10px;
+}
+
+.pair > * {
+  flex: 1 1 0;
+  width: auto;
+  white-space: nowrap;
+}
+
+.pair .save {
+  padding: 0 16px;
+}
+
+/* «✨ Перерахувати»: the same accent tint as the card's. */
+.recalc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 56px;
+  padding: 0 12px;
+  border: 1.5px solid transparent;
+  border-radius: var(--r16);
+  background: var(--accT);
+  color: var(--accD);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.recalc:active:not([aria-disabled='true']) {
+  transform: scale(0.98);
+}
+
+/* Offline or no estimates left (aria-disabled: it keeps her focus when locked under it). */
+.recalc[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* «Рахую…»: busy, not unavailable. */
+.recalc.busy {
+  opacity: 1;
+  cursor: progress;
+}
+
+@media (hover: hover) {
+  .suggestion:hover,
+  .step:hover:not([aria-disabled='true']) {
+    border-color: var(--line3);
+  }
+
+  .modeLink:hover {
+    text-decoration: underline;
+  }
+
+  .recalc:hover:not([aria-disabled='true']) {
+    border-color: var(--accLine);
+  }
+}

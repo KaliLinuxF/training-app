@@ -25,91 +25,81 @@
   flex-direction: column;
 }
 
-/*
- * Row: name (full width) + ✕, then portion + kcal, then an optional status line. Name and portion
- * are 44px-tall text fields that read as plain text (borderless) until focused.
- */
 .item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    'name remove'
-    'portion kcal'
-    'note note';
-  align-items: center;
-  column-gap: 8px;
-  padding: 6px 0;
   border-top: 1px solid var(--line2);
 }
 
 .item:first-child {
-  padding-top: 0;
   border-top: 0;
 }
 
-.item:last-child {
-  padding-bottom: 0;
-}
-
 /*
- * 16px (iOS zooms into smaller fields on focus). The text lines up with the card content; the
- * padding (and the focus ring around it) reaches into the card's own padding.
+ * One position, one tap target (opens the item editor): name (+ tags) over the portion on the left,
+ * kcal and › on the right. The text lines up with the card content; the pressed / hover background
+ * and the focus ring reach 10px into the card's padding.
  */
-.name,
-.portion {
-  display: block;
-  width: calc(100% + 10px);
-  min-width: 0;
-  height: 44px;
-  margin-left: -10px;
-  padding: 0 10px;
-  border: 1px solid transparent;
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  column-gap: 10px;
+  width: calc(100% + 20px);
+  min-height: 56px;
+  margin: 0 -10px;
+  padding: 8px 10px;
+  border: 0;
   border-radius: var(--r12);
   background: transparent;
-  font-size: 16px;
-  text-overflow: ellipsis;
-  outline: none;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.row:active {
+  background: var(--line2);
+}
+
+.item:first-child .row {
+  margin-top: -8px;
+}
+
+.item:last-child .row {
+  margin-bottom: -8px;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nameLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
 }
 
 .name {
-  grid-area: name;
-  color: var(--ink);
+  min-width: 0;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.nameless {
+  color: var(--muted);
 }
 
 .portion {
-  grid-area: portion;
-  color: var(--muted);
-  font-weight: 500;
-}
-
-.name:focus,
-.portion:focus {
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px var(--focus);
-  background: var(--card);
-}
-
-/* The border above shows focus instead of the global ring. */
-.name:focus-visible,
-.portion:focus-visible,
-.kcalInput:focus-visible {
-  outline: none;
-}
-
-.portion:focus {
-  color: var(--ink);
-}
-
-.note {
-  grid-area: note;
-  margin: 0 0 6px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.3;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 /* «змінено»: waits for «✨ Перерахувати». */
@@ -119,74 +109,35 @@
   border-radius: 99px;
   background: var(--accT);
   color: var(--accD);
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+/* «вручну»: her own number, nothing to wait for. */
+.tagManual {
+  background: var(--line2);
+  color: var(--ink2);
 }
 
 .kcal {
-  grid-area: kcal;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.kcalInput {
-  width: 72px;
-  height: 44px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r12);
-  background: var(--paper);
-  color: var(--ink);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  text-align: right;
-  outline: none;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
+  white-space: nowrap;
 }
 
-.kcalInput:focus {
-  border-color: var(--focus);
-  box-shadow: 0 0 0 1px var(--focus);
-  background: var(--card);
-}
-
-.unit {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--muted);
-}
-
-/* Optically aligned with the card edge: the 44px tap box sticks 12px into the padding. */
-.remove {
-  grid-area: remove;
-  justify-self: end;
-  width: 44px;
-  height: 44px;
-  margin-right: -12px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font-size: 13px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 150ms ease;
-}
-
-.remove:active {
-  background: var(--line2);
+.chevron {
+  font-size: 20px;
+  line-height: 1;
+  color: var(--faint);
 }
 
 /* «+ позиція»: a text button right under the rows, its text in line with theirs. */
 .addRow {
   align-self: flex-start;
   min-height: 44px;
-  margin: -8px 0 -6px -10px;
+  margin: -6px 0 -6px -10px;
   padding: 0 10px;
   border: 0;
   border-radius: var(--r12);
@@ -200,6 +151,12 @@
 
 .addRow:active {
   background: var(--accT);
+}
+
+.unit {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
 }
 
 /* «✨ Перерахувати»: the same accent look as «✨ Порахувати» above the card. */
@@ -405,15 +362,12 @@
 }
 
 @media (hover: hover) {
-  .remove:hover {
+  .row:hover {
     background: var(--line2);
-    color: var(--ink);
   }
 
-  /* With a mouse, show that the text can be edited. */
-  .name:hover:not(:focus),
-  .portion:hover:not(:focus) {
-    border-color: var(--line);
+  .row:hover .chevron {
+    color: var(--muted);
   }
 
   .addRow:hover {

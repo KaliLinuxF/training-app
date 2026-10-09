@@ -7,7 +7,7 @@ import { expect, test } from './support/test';
 
 const TODAY_FOOD = 'Вівсянка з бананом, кава';
 
-/** A plate with weighed and counted items: grams can be rescaled on the device, «1 шт» cannot. */
+/** A plate with weighed and counted items: grams and pieces rescale on the device, another dish does not. */
 const PLATE_ESTIMATE: FoodEstimateResponse = {
   photoId: PHOTO_ID,
   items: [
@@ -29,14 +29,57 @@ async function openToday(app: App): Promise<Locator> {
 
 const estimateCard = (sheet: Locator) => sheet.getByRole('region', { name: 'Оцінка калорій' });
 
-/** Fields of estimate row `n` (1-based): every row is editable. */
-const rowField = (card: Locator, field: 'Назва' | 'Порція' | 'Калорії', n: number) =>
-  card.getByRole('textbox', { name: `${field} позиції ${n}`, exact: true });
+const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-async function expectRow(card: Locator, n: number, row: { name: string; portion: string; kcal: string }) {
-  await expect(rowField(card, 'Назва', n)).toHaveValue(row.name);
-  await expect(rowField(card, 'Порція', n)).toHaveValue(row.portion);
-  await expect(rowField(card, 'Калорії', n)).toHaveValue(row.kcal);
+/** A position of the card — one button that opens its editor — by the start of its name. */
+const row = (card: Locator, name: string) =>
+  card.getByRole('button', { name: new RegExp(`^${escapeRegExp(name)}, `) });
+
+interface RowText {
+  name: string;
+  portion: string;
+  kcal: string;
+  /** «змінено» (waits for the model) or «вписано вручну» (her own kcal). */
+  tag?: 'змінено' | 'вписано вручну';
+}
+
+/** Position `n` (1-based) as VoiceOver reads it: «Борщ, 300 г, 180 ккал. Змінити». */
+async function expectRow(card: Locator, n: number, { name, portion, kcal, tag }: RowText) {
+  const label = [name, portion, `${kcal} ккал`, tag].filter(Boolean).join(', ');
+  await expect(
+    card
+      .getByRole('listitem')
+      .nth(n - 1)
+      .getByRole('button'),
+  ).toHaveAccessibleName(`${label}. Змінити`);
+}
+
+/** The item editor stacked over the day sheet. */
+const itemEditor = (page: Page, heading: 'Позиція' | 'Нова позиція' = 'Позиція') =>
+  page.getByRole('dialog', { name: heading, exact: true });
+
+const editorField = (editor: Locator, name: 'Що це' | 'Скільки' | 'Калорії') =>
+  editor.getByRole('textbox', { name, exact: true });
+
+/** Opens a position, changes it in the editor and taps «Готово»; the editor slides away. */
+async function editRow(page: Page, card: Locator, name: string, change: (editor: Locator) => Promise<void>) {
+  await row(card, name).click();
+  const editor = itemEditor(page);
+  await expect(editor).toBeVisible();
+  await change(editor);
+  await editor.getByRole('button', { name: 'Готово', exact: true }).click();
+  await expect(editor).toBeHidden();
+}
+
+const renameRow = (page: Page, card: Locator, from: string, to: string) =>
+  editRow(page, card, from, (editor) => editorField(editor, 'Що це').fill(to));
+
+/** «Видалити позицію» in the position's editor. */
+async function removeRow(page: Page, card: Locator, name: string) {
+  await row(card, name).click();
+  const editor = itemEditor(page);
+  await editor.getByRole('button', { name: 'Видалити позицію' }).click();
+  await expect(editor).toBeHidden();
 }
 
 const countButton = (sheet: Locator) =>
@@ -67,7 +110,7 @@ async function estimateText(sheet: Locator, text: string): Promise<void> {
 }
 
 test.describe('AI calorie estimate (mocked)', () => {
-  test('from text: edit an item, «Додати N ккал» appends the line and adds the kcal', async ({
+  test('from text: correct a position in its editor, «Додати N ккал» appends the line and adds the kcal', async ({
     app,
     page,
     server,
@@ -90,7 +133,22 @@ test.describe('AI calorie estimate (mocked)', () => {
       card.getByRole('heading', { name: 'Оцінка калорій' }).locator('[tabindex="-1"]'),
     ).toBeFocused();
 
-    await rowField(card, 'Калорії', 2).fill('160');
+    // A clean list: no fields in the card.
+    await expect(card.getByRole('textbox')).toHaveCount(0);
+    await editRow(page, card, 'Хліб житній', async (editor) => {
+      await editor.getByRole('button', { name: 'Вписати вручну' }).click();
+      const kcalField = editorField(editor, 'Калорії');
+      await expect(kcalField).toBeFocused();
+      await kcalField.fill('160');
+    });
+    // Back on the row she opened, with her number.
+    await expect(row(card, 'Хліб житній')).toBeFocused();
+    await expectRow(card, 2, {
+      name: 'Хліб житній',
+      portion: '2 скибки',
+      kcal: '160',
+      tag: 'вписано вручну',
+    });
     await expect(card).toContainText('Разом340 ккал');
     await card.getByRole('button', { name: 'Додати 340 ккал' }).click();
     await expect(card).toBeHidden();
@@ -190,8 +248,10 @@ test.describe('AI calorie estimate (mocked)', () => {
     const card = estimateCard(sheet);
     // One estimate used: 2 left today.
     await expect(card).toContainText('Сьогодні ще 2 підрахунки');
-    await card.getByRole('button', { name: 'Прибрати «Борщ»' }).click();
+    await removeRow(page, card, 'Борщ');
     await expect(card).toContainText('1 позиція · можна виправити');
+    // The row is gone with its editor: focus moves on to the next one.
+    await expect(row(card, 'Хліб житній')).toBeFocused();
     await expect(card.getByRole('button', { name: 'Додати 140 ккал' })).toBeVisible();
     await card.getByRole('button', { name: 'Скасувати' }).click();
     await expect(card).toBeHidden();
@@ -293,20 +353,30 @@ test.describe('AI calorie estimate (mocked)', () => {
     await expectRow(card, 2, { name: 'Котлета куряча', portion: '1 шт', kcal: '180' });
     await expect(card).toContainText('Разом445 ккал');
 
-    // Same dish, new grams: proportional kcal on the device, no request.
-    await rowField(card, 'Порція', 1).fill('150 г');
-    await expect(rowField(card, 'Калорії', 1)).toHaveValue('165');
-    await expect(card).toContainText('перераховано за вагою');
+    // Same dish, new grams: proportional kcal on the device, live in the editor, no request.
+    await editRow(page, card, 'Гречка', async (editor) => {
+      await editorField(editor, 'Скільки').fill('150');
+      await expect(editor).toContainText('165');
+      await expect(editor).toContainText('перераховано за вагою');
+    });
+    await expectRow(card, 1, { name: 'Гречка', portion: '150 г', kcal: '165' });
     await expect(card).toContainText('Разом390 ккал');
     await expect(card.getByRole('button', { name: 'Перерахувати' })).toHaveCount(0);
 
     // Another dish and amount: marked «змінено» until the model prices it.
-    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
-    await rowField(card, 'Порція', 2).fill('120 г');
+    await editRow(page, card, 'Котлета куряча', async (editor) => {
+      await editorField(editor, 'Що це').fill('Котлета свиняча');
+      await editor
+        .getByRole('group', { name: 'Одиниця' })
+        .getByRole('button', { name: 'г', exact: true })
+        .click();
+      await editorField(editor, 'Скільки').fill('120');
+      await expect(editor.getByText('змінено — уточни калорії')).toBeVisible();
+    });
     await expect(card.getByText('змінено', { exact: true })).toBeVisible();
     await card.getByRole('button', { name: 'Перерахувати' }).click();
 
-    await expect(rowField(card, 'Калорії', 2)).toHaveValue('310');
+    await expectRow(card, 2, { name: 'Котлета свиняча', portion: '120 г', kcal: '310' });
     await expect(card).toContainText('Разом520 ккал');
     await expect(announced(sheet, 'Перераховано: разом 520 ккал')).toHaveCount(1);
     await expect(card.getByText('змінено', { exact: true })).toHaveCount(0);
@@ -501,7 +571,7 @@ async function estimatePlate(app: App): Promise<{ sheet: Locator; card: Locator 
 const recalcButton = (card: Locator) => card.getByRole('button', { name: /Перерахувати|Рахую…/ });
 
 test.describe('Correcting a photo estimate', () => {
-  test('removed, added, blank and self-priced rows: the body fits the server schema and kcal land by position', async ({
+  test('removed, added, text-portion and self-priced rows: the body fits the server schema and kcal land by position', async ({
     app,
     page,
   }) => {
@@ -509,27 +579,51 @@ test.describe('Correcting a photo estimate', () => {
     const sent = await mockRecalc(page, { kcal: [300, 70, 110, 200] });
     const { card } = await estimatePlate(app);
 
-    // She did not eat the buckwheat.
-    await card.getByRole('button', { name: 'Прибрати «Гречка»' }).click();
-    // Comma decimals in kilograms against grams: 45 × 150 / 100, on the device.
-    await rowField(card, 'Порція', 2).fill('0,15 кг');
-    await expect(rowField(card, 'Калорії', 2)).toHaveValue('68');
+    // She did not eat the buckwheat: no question, focus on the next position.
+    await removeRow(page, card, 'Гречка');
+    await expect(row(card, 'Котлета куряча')).toBeFocused();
+    // Comma decimals in kilograms against grams, written as text: 45 × 150 / 100, on the device.
+    await editRow(page, card, 'Салат з огірків', async (editor) => {
+      await editor.getByRole('button', { name: 'Порція текстом' }).click();
+      await expect(editorField(editor, 'Скільки')).toBeFocused();
+      await editorField(editor, 'Скільки').fill('0,15 кг');
+      await expect(editor).toContainText('68');
+    });
+    await expectRow(card, 2, { name: 'Салат з огірків', portion: '0,15 кг', kcal: '68' });
     // Another dish.
-    await rowField(card, 'Назва', 1).fill('Котлета свиняча');
-    await rowField(card, 'Порція', 1).fill('~120 г');
-    // A missing row the model prices, one she prices herself, one left blank.
+    await editRow(page, card, 'Котлета куряча', async (editor) => {
+      await editorField(editor, 'Що це').fill('Котлета свиняча');
+      await editor.getByRole('button', { name: 'Порція текстом' }).click();
+      await editorField(editor, 'Скільки').fill('~120 г');
+    });
+    // A missing row the model prices, one she prices herself, one she gives up on.
+    const added = itemEditor(page, 'Нова позиція');
     await card.getByRole('button', { name: '+ позиція' }).click();
-    await expect(rowField(card, 'Назва', 3)).toBeFocused();
-    await rowField(card, 'Назва', 3).fill('Сметана');
-    await rowField(card, 'Порція', 3).fill('2 ст. л.');
+    await expect(editorField(added, 'Що це')).toBeFocused();
+    await expect(added.getByRole('button', { name: 'Додати позицію' })).toBeDisabled();
+    await editorField(added, 'Що це').fill('Сметана');
+    await added.getByRole('button', { name: 'Порція текстом' }).click();
+    await editorField(added, 'Скільки').fill('2 ст. л.');
+    await added.getByRole('button', { name: 'Додати позицію' }).click();
+    await expect(added).toBeHidden();
+    await expect(row(card, 'Сметана')).toBeFocused();
+
     await card.getByRole('button', { name: '+ позиція' }).click();
-    await rowField(card, 'Назва', 4).fill('Хліб');
-    await rowField(card, 'Калорії', 4).fill('90');
+    await editorField(added, 'Що це').fill('Хліб');
+    await added.getByRole('button', { name: 'Вписати вручну' }).click();
+    await editorField(added, 'Калорії').fill('90');
+    await added.getByRole('button', { name: 'Додати позицію' }).click();
+    await expect(added).toBeHidden();
+
+    // Opened and closed untouched: nothing added, nothing asked.
     await card.getByRole('button', { name: '+ позиція' }).click();
+    await added.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await expect(added).toBeHidden();
+    await expect(card.getByRole('listitem')).toHaveCount(4);
     await expect(card.getByText('змінено', { exact: true })).toHaveCount(2);
 
     await recalcButton(card).click();
-    await expect(rowField(card, 'Калорії', 1)).toHaveValue('300');
+    await expectRow(card, 1, { name: 'Котлета свиняча', portion: '~120 г', kcal: '300' });
     expect(sent).toHaveLength(1);
     expect(foodEstimateRequestSchema.safeParse(sent[0]).success).toBe(true);
     expect(sent[0]).toEqual({
@@ -542,17 +636,86 @@ test.describe('Correcting a photo estimate', () => {
       ],
       photoId: PHOTO_ID,
     });
-    // Rescaled and self-priced rows keep their numbers; the blank row is not counted.
+    // Rescaled and self-priced rows keep their numbers.
     await expectRow(card, 2, { name: 'Салат з огірків', portion: '0,15 кг', kcal: '68' });
     await expectRow(card, 3, { name: 'Сметана', portion: '2 ст. л.', kcal: '110' });
-    await expectRow(card, 4, { name: 'Хліб', portion: '', kcal: '90' });
-    await expectRow(card, 5, { name: '', portion: '', kcal: '' });
+    await expectRow(card, 4, { name: 'Хліб', portion: '', kcal: '90', tag: 'вписано вручну' });
     await expect(card).toContainText('Разом568 ккал');
 
     await card.getByRole('button', { name: 'Додати 568 ккал' }).click();
     await expect(app.page.getByRole('textbox', { name: 'Що я їла' })).toHaveValue(
       `${TODAY_FOOD}\nКотлета свиняча (~120 г), салат з огірків (0,15 кг), сметана (2 ст. л.), хліб — 568 ккал`,
     );
+  });
+
+  test('the position editor: − / + rescale pieces, its own «✨ Перерахувати», a frequent dish, discard asks', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const sent = await mockRecalc(page, { kcal: [220, 330, 45] });
+    const { card } = await estimatePlate(app);
+
+    // One more cutlet: the same count unit rescales on the device.
+    await row(card, 'Котлета куряча').click();
+    const editor = itemEditor(page);
+    await expect(editor).toBeVisible();
+    await editor.getByRole('button', { name: 'Збільшити' }).click();
+    await expect(editorField(editor, 'Скільки')).toHaveValue('2');
+    await expect(editor).toContainText('360');
+    await expect(editor).toContainText('перераховано за кількістю');
+    // Another dish: asked right here, the rest of the plate as context.
+    await editorField(editor, 'Що це').fill('Котлета свиняча');
+    await expect(editor.getByText('змінено — уточни калорії')).toBeVisible();
+    await editor.getByRole('button', { name: 'Перерахувати' }).click();
+    await expect(editor).toContainText('330');
+    expect(sent).toEqual([
+      {
+        date: TODAY,
+        items: [
+          { name: 'Гречка', portion: '200 г' },
+          { name: 'Котлета свиняча', portion: '2 шт' },
+          { name: 'Салат з огірків', portion: '100 г' },
+        ],
+        photoId: PHOTO_ID,
+      },
+    ]);
+    // Nothing in the list until «Готово».
+    await expectRow(card, 2, { name: 'Котлета куряча', portion: '1 шт', kcal: '180' });
+    await editor.getByRole('button', { name: 'Готово', exact: true }).click();
+    await expect(editor).toBeHidden();
+    await expect(row(card, 'Котлета свиняча')).toBeFocused();
+    await expectRow(card, 2, { name: 'Котлета свиняча', portion: '2 шт', kcal: '330' });
+
+    // A frequent dish: her own numbers, no model.
+    await card.getByRole('button', { name: '+ позиція' }).click();
+    const added = itemEditor(page, 'Нова позиція');
+    await editorField(added, 'Що це').fill('кава');
+    await added.getByRole('button', { name: 'Кава з молоком, 1 чашка, 60 ккал' }).click();
+    await expect(added).toContainText('як у «Частих стравах»');
+    await added.getByRole('button', { name: 'Додати позицію' }).click();
+    await expect(added).toBeHidden();
+    // Her usual numbers, not typed by hand: no «вручну» tag.
+    await expectRow(card, 4, { name: 'Кава з молоком', portion: '1 чашка', kcal: '60' });
+    await expect(row(card, 'Кава з молоком').getByText('вручну', { exact: true })).toHaveCount(0);
+    await expect(card).toContainText('Разом655 ккал');
+    expect(sent).toHaveLength(1);
+
+    // A changed draft is not dropped without asking (✕ or Escape).
+    await row(card, 'Гречка').click();
+    await editorField(editor, 'Скільки').fill('100');
+    await page.keyboard.press('Escape');
+    const ask = page.getByRole('alertdialog', { name: 'Скасувати зміни?' });
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
+    await expect(editorField(editor, 'Скільки')).toHaveValue('100');
+    // The day sheet under it stayed open.
+    await expect(app.sheet('Запис дня')).toBeVisible();
+    await editor.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await ask.getByRole('button', { name: 'Скасувати зміни' }).click();
+    await expect(editor).toBeHidden();
+    await expectRow(card, 1, { name: 'Гречка', portion: '200 г', kcal: '220' });
+    await expect(row(card, 'Гречка')).toBeFocused();
   });
 
   test('a double tap sends one recalculation; a row edited while it runs keeps her edit', async ({
@@ -565,21 +728,26 @@ test.describe('Correcting a photo estimate', () => {
     const sent = await mockRecalc(page, { kcal: [221, 310, 90] }, gate);
     const { sheet, card } = await estimatePlate(app);
 
-    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
-    await rowField(card, 'Назва', 3).fill('Салат з помідорів');
+    await renameRow(page, card, 'Котлета куряча', 'Котлета свиняча');
+    await renameRow(page, card, 'Салат з огірків', 'Салат з помідорів');
     await recalcButton(card).dblclick();
     await expect(recalcButton(card)).toHaveText('Рахую…');
     await expect(announced(sheet, 'Рахую калорії…')).toHaveCount(1);
     // «Додати» waits for the numbers she asked for (not the old dish's kcal under her new name).
     await expect(card.getByRole('button', { name: 'Додати 445 ккал' })).toBeDisabled();
     // Changed again while the model works on the previous name.
-    await rowField(card, 'Назва', 3).fill('Салат з помідорів і сметаною');
+    await renameRow(page, card, 'Салат з помідорів', 'Салат з помідорів і сметаною');
     release();
 
-    await expect(rowField(card, 'Калорії', 2)).toHaveValue('310');
+    await expectRow(card, 2, { name: 'Котлета свиняча', portion: '1 шт', kcal: '310' });
     await expect(card.getByRole('button', { name: 'Додати 575 ккал' })).toBeEnabled();
     await expectRow(card, 1, { name: 'Гречка', portion: '200 г', kcal: '220' });
-    await expectRow(card, 3, { name: 'Салат з помідорів і сметаною', portion: '100 г', kcal: '45' });
+    await expectRow(card, 3, {
+      name: 'Салат з помідорів і сметаною',
+      portion: '100 г',
+      kcal: '45',
+      tag: 'змінено',
+    });
     await expect(card.getByText('змінено', { exact: true })).toHaveCount(1);
     await expect(recalcButton(card)).toHaveText('✨ Перерахувати');
     expect(sent).toHaveLength(1);
@@ -589,8 +757,8 @@ test.describe('Correcting a photo estimate', () => {
     await mockFood(page, { estimate: PLATE_ESTIMATE });
     await mockRecalc(page, { status: 502, body: { error: 'ai_failed', message: 'Не вдалося' } });
     const { sheet, card } = await estimatePlate(app);
-    await card.getByRole('button', { name: 'Прибрати «Гречка»' }).click();
-    await rowField(card, 'Назва', 1).fill('Котлета свиняча');
+    await removeRow(page, card, 'Гречка');
+    await renameRow(page, card, 'Котлета куряча', 'Котлета свиняча');
     await recalcButton(card).click();
 
     const message = 'Не вдалося перерахувати — уточни назву чи вагу або вкажи калорії вручну';
@@ -613,7 +781,7 @@ test.describe('Correcting a photo estimate', () => {
       body: { error: 'rate_limited', message: 'Ліміт підрахунків на сьогодні вичерпано' },
     });
     const { sheet, card } = await estimatePlate(app);
-    await rowField(card, 'Назва', 2).fill('Котлета свиняча');
+    await renameRow(page, card, 'Котлета куряча', 'Котлета свиняча');
     await recalcButton(card).focus();
     await page.keyboard.press('Enter');
 
@@ -625,6 +793,124 @@ test.describe('Correcting a photo estimate', () => {
     await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(false);
     // One line about the limit in the sheet, like a 429 on the first estimate.
     await expect(sheet.getByText('Ліміт підрахунків на сьогодні вичерпано', { exact: true })).toHaveCount(1);
+    // In the position's editor: kcal by hand, the model locked.
+    await row(card, 'Котлета свиняча').click();
+    const editor = itemEditor(page);
+    await expect(editor.getByRole('button', { name: 'Перерахувати' })).toBeDisabled();
+    await editor.getByRole('button', { name: 'Вписати вручну' }).click();
+    await editorField(editor, 'Калорії').fill('320');
+    await editor.getByRole('button', { name: 'Готово', exact: true }).click();
+    await expectRow(card, 2, {
+      name: 'Котлета свиняча',
+      portion: '1 шт',
+      kcal: '320',
+      tag: 'вписано вручну',
+    });
+    await expect(card.getByRole('button', { name: 'Додати 585 ккал' })).toBeEnabled();
+  });
+
+  test('the position editor over the day sheet: drag, a backdrop tap and Escape close only the editor', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const { sheet, card } = await estimatePlate(app);
+    const editor = itemEditor(page);
+
+    // A tap on the dimmed day sheet above the editor is the editor's backdrop.
+    await row(card, 'Гречка').click();
+    await expect(editor).toBeVisible();
+    const box = await editor.boundingBox();
+    if (!box) throw new Error('editor not rendered');
+    await page.mouse.click(box.x + 20, Math.max(4, box.y - 20));
+    await expect(editor).toBeHidden();
+    await expect(sheet).toBeVisible();
+    await expect(row(card, 'Гречка')).toBeFocused();
+
+    // Escape twice: the editor first, then the day sheet asks about the estimate not added yet.
+    await row(card, 'Гречка').click();
+    await expect(editor).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(editor).toBeHidden();
+    await page.keyboard.press('Escape');
+    const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(sheet).toBeVisible();
+    await expect(card.getByRole('listitem')).toHaveCount(3);
+  });
+
+  test('a frequent dish keeps following the amount while she retypes it', async ({ app, page }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const { card } = await estimatePlate(app);
+    await card.getByRole('button', { name: '+ позиція' }).click();
+    const added = itemEditor(page, 'Нова позиція');
+    await editorField(added, 'Що це').fill('кава');
+    await added.getByRole('button', { name: 'Кава з молоком, 1 чашка, 60 ккал' }).click();
+    const amount = editorField(added, 'Скільки');
+    await amount.fill('');
+    await amount.fill('2');
+    await expect(added).toContainText('120');
+    await expect(added).toContainText('як у «Частих стравах»');
+    await expect(added.getByRole('button', { name: /Порахувати/ })).toHaveCount(0);
+  });
+
+  test('an answer that arrives while the editor is open on its row is not lost on «Готово»', async ({
+    app,
+    page,
+  }) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const sent = await mockRecalc(page, { kcal: [220, 310, 45] }, gate);
+    const { card } = await estimatePlate(app);
+    await renameRow(page, card, 'Котлета куряча', 'Котлета свиняча');
+    await recalcButton(card).click();
+    // While «Рахую…», one more cutlet.
+    await row(card, 'Котлета свиняча').click();
+    const editor = itemEditor(page);
+    await editor.getByRole('button', { name: 'Збільшити' }).click();
+    release();
+    await expect(row(card, 'Котлета свиняча')).toHaveAccessibleName(
+      'Котлета свиняча, 1 шт, 310 ккал. Змінити',
+    );
+    await editor.getByRole('button', { name: 'Готово', exact: true }).click();
+    // 2 × the model's 310, rescaled on the device: no second request.
+    await expectRow(card, 2, { name: 'Котлета свиняча', portion: '2 шт', kcal: '620' });
+    expect(sent).toHaveLength(1);
+  });
+
+  test('the error of a recalculation in a discarded editor does not stay in the card', async ({
+    app,
+    page,
+  }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    await mockRecalc(page, { status: 502, body: { error: 'ai_failed', message: 'Не вдалося' } });
+    const { card } = await estimatePlate(app);
+    await row(card, 'Котлета куряча').click();
+    const editor = itemEditor(page);
+    await editorField(editor, 'Що це').fill('Котлета свиняча');
+    await editor.getByRole('button', { name: 'Перерахувати' }).click();
+    await expect(editor.getByRole('alert')).toBeVisible();
+    await editor.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Скасувати зміни' }).click();
+    await expect(editor).toBeHidden();
+    await expect(card.getByText(/Не вдалося перерахувати/)).toHaveCount(0);
+  });
+
+  // Regression: the second tap of a double tap on «Готово» must not reach the day sheet's «Зберегти»
+  // under it while the editor closes (a closing sheet's backdrop keeps swallowing taps until it is gone).
+  test('a double tap on «Готово» closes the editor only', async ({ app, page, server }) => {
+    await mockFood(page, { estimate: PLATE_ESTIMATE });
+    const { sheet, card } = await estimatePlate(app);
+    await row(card, 'Гречка').click();
+    const editor = itemEditor(page);
+    await editor.getByRole('button', { name: 'Збільшити' }).click();
+    await editor.getByRole('button', { name: 'Готово', exact: true }).dblclick();
+    await expect(editor).toBeHidden();
+    await expect(sheet).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(1);
+    await expectRow(card, 1, { name: 'Гречка', portion: '210 г', kcal: '231' });
+    expect((await server.getData()).days[TODAY]?.kcal ?? null).toBeNull();
   });
 });
 

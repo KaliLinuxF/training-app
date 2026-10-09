@@ -1,18 +1,13 @@
-import { f0, LIMITS } from '@legko/shared';
-import { useId, useLayoutEffect, useRef, type KeyboardEvent, type MouseEvent, type Ref } from 'react';
+import { f0, type FoodItem } from '@legko/shared';
+import { useEffect, useId, useLayoutEffect, useRef, type Ref } from 'react';
 import { flushSync } from 'react-dom';
+import { useAppData } from '@/store/data';
 import { Button, Card, CardHeader, cx } from '@/ui';
-import {
-  draftsTotal,
-  isNamed,
-  MAX_ROWS,
-  needsRecalc,
-  scaledByWeight,
-  type DraftField,
-  type DraftItem,
-} from './drafts';
-import { focusFirst, neighbourControls } from './focus';
-import { emptyEstimateComment, pluralUk, remainingHint } from './model';
+import { draftsTotal, isNamed, MAX_ROWS, needsRecalc, type DraftItem } from './drafts';
+import { focusFirst, focusIsAround } from './focus';
+import { ItemEditor } from './ItemEditor';
+import type { EditorAction, ItemEditorState } from './itemEditorModel';
+import { emptyEstimateComment, parseKcal, pluralUk, remainingHint } from './model';
 import s from './EstimateCard.module.css';
 
 export interface EstimateCardProps {
@@ -30,15 +25,28 @@ export interface EstimateCardProps {
   recalculating?: boolean;
   /** Why the last recalculation failed (inline alert; the toast is FoodAssist's). */
   recalcError?: string;
+  /** The running (or failed) recalculation was asked for in the item editor: its «Рахую…» and alert are there. */
+  recalcInEditor?: boolean;
   /**
    * Recalculating is impossible right now (offline, no estimates left today): why, and the id of
    * the line FoodAssist shows it in. When the card's alert says the same (a 429 on «Перерахувати»),
    * the alert takes that id over and FoodAssist hides its line: one line in the sheet.
    */
   blockedHint?: { id: string; text: string };
-  onEdit: (itemId: string, field: DraftField, value: string) => void;
-  /** «+ позиція». */
-  onAddItem: () => void;
+  /** The item editor over the day sheet, when open. */
+  editor?: ItemEditorState | null;
+  /** «Часті страви» the editor suggests; the app's data by default. */
+  foods?: readonly FoodItem[];
+  /** A row was tapped: open the editor on it. */
+  onOpenItem: (itemId: string) => void;
+  /** «+ позиція»: the editor on a new row. */
+  onNewItem: () => void;
+  onEditorChange: (action: EditorAction) => void;
+  /** «Готово» / «Додати позицію». */
+  onSaveItem: () => void;
+  /** The editor's draft is dropped. */
+  onCloseItem: () => void;
+  /** «Видалити позицію». */
   onRemove: (itemId: string) => void;
   onRecalculate: () => void;
   onAdd: () => void;
@@ -47,7 +55,11 @@ export interface EstimateCardProps {
   onRetry: () => void;
 }
 
-/** Itemised estimate she can correct (name, portion, kcal, rows) before adding it to the day. */
+/**
+ * Itemised estimate (SPEC §3.7 «Result card»): a clean list of the positions; tapping one, or
+ * «+ позиція», opens the item editor in a second sheet. Total, «✨ Перерахувати» for the rows the
+ * model has to price again, «Додати N ккал» / «Скасувати».
+ */
 export function EstimateCard({
   drafts,
   comment,
@@ -57,26 +69,40 @@ export function EstimateCard({
   titleRef,
   recalculating = false,
   recalcError,
+  recalcInEditor = false,
   blockedHint,
-  onEdit,
-  onAddItem,
+  editor = null,
+  foods,
+  onOpenItem,
+  onNewItem,
+  onEditorChange,
+  onSaveItem,
+  onCloseItem,
   onRemove,
   onRecalculate,
   onAdd,
   onCancel,
   onRetry,
 }: EstimateCardProps) {
+  const appFoods = useAppData().foods;
   const titleId = useId();
   const recalcId = useId();
-  const listRef = useRef<HTMLUListElement>(null);
   /** «Додати» (or «Спробувати ще»), then «Скасувати»: where focus goes when «Перерахувати» does. */
   const primaryRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const addRowRef = useRef<HTMLButtonElement>(null);
+  const rowButtons = useRef(new Map<string, HTMLButtonElement>());
+  const nameRef = useRef<HTMLInputElement>(null);
+  const editorBodyRef = useRef<HTMLDivElement>(null);
+  /** Rows to put focus on once the editor closes (first one still there wins). */
+  const focusAfterEditor = useRef<string[]>([]);
+
   const total = draftsTotal(drafts);
   const empty = drafts.length === 0;
   const canAdd = drafts.some(isNamed);
   const dirty = drafts.filter(needsRecalc).length;
   const recalcBlocked = blockedHint !== undefined;
+  const editorOpen = editor !== null;
   // «Сьогодні ще…» unless the sheet says it already (FoodAssist's «Ліміт…» line, or the alert).
   const remainingLine = remainingHint(remaining);
   const hint = remainingLine !== recalcError && remainingLine !== blockedHint?.text ? remainingLine : null;
@@ -85,33 +111,58 @@ export function EstimateCard({
   // it says what «Додати» is waiting for.
   const recalcShown = dirty > 0 || recalculating;
 
-  // «✨ Перерахувати» goes away once nothing waits for it: focus must not fall to <body> with it
-  // (a removed row moves focus itself, to its neighbour).
+  // «✨ Перерахувати» goes away once nothing waits for it: focus must not fall to <body> with it.
   const wasRecalcShown = useRef(recalcShown);
-  const removing = useRef(false);
   useLayoutEffect(() => {
     const was = wasRecalcShown.current;
     wasRecalcShown.current = recalcShown;
-    if (!was || recalcShown || removing.current || !focusLost()) return;
+    if (!was || recalcShown || !focusLost()) return;
     focusFirst([primaryRef.current, cancelRef.current]);
   }, [recalcShown]);
 
-  const addRow = () => {
-    flushSync(onAddItem);
-    // Straight to the new row's name, still inside the tap (iOS opens the keyboard only then).
-    listRef.current?.lastElementChild?.querySelector('input')?.focus();
+  // The editor started closing. Over the day sheet the kit has just given focus back to the row
+  // (or, the row deleted, to the day sheet) — a child's effect, so it ran before this one; move it
+  // on to the row she saved, the one she added, or the deleted row's neighbour. Not if she is
+  // already working somewhere else.
+  const wasEditorOpen = useRef(editorOpen);
+  useEffect(() => {
+    const was = wasEditorOpen.current;
+    wasEditorOpen.current = editorOpen;
+    if (!was || editorOpen) return;
+    const rows = focusAfterEditor.current;
+    focusAfterEditor.current = [];
+    const card = primaryRef.current?.closest('section');
+    const active = document.activeElement;
+    const inEditor = active !== null && editorBodyRef.current?.closest('[role="dialog"]')?.contains(active);
+    if (card && !inEditor && !focusIsAround(card)) return;
+    focusFirst([
+      ...rows.map((id) => rowButtons.current.get(id)),
+      addRowRef.current,
+      primaryRef.current,
+      cancelRef.current,
+    ]);
+  }, [editorOpen]);
+
+  const newRow = () => {
+    flushSync(onNewItem);
+    // Straight to the name, still inside the tap (iOS opens the keyboard only then).
+    nameRef.current?.focus();
   };
 
-  const removeRow = (e: MouseEvent<HTMLButtonElement>, itemId: string) => {
-    const row = e.currentTarget.closest('li');
-    const next = row ? [...neighbourControls(row, 'after'), ...neighbourControls(row, 'before')] : [];
-    removing.current = true;
-    try {
-      flushSync(() => onRemove(itemId));
-    } finally {
-      removing.current = false;
-    }
-    if (focusLost()) focusFirst(next);
+  const saveItem = () => {
+    if (editor) focusAfterEditor.current = [editor.item.id];
+    onSaveItem();
+  };
+
+  const closeItem = () => {
+    focusAfterEditor.current = editor?.original ? [editor.original.id] : [];
+    onCloseItem();
+  };
+
+  const removeItem = (itemId: string) => {
+    const i = drafts.findIndex((d) => d.id === itemId);
+    focusAfterEditor.current = [drafts[i + 1]?.id, drafts[i - 1]?.id].filter((id) => id !== undefined);
+    onRemove(itemId);
   };
 
   // Both stay focusable when they cannot act (aria-disabled): a button natively disabled under her
@@ -128,7 +179,7 @@ export function EstimateCard({
 
   const addRowButton =
     drafts.length < MAX_ROWS ? (
-      <button type="button" className={s.addRow} onClick={addRow}>
+      <button ref={addRowRef} type="button" className={s.addRow} onClick={newRow}>
         + позиція
       </button>
     ) : null;
@@ -152,9 +203,18 @@ export function EstimateCard({
 
       {!empty && (
         <>
-          <ul ref={listRef} className={s.items}>
+          <ul className={s.items}>
             {drafts.map((d, i) => (
-              <EstimateRow key={d.id} item={d} index={i} onEdit={onEdit} onRemove={removeRow} />
+              <EstimateRow
+                key={d.id}
+                item={d}
+                index={i}
+                buttonRef={(el) => {
+                  if (el) rowButtons.current.set(d.id, el);
+                  else rowButtons.current.delete(d.id);
+                }}
+                onOpen={onOpenItem}
+              />
             ))}
           </ul>
           {addRowButton}
@@ -174,7 +234,8 @@ export function EstimateCard({
         <p
           id={blockedHint && recalcError === blockedHint.text ? blockedHint.id : undefined}
           className={s.error}
-          role="alert"
+          // The editor over the card says it while it is open (one alert, not two).
+          role={editorOpen ? undefined : 'alert'}
         >
           {recalcError}
         </p>
@@ -221,6 +282,22 @@ export function EstimateCard({
           Скасувати
         </Button>
       </div>
+
+      <ItemEditor
+        state={editor}
+        foods={foods ?? appFoods}
+        recalculating={recalculating}
+        recalcAskedHere={recalcInEditor}
+        recalcError={recalcInEditor ? recalcError : undefined}
+        blockedReason={blockedHint?.text ?? null}
+        nameRef={nameRef}
+        bodyRef={editorBodyRef}
+        onChange={onEditorChange}
+        onSave={saveItem}
+        onDiscard={closeItem}
+        onRemove={removeItem}
+        onRecalculate={onRecalculate}
+      />
     </Card>
   );
 }
@@ -231,85 +308,58 @@ function focusLost(): boolean {
   return !active || active === document.body;
 }
 
-/** «Готово» on the iPhone keyboard just closes it; never submits anything around the card. */
-function blurOnEnter(e: KeyboardEvent<HTMLInputElement>) {
-  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-    e.preventDefault();
-    e.currentTarget.blur();
-  }
+/**
+ * Kcal she typed herself (tagged «вручну»). A «Часті страви» dish's are pinned too, but they are
+ * her usual numbers, not a correction: that row reads like any other.
+ */
+const typedByHand = (item: DraftItem): boolean => item.pinned && !item.fromDish;
+
+/** What a row says to VoiceOver: «Сирники зі сметаною, 3 шт, 420 ккал. Змінити». */
+export function rowLabel(item: DraftItem, index: number): string {
+  const parts = [
+    item.name.trim() || `Позиція ${index + 1}`,
+    item.portion.trim(),
+    `${f0(parseKcal(item.kcalText))} ккал`,
+    needsRecalc(item) ? 'змінено' : '',
+    typedByHand(item) ? 'вписано вручну' : '',
+  ];
+  return `${parts.filter(Boolean).join(', ')}. Змінити`;
 }
 
 interface EstimateRowProps {
   item: DraftItem;
   index: number;
-  onEdit: (itemId: string, field: DraftField, value: string) => void;
-  onRemove: (e: MouseEvent<HTMLButtonElement>, itemId: string) => void;
+  buttonRef: (el: HTMLButtonElement | null) => void;
+  onOpen: (itemId: string) => void;
 }
 
-function EstimateRow({ item, index, onEdit, onRemove }: EstimateRowProps) {
-  const noteId = useId();
-  const n = index + 1;
-  // At most one of them: «змінено» waits for the model, the note says the device rescaled it.
-  const changed = needsRecalc(item);
-  const scaled = scaledByWeight(item);
+/** One position: name (+ «змінено» / «вручну»), portion under it, kcal and › on the right. */
+function EstimateRow({ item, index, buttonRef, onOpen }: EstimateRowProps) {
   const name = item.name.trim();
+  const portion = item.portion.trim();
+  const changed = needsRecalc(item);
   return (
     <li className={s.item}>
-      <input
-        className={s.name}
-        value={item.name}
-        placeholder="Назва страви"
-        aria-label={`Назва позиції ${n}`}
-        maxLength={LIMITS.foodName}
-        enterKeyHint="done"
-        autoComplete="off"
-        onChange={(e) => onEdit(item.id, 'name', e.target.value)}
-        onKeyDown={blurOnEnter}
-      />
       <button
+        ref={buttonRef}
         type="button"
-        className={s.remove}
-        aria-label={name ? `Прибрати «${name}»` : `Прибрати позицію ${n}`}
-        onClick={(e) => onRemove(e, item.id)}
+        className={s.row}
+        aria-label={rowLabel(item, index)}
+        onClick={() => onOpen(item.id)}
       >
-        <span aria-hidden="true">✕</span>
+        <span className={s.main}>
+          <span className={s.nameLine}>
+            <span className={cx(s.name, !name && s.nameless)}>{name || `Позиція ${index + 1}`}</span>
+            {changed && <span className={s.tag}>змінено</span>}
+            {typedByHand(item) && <span className={cx(s.tag, s.tagManual)}>вручну</span>}
+          </span>
+          {portion && <span className={s.portion}>{portion}</span>}
+        </span>
+        <span className={s.kcal}>{f0(parseKcal(item.kcalText))} ккал</span>
+        <span className={s.chevron} aria-hidden="true">
+          ›
+        </span>
       </button>
-      <input
-        className={s.portion}
-        value={item.portion}
-        placeholder="напр. 150 г"
-        aria-label={`Порція позиції ${n}`}
-        maxLength={LIMITS.portion}
-        enterKeyHint="done"
-        autoComplete="off"
-        autoCapitalize="none"
-        autoCorrect="off"
-        onChange={(e) => onEdit(item.id, 'portion', e.target.value)}
-        onKeyDown={blurOnEnter}
-      />
-      <label className={s.kcal}>
-        <input
-          className={s.kcalInput}
-          inputMode="numeric"
-          pattern="[0-9]*"
-          enterKeyHint="done"
-          autoComplete="off"
-          maxLength={5}
-          value={item.kcalText}
-          placeholder="0"
-          aria-label={`Калорії позиції ${n}`}
-          aria-describedby={changed || scaled ? noteId : undefined}
-          onChange={(e) => onEdit(item.id, 'kcal', e.target.value)}
-          onFocus={(e) => e.target.select()}
-          onKeyDown={blurOnEnter}
-        />
-        <span className={s.unit}>ккал</span>
-      </label>
-      {(changed || scaled) && (
-        <p id={noteId} className={s.note}>
-          {changed ? <span className={s.tag}>змінено</span> : 'перераховано за вагою'}
-        </p>
-      )}
     </li>
   );
 }

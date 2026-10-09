@@ -111,6 +111,38 @@ describe('Sheet', () => {
     opener.remove();
   });
 
+  it('swallows a second tap while animating out, so a double tap on «Зберегти» cannot reach the page', () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const sheet = (open: boolean) => (
+      <Sheet
+        open={open}
+        onClose={onClose}
+        heading="Запис дня"
+        footer={<button type="button">Зберегти</button>}
+      >
+        тіло
+      </Sheet>
+    );
+    const { rerender } = render(sheet(true));
+    const save = screen.getByRole('button', { name: 'Зберегти' });
+    save.focus();
+    rerender(sheet(false)); // saved: the sheet animates out
+
+    // The second tap lands on the backdrop, still covering the page until the sheet unmounts (the panel takes no
+    // presses now, see the CSS contract in stack.test.tsx): it neither closes again nor moves focus.
+    const backdrop = backdropOf(screen.getByRole('dialog'));
+    expect(backdrop.parentElement).toBe(document.body);
+    fireEvent.pointerDown(backdrop);
+    expect(fireEvent.mouseDown(backdrop)).toBe(false);
+    fireEvent.click(backdrop);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(save);
+
+    act(() => vi.advanceTimersByTime(SHEET_EXIT_MS));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('renders the date navigator and disables «›» when the next day is not allowed', () => {
     const onPrev = vi.fn();
     const onNext = vi.fn();

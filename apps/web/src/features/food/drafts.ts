@@ -1,6 +1,7 @@
 /**
- * Editable estimate rows (SPEC §3.7 «Result card»): her edits of name, portion and kcal, what the
- * device rescales by itself and what waits for «✨ Перерахувати». Pure; the estimate reducer uses it.
+ * Estimate rows (SPEC §3.7 «Result card»): her edits of name, portion and kcal (made in the item
+ * editor, see `itemEditorModel.ts`), what the device rescales by itself and what waits for
+ * «✨ Перерахувати». Pure; the estimate reducer uses it.
  */
 import { LIMITS, type FoodEstimateItem, type FoodRecalcItem } from '@legko/shared';
 import { clampItem, parseKcal, sanitizeKcalInput } from './model';
@@ -19,13 +20,19 @@ export interface DraftItem {
   base: FoodEstimateItem | null;
   /** She typed the kcal herself: a recalculation keeps it, until she changes the name or portion. */
   pinned: boolean;
+  /**
+   * The pinned kcal are a «Часті страви» dish's (picked in the item editor), not a number she typed:
+   * only typed ones are tagged «вручну». Set only on a pinned row.
+   */
+  fromDish?: boolean;
 }
 
 export type DraftField = 'name' | 'portion' | 'kcal';
 
 /**
  * - `confirmed`: name and portion as the model last priced them;
- * - `scaled`: same dish, another amount of the same unit group — kcal rescaled on the device;
+ * - `scaled`: same dish, another amount the device can compare (г/кг, мл/л, or the same count unit:
+ *   «2 скибки» → «3 скибки») — kcal rescaled on the device;
  * - `changed`: needs the model — another dish, a portion the device cannot compare, or a new row.
  */
 export type DraftStatus = 'confirmed' | 'scaled' | 'changed';
@@ -35,11 +42,12 @@ export interface RecalcRow extends FoodRecalcItem {
   id: string;
 }
 
-const normalized = (s: string): string => s.trim().replace(/\s+/g, ' ').toLocaleLowerCase('uk');
+/** Text as names and portions compare: trimmed, single spaces, lower case. */
+export const foldText = (s: string): string => s.trim().replace(/\s+/g, ' ').toLocaleLowerCase('uk');
 
 /** Names and portions compare without case and extra spaces («борщ » = «Борщ»). */
 export function sameText(a: string, b: string): boolean {
-  return normalized(a) === normalized(b);
+  return foldText(a) === foldText(b);
 }
 
 export function toDrafts(items: readonly FoodEstimateItem[]): DraftItem[] {
@@ -81,8 +89,8 @@ export function needsRecalc(d: DraftItem): boolean {
   return !d.pinned && isNamed(d) && draftStatus(d) === 'changed';
 }
 
-/** The muted «перераховано за вагою» note: kcal follows her new amount, not typed by her. */
-export function scaledByWeight(d: DraftItem): boolean {
+/** Kcal follows her new amount (rescaled on the device), not typed by her. */
+export function scaledOnDevice(d: DraftItem): boolean {
   return !d.pinned && draftStatus(d) === 'scaled';
 }
 
@@ -92,13 +100,61 @@ export function scaledByWeight(d: DraftItem): boolean {
  * old number stays until the recalculation.
  */
 export function editDraft(d: DraftItem, field: DraftField, value: string): DraftItem {
-  if (field === 'kcal') return { ...d, kcalText: sanitizeKcalInput(value), pinned: true };
+  const own = withoutDish(d);
+  if (field === 'kcal') return { ...own, kcalText: sanitizeKcalInput(value), pinned: true };
   const next: DraftItem =
     field === 'name'
-      ? { ...d, name: value.slice(0, LIMITS.foodName), pinned: false }
-      : { ...d, portion: value.slice(0, LIMITS.portion), pinned: false };
+      ? { ...own, name: value.slice(0, LIMITS.foodName), pinned: false }
+      : { ...own, portion: value.slice(0, LIMITS.portion), pinned: false };
   const kcal = knownKcal(next);
   return kcal === null ? next : { ...next, kcalText: String(kcal) };
+}
+
+/** The row without the «Часті страви» mark (kcal she typed, or no pin at all). */
+function withoutDish(d: DraftItem): DraftItem {
+  if (d.fromDish === undefined) return d;
+  const { fromDish: _fromDish, ...rest } = d;
+  return rest;
+}
+
+/** Kcal of a «Часті страви» dish: pinned like typed ones, marked as the dish's. */
+export function dishKcal(d: DraftItem, kcal: number): DraftItem {
+  return { ...editDraft(d, 'kcal', String(kcal)), fromDish: true };
+}
+
+/**
+ * Her draft of a row on top of newer numbers the model gave for that row (an answer that came in
+ * while she was editing it): the model's item becomes its base and, unless the kcal are pinned,
+ * the device works them out again — rescaled when the name is still the priced one and the amount
+ * comparable; otherwise the number stays and the row keeps waiting for the model.
+ */
+export function rebaseDraft(d: DraftItem, base: FoodEstimateItem): DraftItem {
+  const next: DraftItem = { ...d, base: { ...base } };
+  return d.pinned ? next : editDraft(next, 'portion', next.portion);
+}
+
+/** Same row content: name, portion, kcal, pin (and whose number it is) and what the model confirmed. */
+export function sameDraft(a: DraftItem, b: DraftItem): boolean {
+  return (
+    a.id === b.id &&
+    a.name === b.name &&
+    a.portion === b.portion &&
+    a.kcalText === b.kcalText &&
+    a.pinned === b.pinned &&
+    Boolean(a.fromDish) === Boolean(b.fromDish) &&
+    sameBase(a.base, b.base)
+  );
+}
+
+function sameBase(a: FoodEstimateItem | null, b: FoodEstimateItem | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.name === b.name && a.portion === b.portion && a.kcal === b.kcal;
+}
+
+/** The rows with `item` in place of the row with its id, or appended (up to `MAX_ROWS`) when it is new. */
+export function putDraft(drafts: readonly DraftItem[], item: DraftItem): DraftItem[] {
+  if (drafts.some((d) => d.id === item.id)) return drafts.map((d) => (d.id === item.id ? item : d));
+  return drafts.length < MAX_ROWS ? [...drafts, item] : [...drafts];
 }
 
 /** What a recalculation sends: every named row (the whole meal is context), or null when none needs it. */

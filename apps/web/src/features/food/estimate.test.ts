@@ -1,7 +1,8 @@
 import type { FoodEstimateResponse } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import type { RecalcRow } from './drafts';
+import { needsRecalc, type RecalcRow } from './drafts';
 import { estimateReducer, IDLE, type EstimateAction, type EstimatePhase } from './estimate';
+import { editorChanged, kcalSource, restorableName } from './itemEditorModel';
 
 const RES: FoodEstimateResponse = {
   photoId: 'ph_0123456789abcdef',
@@ -61,6 +62,7 @@ describe('estimateReducer', () => {
       ],
       found: { count: 2, total: 340 },
       recalc: { pending: null },
+      editor: null,
     });
   });
 
@@ -233,5 +235,391 @@ describe('estimateReducer: recalculation', () => {
     );
     expect(s.drafts[1]).toMatchObject({ portion: '3 скибки', kcalText: '80' });
     expect(s.drafts[1]?.base?.name).toBe('Хліб');
+  });
+});
+
+describe('estimateReducer: the item editor', () => {
+  const editor = (s: EstimatePhase) => {
+    const r = result(s);
+    if (!r.editor) throw new Error('no editor open');
+    return r.editor;
+  };
+
+  it('opens on a row as a local draft: the list is untouched until «Готово»', () => {
+    const open = run(resolved(), { type: 'openItem', itemId: 'i1' });
+    expect(editor(open).item).toBe(result(open).drafts[1]);
+    const edited = run(open, { type: 'editor', action: { type: 'name', value: 'Хліб житній' } });
+    expect(editor(edited).item.name).toBe('Хліб житній');
+    expect(result(edited).drafts[1]?.name).toBe('Хліб');
+
+    const saved = result(run(edited, { type: 'saveItem' }));
+    expect(saved.editor).toBeNull();
+    expect(saved.drafts.map((d) => d.name)).toEqual(['Борщ', 'Хліб житній']);
+    // Still waiting for the model: the old number until then.
+    expect(saved.drafts[1]).toMatchObject({ kcalText: '80', base: { name: 'Хліб' } });
+  });
+
+  it('«Готово» on a new amount puts the rescaled row in place', () => {
+    const s = result(
+      run(
+        resolved(),
+        { type: 'openItem', itemId: 'i0' },
+        { type: 'editor', action: { type: 'amount', text: '450' } },
+        { type: 'saveItem' },
+      ),
+    );
+    expect(s.drafts[0]).toMatchObject({ portion: '450 г', kcalText: '390' });
+  });
+
+  it('closing drops the draft; another row or no result opens nothing', () => {
+    const s = run(
+      resolved(),
+      { type: 'openItem', itemId: 'i0' },
+      { type: 'editor', action: { type: 'name', value: 'Рис' } },
+      { type: 'closeItem' },
+    );
+    expect(result(s).editor).toBeNull();
+    expect(result(s).drafts[0]?.name).toBe('Борщ');
+    expect(run(resolved(), { type: 'openItem', itemId: 'nope' })).toEqual(resolved());
+    expect(estimateReducer(IDLE, { type: 'openItem', itemId: 'i0' })).toBe(IDLE);
+    expect(estimateReducer(IDLE, { type: 'saveItem' })).toBe(IDLE);
+    // Nothing open: editor changes, «Готово» and closing do nothing.
+    const r = resolved();
+    expect(estimateReducer(r, { type: 'editor', action: { type: 'name', value: 'x' } })).toBe(r);
+    expect(estimateReducer(r, { type: 'saveItem' })).toBe(r);
+    expect(estimateReducer(r, { type: 'closeItem' })).toBe(r);
+  });
+
+  it('a new row joins the list only on «Додати позицію», and only with a name', () => {
+    const open = run(resolved(), { type: 'newItem', itemId: 'n1' });
+    expect(result(open).drafts).toHaveLength(2);
+    expect(editor(open).original).toBeNull();
+    // Nameless: «Додати позицію» does nothing.
+    expect(run(open, { type: 'saveItem' })).toEqual(open);
+    const added = result(
+      run(
+        open,
+        { type: 'editor', action: { type: 'name', value: 'Чай' } },
+        { type: 'editor', action: { type: 'kcal', value: '5' } },
+        { type: 'saveItem' },
+      ),
+    );
+    expect(added.editor).toBeNull();
+    expect(added.drafts[2]).toEqual({
+      id: 'n1',
+      name: 'Чай',
+      portion: '',
+      kcalText: '5',
+      base: null,
+      pinned: true,
+    });
+
+    let full: EstimatePhase = resolved();
+    for (let i = 0; i < 28; i++) full = estimateReducer(full, { type: 'add', itemId: `a${i}` });
+    expect(result(full).drafts).toHaveLength(30);
+    expect(result(estimateReducer(full, { type: 'newItem', itemId: 'n9' })).editor).toBeNull();
+  });
+
+  it('«Видалити позицію» removes the row and closes the editor on it', () => {
+    const s = result(run(resolved(), { type: 'openItem', itemId: 'i0' }, { type: 'remove', itemId: 'i0' }));
+    expect(s.editor).toBeNull();
+    expect(s.drafts.map((d) => d.id)).toEqual(['i1']);
+    // Another row removed meanwhile leaves the editor open.
+    const other = result(
+      run(resolved(), { type: 'openItem', itemId: 'i0' }, { type: 'remove', itemId: 'i1' }),
+    );
+    expect(other.editor?.item.id).toBe('i0');
+  });
+
+  it('a recalculation asked for in the editor prices its draft; the list row stays as it was', () => {
+    const asked = result(
+      run(
+        resolved(),
+        { type: 'openItem', itemId: 'i1' },
+        { type: 'editor', action: { type: 'name', value: 'Хліб житній' } },
+        { type: 'editor', action: { type: 'amount', text: '2' } },
+        { type: 'recalcStart', id: 4 },
+      ),
+    );
+    expect(asked.recalc).toEqual({ pending: 4, fromEditor: true });
+    const sent: RecalcRow[] = [
+      { id: 'i0', name: 'Борщ', portion: '300 г' },
+      { id: 'i1', name: 'Хліб житній', portion: '2 скибки' },
+    ];
+    const res: FoodEstimateResponse = {
+      photoId: null,
+      items: [
+        { name: 'Борщ', portion: '300 г', kcal: 999 },
+        { name: 'Хліб житній', portion: '2 скибки', kcal: 170 },
+      ],
+      totalKcal: 0,
+      comment: '',
+    };
+    const done = result(estimateReducer(asked, { type: 'recalcResolve', id: 4, rows: sent, res }));
+    expect(done.editor?.item).toMatchObject({
+      name: 'Хліб житній',
+      kcalText: '170',
+      base: { name: 'Хліб житній', portion: '2 скибки', kcal: 170 },
+    });
+    // Not applied yet: «Готово» does that.
+    expect(done.drafts.map((d) => d.kcalText)).toEqual(['260', '80']);
+    expect(done.recalc).toEqual({ pending: null, done: { id: 4, total: 340, fromEditor: true } });
+    const saved = result(estimateReducer(done, { type: 'saveItem' }));
+    expect(saved.drafts[1]).toMatchObject({ name: 'Хліб житній', kcalText: '170' });
+  });
+
+  it('a draft changed while the model works keeps waiting; a failure asked for in the editor stays there', () => {
+    const asked = run(
+      resolved(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб житній' } },
+      { type: 'recalcStart', id: 5 },
+      { type: 'editor', action: { type: 'name', value: 'Хліб білий' } },
+    );
+    const sent: RecalcRow[] = [
+      { id: 'i0', name: 'Борщ', portion: '300 г' },
+      { id: 'i1', name: 'Хліб житній', portion: '1 скибка' },
+    ];
+    const res: FoodEstimateResponse = {
+      photoId: null,
+      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 1 })),
+      totalKcal: 2,
+      comment: '',
+    };
+    const done = result(estimateReducer(asked, { type: 'recalcResolve', id: 5, rows: sent, res }));
+    expect(done.editor?.item).toMatchObject({ name: 'Хліб білий', kcalText: '80' });
+
+    const failed = result(run(asked, { type: 'recalcFail', id: 5, message: 'Немає зʼєднання з сервером' }));
+    expect(failed.recalc).toEqual({ pending: null, error: 'Немає зʼєднання з сервером', fromEditor: true });
+  });
+
+  it('a recalculation from the card is not the editor one even if she opens the editor meanwhile', () => {
+    const s = result(run(resolved(), { type: 'recalcStart', id: 6 }, { type: 'openItem', itemId: 'i0' }));
+    expect(s.recalc).toEqual({ pending: 6 });
+  });
+
+  it('reset drops the editor with the result', () => {
+    expect(run(resolved(), { type: 'openItem', itemId: 'i0' }, { type: 'reset' })).toBe(IDLE);
+  });
+});
+
+describe('estimateReducer: an answer and an open editor', () => {
+  const editor = (s: EstimatePhase) => {
+    const r = result(s);
+    if (!r.editor) throw new Error('no editor open');
+    return r.editor;
+  };
+  /** «Хліб» renamed in the list, then the card's «Перерахувати» (id 7). */
+  const askedFromCard = () =>
+    run(
+      resolved(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб житній' } },
+      { type: 'saveItem' },
+      { type: 'recalcStart', id: 7 },
+    );
+  const sent: RecalcRow[] = [
+    { id: 'i0', name: 'Борщ', portion: '300 г' },
+    { id: 'i1', name: 'Хліб житній', portion: '1 скибка' },
+  ];
+  const answer = (comment = ''): EstimateAction => ({
+    type: 'recalcResolve',
+    id: 7,
+    rows: sent,
+    res: {
+      photoId: null,
+      items: [
+        { name: 'Борщ', portion: '300 г', kcal: 999 },
+        { name: 'Хліб житній', portion: '1 скибка', kcal: 100 },
+      ],
+      totalKcal: 0,
+      comment,
+    },
+  });
+
+  it('a draft she changed meanwhile keeps her change on the model’s new numbers: «Готово» keeps them', () => {
+    const open = run(
+      askedFromCard(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'step', dir: 1 } },
+    );
+    expect(editor(open).item).toMatchObject({ portion: '2 скибки', kcalText: '80' });
+    const done = run(open, answer());
+    expect(result(done).drafts[1]).toMatchObject({ portion: '1 скибка', kcalText: '100' });
+    // Rescaled on the device from the answer: 2 × 100, nothing left for the model.
+    expect(editor(done).item).toMatchObject({
+      name: 'Хліб житній',
+      portion: '2 скибки',
+      kcalText: '200',
+      base: { name: 'Хліб житній', portion: '1 скибка', kcal: 100 },
+    });
+    expect(editor(done).original).toBe(result(done).drafts[1]);
+    expect(kcalSource(editor(done))).toEqual({ kind: 'scaled', group: 'count' });
+    const saved = result(run(done, { type: 'saveItem' }));
+    expect(saved.drafts[1]).toMatchObject({ portion: '2 скибки', kcalText: '200' });
+    expect(saved.drafts.some(needsRecalc)).toBe(false);
+  });
+
+  it('an untouched draft becomes the priced row: nothing to ask about on ✕', () => {
+    const done = run(askedFromCard(), { type: 'openItem', itemId: 'i1' }, answer());
+    expect(editor(done).item).toEqual(result(done).drafts[1]);
+    expect(editorChanged(editor(done))).toBe(false);
+    expect(result(run(done, { type: 'closeItem' })).drafts[1]?.kcalText).toBe('100');
+  });
+
+  it('another name meanwhile still waits for the model, with «повернути» to the priced one', () => {
+    const done = run(
+      askedFromCard(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб білий' } },
+      answer(),
+    );
+    expect(editor(done).item).toMatchObject({ name: 'Хліб білий', kcalText: '80' });
+    expect(needsRecalc(editor(done).item)).toBe(true);
+    expect(restorableName(editor(done))).toBe('Хліб житній');
+    const back = run(done, { type: 'editor', action: { type: 'restoreName' } });
+    expect(editor(back).item.kcalText).toBe('100');
+    expect(editorChanged(editor(back))).toBe(false);
+  });
+
+  it('kcal she typed meanwhile stay hers', () => {
+    const done = run(
+      askedFromCard(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'kcal', value: '90' } },
+      answer(),
+    );
+    expect(editor(done).item).toMatchObject({ kcalText: '90', pinned: true, base: { kcal: 100 } });
+  });
+
+  it('a row that did not take the answer leaves the editor on it alone', () => {
+    const open = run(askedFromCard(), { type: 'openItem', itemId: 'i0' });
+    const done = run(open, answer());
+    expect(editor(done)).toBe(editor(open));
+  });
+
+  it('the card’s remark changes only when a row in the list took the answer', () => {
+    expect(result(run(askedFromCard(), answer(' Житній темніший. '))).comment).toBe('Житній темніший.');
+    // She changed the only row that needed it while the model worked: the remark is about nothing on screen.
+    const changed = run(
+      askedFromCard(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб білий' } },
+      { type: 'saveItem' },
+      answer('Житній темніший.'),
+    );
+    expect(result(changed).comment).toBe('Приблизно.');
+  });
+});
+
+describe('estimateReducer: a recalculation asked for in the editor', () => {
+  /** The editor on «Хліб», renamed, its «Перерахувати» (id 8). */
+  const asked = () =>
+    run(
+      resolved(),
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб житній' } },
+      { type: 'recalcStart', id: 8 },
+    );
+  const sent: RecalcRow[] = [
+    { id: 'i0', name: 'Борщ', portion: '300 г' },
+    { id: 'i1', name: 'Хліб житній', portion: '1 скибка' },
+  ];
+  const answer = (comment: string): EstimateAction => ({
+    type: 'recalcResolve',
+    id: 8,
+    rows: sent,
+    res: {
+      photoId: null,
+      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 100 })),
+      totalKcal: 200,
+      comment,
+    },
+  });
+  const failed = () => run(asked(), { type: 'recalcFail', id: 8, message: 'Не вдалося' });
+
+  it('its remark waits in the editor: the card gets it with her draft on «Готово», never on ✕', () => {
+    const done = result(run(asked(), answer(' Житній темніший. ')));
+    expect(done.editor?.comment).toBe('Житній темніший.');
+    expect(done.comment).toBe('Приблизно.');
+    expect(result(run(done, { type: 'closeItem' })).comment).toBe('Приблизно.');
+    expect(result(run(done, { type: 'saveItem' })).comment).toBe('Житній темніший.');
+    // No remark: the card's stays.
+    expect(result(run(asked(), answer(''), { type: 'saveItem' })).comment).toBe('Приблизно.');
+    // Her draft changed while the model worked: the remark is about a version no longer there.
+    const moved = result(
+      run(
+        asked(),
+        { type: 'editor', action: { type: 'name', value: 'Хліб білий' } },
+        answer('Житній темніший.'),
+      ),
+    );
+    expect(moved.editor?.comment).toBeUndefined();
+    expect(moved.comment).toBe('Приблизно.');
+  });
+
+  it('its failure goes with the draft on ✕ or «Видалити позицію», quietly', () => {
+    expect(result(failed()).recalc).toEqual({ pending: null, error: 'Не вдалося', fromEditor: true });
+    const closed = result(run(failed(), { type: 'closeItem' }));
+    // `fromEditor` stays: nothing to announce instead.
+    expect(closed.recalc).toEqual({ pending: null, fromEditor: true });
+    const removed = result(run(failed(), { type: 'remove', itemId: 'i1' }));
+    expect(removed.recalc).toEqual({ pending: null, fromEditor: true });
+    // A failure from the card is not the editor's to drop.
+    const fromCard = run(
+      resolved(),
+      { type: 'edit', itemId: 'i1', field: 'name', value: 'Хліб житній' },
+      { type: 'recalcStart', id: 9 },
+      { type: 'recalcFail', id: 9, message: 'Не вдалося' },
+      { type: 'openItem', itemId: 'i0' },
+      { type: 'closeItem' },
+    );
+    expect(result(fromCard).recalc).toEqual({ pending: null, error: 'Не вдалося' });
+  });
+
+  it('kept with «Готово», it is the card’s: the failure shows there, not in the next editor', () => {
+    const saved = result(run(failed(), { type: 'saveItem' }));
+    expect(saved.recalc).toEqual({ pending: null, error: 'Не вдалося' });
+    // Still running when she saves: the answer is announced with the card's new total.
+    const running = run(asked(), { type: 'saveItem' });
+    expect(result(running).recalc).toEqual({ pending: 8 });
+    const done = result(run(running, answer('')));
+    expect(done.drafts[1]?.kcalText).toBe('100');
+    expect(done.recalc).toEqual({ pending: null, done: { id: 8, total: 360 } });
+  });
+
+  it('dropped while it runs: the answer prices only what the list still needs, quietly', () => {
+    const dropped = run(asked(), { type: 'closeItem' });
+    expect(result(dropped).recalc).toEqual({ pending: 8, fromEditor: true });
+    const done = result(run(dropped, answer('Житній темніший.')));
+    expect(done.drafts.map((d) => d.kcalText)).toEqual(['260', '80']);
+    expect(done.comment).toBe('Приблизно.');
+    expect(done.recalc.done).toEqual({ id: 8, total: 340, fromEditor: true });
+    // A failure about nothing still in the list says nothing…
+    expect(result(run(dropped, { type: 'recalcFail', id: 8, message: 'Не вдалося' })).recalc).toEqual({
+      pending: null,
+      fromEditor: true,
+    });
+    // …but one the list still waits for keeps its alert in the card.
+    const otherDirty = run(
+      resolved(),
+      { type: 'edit', itemId: 'i0', field: 'name', value: 'Борщ зелений' },
+      { type: 'openItem', itemId: 'i1' },
+      { type: 'editor', action: { type: 'name', value: 'Хліб житній' } },
+      { type: 'recalcStart', id: 8 },
+      { type: 'closeItem' },
+      { type: 'recalcFail', id: 8, message: 'Не вдалося' },
+    );
+    expect(result(otherDirty).recalc).toEqual({ pending: null, error: 'Не вдалося', fromEditor: true });
+    // Opening a row then: the card's failure, not that editor's.
+    expect(result(run(otherDirty, { type: 'openItem', itemId: 'i0' })).recalc).toEqual({
+      pending: null,
+      error: 'Не вдалося',
+    });
+  });
+
+  it('dropped while it runs, then another row opened: «Рахую…» is the card’s, not that editor’s', () => {
+    const s = result(run(asked(), { type: 'closeItem' }, { type: 'newItem', itemId: 'n1' }));
+    expect(s.recalc).toEqual({ pending: 8 });
   });
 });

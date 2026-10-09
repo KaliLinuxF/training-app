@@ -16,6 +16,7 @@ import { focusFirst, focusIsAround } from './focus';
 import { useFoodStatus } from './foodStatus';
 import { FrequentDishes } from './FrequentDishes';
 import { draftsToItems } from './drafts';
+import { editorChanged } from './itemEditorModel';
 import {
   addedMessage,
   buildFoodAdd,
@@ -106,9 +107,12 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
   const composerShown = composer.open && phase.kind === 'idle';
   const view: View =
     phase.kind === 'loading' ? 'loading' : phase.kind === 'result' ? 'result' : composerShown ? 'composer' : 'actions';
+  // A row she is writing in the item editor counts too (the list may still be empty).
+  const editing = phase.kind === 'result' && phase.editor !== null && editorChanged(phase.editor);
   const pending =
     phase.kind === 'loading' ||
     (phase.kind === 'result' && phase.drafts.length > 0) ||
+    editing ||
     (composer.open && composerEdited(composer));
   const live = liveMessage(phase, added);
 
@@ -293,9 +297,14 @@ function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, c
               titleRef={titleRef}
               recalculating={phase.recalc.pending !== null}
               recalcError={phase.recalc.error}
+              recalcInEditor={phase.recalc.fromEditor === true}
               blockedHint={hint ? { id: hintId, text: hint } : undefined}
-              onEdit={est.editItem}
-              onAddItem={est.addItem}
+              editor={phase.editor}
+              onOpenItem={est.openItem}
+              onNewItem={est.newItem}
+              onEditorChange={est.changeItem}
+              onSaveItem={est.saveItem}
+              onCloseItem={est.closeItem}
               onRemove={est.removeItem}
               onRecalculate={est.recalculate}
               onAdd={addEstimate}
@@ -323,6 +332,10 @@ function liveMessage(phase: EstimatePhase, added: Announcement | null): Announce
   // «✨ Перерахувати»: progress, then the new total; until the first one, what the estimate found.
   const { pending, done, error } = phase.recalc;
   if (pending !== null) return { key: `l${pending}`, text: 'Рахую калорії…' };
+  // Asked for in the item editor: its kcal number says what came back (the list total, not yet
+  // with her draft in it, would mislead); the card's total speaks once she applies it. Dropped
+  // with the editor, it has nothing left to say either.
+  if (done?.fromEditor || phase.recalc.fromEditor) return null;
   if (done) return { key: `d${done.id}`, text: recalculatedMessage(done.total) };
   // Failed: the card's alert says so. What the estimate first found is out of date by now, and a
   // new key would read it out again.
