@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 import { cx } from '@/ui';
 import { NAV_ITEMS, isNavActive } from './nav';
+import { NavIcon } from './NavIcon';
 import { NavLink } from './NavLink';
 import s from './TabBar.module.css';
 
@@ -27,7 +28,9 @@ export function TabBar({ location, onRecord }: TabBarProps) {
                 </button>
               )}
               <NavLink href={item.href} active={active} className={cx(s.item, active && s.active)}>
-                <span className={s.indicator} aria-hidden="true" />
+                <span className={s.icon} aria-hidden="true">
+                  <NavIcon href={item.href} />
+                </span>
                 <span className={s.label}>{item.label}</span>
               </NavLink>
             </Fragment>
