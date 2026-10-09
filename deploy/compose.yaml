@@ -58,9 +58,21 @@ services:
       - '443:443/udp'
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Site files of other projects on this VPS (see the end of the Caddyfile).
+      - /opt/caddy-sites:/etc/caddy/sites:ro
       - caddy_data:/data
       - caddy_config:/config
+    # `edge` is shared with other projects' stacks so Caddy can reach their containers by name;
+    # the app itself stays on the private default network.
+    networks:
+      - default
+      - edge
     logging: *logging
+
+networks:
+  edge:
+    external: true
+    name: edge
 
 volumes:
   caddy_data:

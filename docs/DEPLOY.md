@@ -295,3 +295,21 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 | no «Порахувати» / «Фото» buttons   | `ANTHROPIC_API_KEY` missing in `.env` (or not applied with `up -d`)      |
 | AI estimates keep failing          | `deploy/deploy.sh logs` → `food estimate failed: …` / `key rejected`     |
 | disk filling up                    | `docker system df` on the server; deploys prune old images and cache     |
+
+## Other projects on this server
+
+Caddy (in this stack) is the only thing listening on 80/443, and it serves other projects too:
+
+- Each project lives in its own directory (e.g. `/opt/<project>`, owner `deploy`) with its own compose project.
+- Its web container joins the external Docker network **`edge`** (`networks: { edge: { external: true } }`)
+  and **publishes no ports** (published ports bypass ufw). Give it a fixed `container_name` or use the service
+  DNS name on `edge`.
+- Its site block goes into **`/opt/caddy-sites/<project>.caddy`** (mounted read-only into Caddy and imported
+  at the end of this repo's Caddyfile). It may use `import security_headers`. Validate and apply:
+
+```bash
+ssh deploy@64.176.75.160 'docker exec training-app-caddy-1 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile && docker exec training-app-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile'
+```
+
+- Never edit `/opt/training-app/Caddyfile` or `compose.yaml` on the server: `deploy/deploy.sh` overwrites them.
+- The `edge` network and `/opt/caddy-sites` are created once (the deploy script checks both).

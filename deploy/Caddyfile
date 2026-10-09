@@ -38,3 +38,9 @@ fit.triple-a.dev {
 		respond "{err.status_code} {err.status_text}"
 	}
 }
+
+# Other projects on this VPS: one file per project in /opt/caddy-sites/<project>.caddy (mounted
+# read-only at /etc/caddy/sites), each with its own site block that may reuse `import security_headers`.
+# Their containers join the external Docker network `edge` and are proxied by service name.
+# An empty folder is fine. This file is owned by the «Легко» repo — don't edit it on the server.
+import /etc/caddy/sites/*.caddy

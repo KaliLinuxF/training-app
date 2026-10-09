@@ -177,6 +177,19 @@ reload_caddy() {
   fi
 }
 
+# The shared edge: the external `edge` network (Caddy reaches other projects' containers through it)
+# and /opt/caddy-sites with their site files (imported at the end of the Caddyfile).
+ensure_edge() {
+  local root_hint="$1"
+  if ! docker network inspect edge >/dev/null 2>&1; then
+    docker network create edge >/dev/null
+    log "created the shared docker network 'edge'"
+  fi
+  [[ -d /opt/caddy-sites ]] || die "/opt/caddy-sites is missing. Create it once as root:
+    ssh ${root_hint} 'install -d -m 755 -o deploy -g deploy /opt/caddy-sites'
+  then run the deploy again."
+}
+
 prune() {
   docker image prune --force >/dev/null 2>&1 || true
   docker builder prune --force --filter until=336h >/dev/null 2>&1 || true
@@ -195,6 +208,8 @@ cmd_deploy() {
   if ((INSTALLED)); then
     log "compose.yaml updated (old one saved as compose.yaml.bak)"
   fi
+
+  ensure_edge "$root_hint"
 
   # Validated now, installed only once the new app is healthy, so a failed deploy leaves Caddy alone.
   local caddy_changed=0
