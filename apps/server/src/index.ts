@@ -9,9 +9,13 @@ import { ConfigError, loadConfig, type Config } from './config';
 import { createDataRepo } from './db/data';
 import { databasePath, openDatabase } from './db/open';
 import type { Database } from './db/sqlite';
+import { createClaudeEstimator } from './food/claude';
+import type { FoodEstimator } from './food/estimator';
 import { createApp } from './http/app';
 import { createLogger, type Logger } from './logger';
 import { startLoop, type Loop } from './loop';
+import { createPhotoGcJob } from './photos/gc';
+import { createPhotoStore, photosDir } from './photos/store';
 import { createPushService, type PushService } from './push/service';
 import { createWebPushTransport } from './push/transport';
 import { loadVapidKeys } from './push/vapid';
@@ -50,10 +54,23 @@ function initPush(db: Database, config: Config, logger: Logger): PushService | n
   }
 }
 
-/** Reminders, daily backup and session clean-up share one 30-second tick. */
+function initFoodAi(config: Config, logger: Logger): FoodEstimator | null {
+  const { apiKey, model, dailyLimit } = config.foodAi;
+  if (!apiKey || dailyLimit === 0) {
+    logger.info(
+      `AI calorie estimate disabled (${apiKey ? 'FOOD_DAILY_LIMIT=0' : 'ANTHROPIC_API_KEY is not set'})`,
+    );
+    return null;
+  }
+  logger.info(`AI calorie estimate enabled (model ${model}, ${dailyLimit} per day)`);
+  return createClaudeEstimator({ apiKey, model, logger });
+}
+
+/** Reminders, daily backup, photo clean-up and session clean-up share one 30-second tick. */
 function startScheduler(db: Database, config: Config, logger: Logger, push: PushService | null): Loop {
   const backups = createBackupJob({ db, dir: backupsDir(config.dataDir), logger });
   backups.atStartup(new Date());
+  const photoGc = createPhotoGcJob({ photos: createPhotoStore(db, photosDir(config.dataDir)), logger });
   const reminderDeps = push
     ? { data: createDataRepo(db, Date.now, logger), log: createReminderLog(db), push, logger }
     : null;
@@ -75,6 +92,7 @@ function startScheduler(db: Database, config: Config, logger: Logger, push: Push
     task: async (now) => {
       if (reminderDeps) await guarded('reminders', () => runReminderTick(reminderDeps, now));
       await guarded('backup', () => backups.tick(now));
+      await guarded('photo gc', () => photoGc.tick(now));
       if (now.getTime() - lastPurge >= SESSION_PURGE_MS) {
         lastPurge = now.getTime();
         await guarded('session purge', () => sessions.purgeExpired(now.getTime()));
@@ -112,7 +130,8 @@ async function main(): Promise<void> {
   if (!config.staticDir) logger.info('STATIC_DIR is not set: serving the API only');
 
   const push = initPush(db, config, logger);
-  const app = createApp({ db, config, logger, push });
+  const food = { estimator: initFoodAi(config, logger), dailyLimit: config.foodAi.dailyLimit };
+  const app = createApp({ db, config, logger, push, photosDir: photosDir(config.dataDir), food });
   const scheduler = startScheduler(db, config, logger, push);
   void scheduler.runNow();
 

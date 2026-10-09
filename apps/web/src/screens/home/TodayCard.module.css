@@ -1,0 +1,27 @@
+/* The kit ghost button grows its tap area to 43px (35 + 2 × 4); make it a full 44+. */
+.openDay.openDay::after {
+  inset: -6px -6px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.training {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trainingLabel {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.trainingState {
+  color: var(--ink);
+  font-weight: 600;
+}

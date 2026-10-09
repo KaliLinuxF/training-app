@@ -1,0 +1,49 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Prototype row: padding 11px 12px, r14, paper background when it drives the chart. */
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 12px;
+  border: 0;
+  border-radius: var(--r14);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.selected {
+  background: var(--paper);
+}
+
+.label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.values {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.range {
+  color: var(--muted);
+}
+
+.delta {
+  font-weight: 700;
+  min-width: 56px;
+  text-align: right;
+}

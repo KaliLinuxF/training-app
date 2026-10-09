@@ -1,0 +1,20 @@
+/* Text tones (same roles as the UI kit's `Tone`) for elements the kit does not render. */
+.ink {
+  color: var(--ink);
+}
+
+.acc {
+  color: var(--accD);
+}
+
+.acc2 {
+  color: var(--acc2D);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.faint {
+  color: var(--faint);
+}

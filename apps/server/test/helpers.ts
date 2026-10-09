@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { setPassword, type ScryptParams } from '../src/auth/password';
 import { createRateLimiter, LOGIN_RATE_LIMIT } from '../src/auth/rateLimit';
@@ -5,6 +8,7 @@ import { createApp } from '../src/http/app';
 import type { AppEnv } from '../src/http/types';
 import { openDatabase } from '../src/db/open';
 import type { Database } from '../src/db/sqlite';
+import type { FoodEstimator } from '../src/food/estimator';
 import { createPushService, type PushService } from '../src/push/service';
 import type { StoredSubscription } from '../src/push/subscriptions';
 import type { PushDelivery, PushRequestOptions, PushTransport } from '../src/push/transport';
@@ -52,6 +56,7 @@ export interface CallOptions {
 export interface TestServer {
   app: Hono<AppEnv>;
   db: Database;
+  photosDir: string;
   clock: Clock;
   push: PushService;
   transport: FakeTransport;
@@ -67,6 +72,11 @@ export interface TestServerOptions {
   staticDir?: string | null;
   publicOrigin?: string;
   pushAvailable?: boolean;
+  /** Default: a unique path under the OS temp dir that only exists once a photo is stored. */
+  photosDir?: string;
+  /** AI estimator; default none (feature disabled). */
+  estimator?: FoodEstimator | null;
+  foodDailyLimit?: number;
 }
 
 export function sessionCookie(res: Response): string | null {
@@ -85,6 +95,9 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     staticDir = null,
     publicOrigin = 'https://fit.triple-a.dev',
     pushAvailable = true,
+    photosDir = join(tmpdir(), `legko-test-photos-${randomUUID()}`),
+    estimator = null,
+    foodDailyLimit,
   } = options;
   const db = openDatabase(':memory:');
   if (password !== null) await setPassword(db, password, TEST_SCRYPT);
@@ -96,6 +109,8 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     db,
     config: { production, publicOrigin, trustProxy, staticDir },
     push: pushAvailable ? push : null,
+    photosDir,
+    food: { estimator, dailyLimit: foodDailyLimit },
     now,
     loginLimiter: createRateLimiter(LOGIN_RATE_LIMIT),
     version: 'test',
@@ -126,7 +141,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     return cookie;
   };
 
-  return { app, db, clock, push, transport, call, login };
+  return { app, db, photosDir, clock, push, transport, call, login };
 }
 
 export async function json<T = unknown>(res: Response): Promise<T> {
@@ -143,4 +158,11 @@ export function seededRandom(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/** Bytes that pass the JPEG magic check; the content is irrelevant to the server. */
+export function fakeJpeg(size: number, fill = 7): Buffer {
+  const bytes = Buffer.alloc(size, fill);
+  bytes.set([0xff, 0xd8, 0xff, 0xe0]);
+  return bytes;
 }

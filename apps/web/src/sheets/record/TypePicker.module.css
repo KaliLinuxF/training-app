@@ -1,0 +1,62 @@
+/* «+ Свій тип»: same pill as the type chips (prototype line 452), dashed to read as an action. */
+.add {
+  border: 1.5px dashed var(--line3);
+  background: transparent;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 999px;
+  padding: 0 16px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.add:active {
+  transform: scale(0.98);
+}
+
+/* Inline «new type» input takes the whole chip row. */
+.form {
+  flex: 1 1 100%;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1.5px solid var(--acc);
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 0 16px;
+  /* 16px keeps iOS from zooming into the field. */
+  font-size: 16px;
+  font-weight: 600;
+  outline: none;
+}
+
+.confirm {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--solid);
+  color: var(--onSolid);
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 120ms ease;
+}
+
+.confirm:active {
+  transform: scale(0.96);
+}

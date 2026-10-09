@@ -1,3 +1,1 @@
-export function HomeScreen() {
-  return <div>Головна</div>;
-}
+export { HomeScreen } from './HomeScreen';

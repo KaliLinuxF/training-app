@@ -8,9 +8,19 @@ export interface VapidEnv {
   privateKey: string | null;
 }
 
+/** AI calorie estimate (SPEC §3.7). */
+export interface FoodAiEnv {
+  /** `ANTHROPIC_API_KEY`; null disables the feature (the UI hides it). Never log it. */
+  apiKey: string | null;
+  /** `FOOD_AI_MODEL`. */
+  model: string;
+  /** `FOOD_DAILY_LIMIT`: model calls allowed per local day. */
+  dailyLimit: number;
+}
+
 export interface Config {
   port: number;
-  /** Absolute path; holds `legko.db` and `backups/`. */
+  /** Absolute path; holds `legko.db`, `backups/` and `photos/`. */
   dataDir: string;
   /** Absolute path of the built web app, or null (dev: Vite serves the UI). */
   staticDir: string | null;
@@ -23,9 +33,12 @@ export interface Config {
   logLevel: LogLevel;
   /** Development only: password applied at start-up when none is set yet. */
   devPassword: string | null;
+  foodAi: FoodAiEnv;
 }
 
 export const DEFAULT_PUBLIC_ORIGIN = 'https://fit.triple-a.dev';
+export const DEFAULT_FOOD_AI_MODEL = 'claude-opus-5-5';
+export const DEFAULT_FOOD_DAILY_LIMIT = 60;
 
 export class ConfigError extends Error {
   override name = 'ConfigError';
@@ -90,6 +103,22 @@ function parseLogLevel(raw: string | undefined): LogLevel {
   return level;
 }
 
+function parseDailyLimit(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_FOOD_DAILY_LIMIT;
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 0 || limit > 10_000)
+    throw new ConfigError(`FOOD_DAILY_LIMIT must be an integer 0–10000, got "${raw}"`);
+  return limit;
+}
+
+function parseFoodAi(env: Env): FoodAiEnv {
+  return {
+    apiKey: value(env, 'ANTHROPIC_API_KEY') ?? null,
+    model: value(env, 'FOOD_AI_MODEL') ?? DEFAULT_FOOD_AI_MODEL,
+    dailyLimit: parseDailyLimit(value(env, 'FOOD_DAILY_LIMIT')),
+  };
+}
+
 const truthy = (raw: string | undefined): boolean => raw === '1' || raw?.toLowerCase() === 'true';
 
 export function loadConfig(env: Env = process.env, cwd: string = process.cwd()): Config {
@@ -107,5 +136,6 @@ export function loadConfig(env: Env = process.env, cwd: string = process.cwd()):
     logLevel: parseLogLevel(value(env, 'LOG_LEVEL')),
     // Never honoured in production, even if the variable leaks into the environment.
     devPassword: production ? null : (env.DEV_PASSWORD ?? null) || null,
+    foodAi: parseFoodAi(env),
   };
 }

@@ -102,6 +102,6 @@ describe('API error shape', () => {
     const cookie = await s.login();
     const res = await s.call('/api/ops', { cookie, body: 'x'.repeat(16 * 1024 * 1024 + 1) });
     expect(res.status).toBe(413);
-    expect(await json(res)).toMatchObject({ error: 'bad_request' });
+    expect(await json(res)).toMatchObject({ error: 'payload_too_large' });
   });
 });

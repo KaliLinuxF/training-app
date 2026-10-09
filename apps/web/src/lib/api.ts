@@ -33,7 +33,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
@@ -42,6 +42,7 @@ async function request<T>(method: 'GET' | 'POST', path: string, body?: unknown):
       cache: 'no-store',
       headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined,
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+      ...(signal ? { signal } : {}),
     });
   } catch {
     throw new ApiError(0, 'network', 'Немає зʼєднання з сервером');
@@ -74,6 +75,10 @@ export const api = {
   pushUnsubscribe: (endpoint: string) => request<OkResponse>('POST', API.pushUnsubscribe, { endpoint }),
   pushTest: () => request<PushTestResponse>('POST', API.pushTest),
   foodStatus: () => request<FoodStatusResponse>('GET', API.foodStatus),
-  /** AI calorie estimate from text and/or a downscaled JPEG (base64). Can take ~5–20 s. */
-  foodEstimate: (req: FoodEstimateRequest) => request<FoodEstimateResponse>('POST', API.foodEstimate, req),
+  /**
+   * AI calorie estimate from text and/or a downscaled JPEG (base64). Can take ~5–20 s.
+   * Aborting `signal` rejects with `ApiError('network')`; check `signal.aborted` to tell it apart.
+   */
+  foodEstimate: (req: FoodEstimateRequest, signal?: AbortSignal) =>
+    request<FoodEstimateResponse>('POST', API.foodEstimate, req, signal),
 };

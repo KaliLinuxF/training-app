@@ -137,3 +137,100 @@ describe('data repo', () => {
     expect(repo.setTimezone('Europe/Warsaw')).toBe(false);
   });
 });
+
+describe('migration v1 → v2 (photos, foods)', () => {
+  it('keeps existing data and adds the new columns and tables', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'legko-db-v1-'));
+    const file = join(dir, 'legko.db');
+    try {
+      // A database as the first release left it.
+      const v1 = new (sqlite().DatabaseSync)(file);
+      expect(migrate(v1, MIGRATIONS.slice(0, 1))).toBe(1);
+      v1.exec(`
+        INSERT INTO days (date, food, kcal, trained, types, notes, updated_at)
+          VALUES ('2026-10-01', 'Омлет', 1500, 1, '["Кардіо"]', 'легко', 1);
+        INSERT INTO weights (date, kg, updated_at) VALUES ('2026-10-01', 65.4, 1);
+        INSERT INTO measures (date, chest, waist, hips, updated_at) VALUES ('2026-10-01', 90, 70, NULL, 1);
+        INSERT INTO kv (key, value) VALUES ('password_hash', 'scrypt$hash');
+        INSERT INTO kv (key, value) VALUES ('settings', '{"goal":57,"kcalGoal":1500,"onboarded":true}');
+      `);
+      v1.close();
+
+      const db = openDatabase(file);
+      expect(schemaVersion(db)).toBe(2);
+      const data = createDataRepo(db).read();
+      expect(data.days).toEqual({
+        '2026-10-01': { food: 'Омлет', kcal: 1500, trained: true, types: ['Кардіо'], notes: 'легко' },
+      });
+      expect(data.days['2026-10-01']).not.toHaveProperty('photos');
+      expect(data.weights).toEqual([{ date: '2026-10-01', kg: 65.4 }]);
+      expect(data.measures).toEqual([{ date: '2026-10-01', chest: 90, waist: 70, hips: null }]);
+      expect(data.foods).toEqual([]);
+      expect(data.settings.goal).toBe(57);
+      expect(getKv(db, KV.passwordHash)).toBe('scrypt$hash');
+      expect(db.prepare('SELECT photos FROM days').get()).toEqual({ photos: '[]' });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM photos').get()).toEqual({ n: 0 });
+      db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('data repo: photos and foods', () => {
+  const a = 'AAAAAAAAAAAAAAAAAAAAAA';
+
+  it('round-trips day photos and keeps the order of foods', () => {
+    const repo = createDataRepo(openDatabase(':memory:'));
+    repo.apply([
+      {
+        kind: 'day.put',
+        date: '2026-10-10',
+        value: { food: '', kcal: null, trained: null, types: [], notes: '', photos: [a, a] },
+      },
+      { kind: 'food.use', date: '2026-10-10', value: { name: 'Борщ', portion: '300 г', kcal: 180 } },
+      { kind: 'food.use', date: '2026-10-10', value: { name: 'Кава', portion: '', kcal: 40 } },
+      { kind: 'food.use', date: '2026-10-11', value: { name: 'борщ', portion: '300 г', kcal: 190 } },
+    ]);
+    const data = repo.read();
+    expect(data.days['2026-10-10']).toEqual({
+      food: '',
+      kcal: null,
+      trained: null,
+      types: [],
+      notes: '',
+      photos: [a],
+    });
+    expect(data.foods.map((f) => [f.name, f.count])).toEqual([
+      ['Кава', 1],
+      ['борщ', 2],
+    ]);
+  });
+
+  it('replaceAll replaces foods', () => {
+    const repo = createDataRepo(openDatabase(':memory:'));
+    repo.apply([{ kind: 'food.use', date: '2026-10-10', value: { name: 'Борщ', portion: '', kcal: 180 } }]);
+    const foods = [
+      { name: 'Сирники', portion: '3 шт.', kcal: 420, count: 2, lastUsed: '2026-10-09' },
+      { name: 'Гречка', portion: '200 г', kcal: 220, count: 5, lastUsed: '2026-10-08' },
+    ];
+    repo.replaceAll({ ...repo.read(), foods });
+    expect(repo.read().foods).toEqual(foods);
+  });
+
+  it('a failing batch leaves foods untouched', () => {
+    const db = openDatabase(':memory:');
+    const repo = createDataRepo(db);
+    repo.apply([{ kind: 'food.use', date: '2026-10-10', value: { name: 'Борщ', portion: '', kcal: 180 } }]);
+    db.exec(
+      `CREATE TRIGGER no_2027 BEFORE INSERT ON weights WHEN NEW.date LIKE '2027-%' BEGIN SELECT RAISE(ABORT, 'nope'); END`,
+    );
+    expect(() =>
+      repo.apply([
+        { kind: 'food.delete', name: 'борщ' },
+        { kind: 'weight.put', date: '2027-01-01', kg: 64 },
+      ]),
+    ).toThrow();
+    expect(repo.read().foods.map((f) => f.name)).toEqual(['Борщ']);
+  });
+});

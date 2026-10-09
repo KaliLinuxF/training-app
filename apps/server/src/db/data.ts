@@ -1,11 +1,14 @@
 import {
+  foodKey,
   isEmptyDay,
   isEmptyMeasure,
   normalizeDay,
   normalizeSettings,
   settingsSchema,
+  useFood,
   type AppData,
   type DayEntry,
+  type FoodItem,
   type ISODate,
   type MeasureEntry,
   type MeasureValues,
@@ -23,7 +26,7 @@ import { transaction } from './tx';
 /**
  * Persistence of `AppData`. Writes follow `applyOp()` from `@legko/shared` exactly:
  * days are normalised (`normalizeDay`), an empty day or an empty measurement is a delete,
- * and puts are upserts keyed by date.
+ * puts are upserts keyed by date, and «Часті страви» go through `useFood()` / `foodKey()`.
  */
 export interface DataRepo {
   read(): AppData;
@@ -45,19 +48,25 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const trainedToSql = (t: boolean | null): number | null => (t === null ? null : t ? 1 : 0);
 const trainedFromSql = (v: number | null): boolean | null => (v === null ? null : v === 1);
 
-function parseTypes(raw: string): string[] {
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) throw new TypeError('days.types: expected a JSON array');
+function parseStringArray(row: Row, column: string): string[] {
+  const parsed: unknown = JSON.parse(text(row, column));
+  if (!Array.isArray(parsed)) throw new TypeError(`days.${column}: expected a JSON array`);
   return parsed.filter((t): t is string => typeof t === 'string');
 }
 
-const dayFromRow = (row: Row): DayEntry => ({
-  food: text(row, 'food'),
-  kcal: numOrNull(row, 'kcal'),
-  trained: trainedFromSql(numOrNull(row, 'trained')),
-  types: parseTypes(text(row, 'types')),
-  notes: text(row, 'notes'),
-});
+function dayFromRow(row: Row): DayEntry {
+  const day: DayEntry = {
+    food: text(row, 'food'),
+    kcal: numOrNull(row, 'kcal'),
+    trained: trainedFromSql(numOrNull(row, 'trained')),
+    types: parseStringArray(row, 'types'),
+    notes: text(row, 'notes'),
+  };
+  // Same shape as normalizeDay(): `photos` only when there are some.
+  const photos = parseStringArray(row, 'photos');
+  if (photos.length) day.photos = photos;
+  return day;
+}
 
 const measureFromRow = (row: Row): MeasureEntry => ({
   date: text(row, 'date'),
@@ -66,19 +75,29 @@ const measureFromRow = (row: Row): MeasureEntry => ({
   hips: numOrNull(row, 'hips'),
 });
 
+const foodFromRow = (row: Row): FoodItem => ({
+  name: text(row, 'name'),
+  portion: text(row, 'portion'),
+  kcal: num(row, 'kcal'),
+  count: num(row, 'count'),
+  lastUsed: text(row, 'last_used'),
+});
+
 export function createDataRepo(
   db: Database,
   now: () => number = Date.now,
   logger: Logger = silentLogger,
 ): DataRepo {
   const q = {
-    allDays: db.prepare('SELECT date, food, kcal, trained, types, notes FROM days ORDER BY date'),
+    allDays: db.prepare('SELECT date, food, kcal, trained, types, notes, photos FROM days ORDER BY date'),
     allWeights: db.prepare('SELECT date, kg FROM weights ORDER BY date'),
     allMeasures: db.prepare('SELECT date, chest, waist, hips FROM measures ORDER BY date'),
+    // `position` keeps the array order of AppData.foods, so reads equal what applyOp() produces.
+    allFoods: db.prepare('SELECT name, portion, kcal, count, last_used FROM foods ORDER BY position'),
     putDay: db.prepare(
-      `INSERT INTO days (date, food, kcal, trained, types, notes, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO days (date, food, kcal, trained, types, notes, photos, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (date) DO UPDATE SET food = excluded.food, kcal = excluded.kcal, trained = excluded.trained,
-         types = excluded.types, notes = excluded.notes, updated_at = excluded.updated_at`,
+         types = excluded.types, notes = excluded.notes, photos = excluded.photos, updated_at = excluded.updated_at`,
     ),
     deleteDay: db.prepare('DELETE FROM days WHERE date = ?'),
     putWeight: db.prepare(
@@ -92,6 +111,9 @@ export function createDataRepo(
          updated_at = excluded.updated_at`,
     ),
     deleteMeasure: db.prepare('DELETE FROM measures WHERE date = ?'),
+    insertFood: db.prepare(
+      'INSERT INTO foods (key, position, name, portion, kcal, count, last_used) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ),
     hasWeight: db.prepare('SELECT 1 AS found FROM weights WHERE date = ?'),
     hasMeasure: db.prepare('SELECT 1 AS found FROM measures WHERE date = ?'),
     dayTrained: db.prepare('SELECT trained FROM days WHERE date = ?'),
@@ -115,6 +137,16 @@ export function createDataRepo(
 
   const writeSettings = (s: Settings): void => setKv(db, KV.settings, JSON.stringify(s));
 
+  const readFoods = (): FoodItem[] => q.allFoods.all().map(foodFromRow);
+
+  /** At most 200 small rows: rewriting them all keeps the stored order identical to the array. */
+  function writeFoods(foods: readonly FoodItem[]): void {
+    db.exec('DELETE FROM foods');
+    foods.forEach((f, position) =>
+      q.insertFood.run(foodKey(f.name), position, f.name, f.portion, f.kcal, f.count, f.lastUsed),
+    );
+  }
+
   function putDay(date: ISODate, value: DayEntry, at: number): void {
     const entry = normalizeDay(value);
     if (isEmptyDay(entry)) {
@@ -128,6 +160,7 @@ export function createDataRepo(
       trainedToSql(entry.trained),
       JSON.stringify(entry.types),
       entry.notes,
+      JSON.stringify(entry.photos ?? []),
       at,
     );
   }
@@ -137,7 +170,9 @@ export function createDataRepo(
     else q.putMeasure.run(date, value.chest, value.waist, value.hips, at);
   }
 
-  function applyOne(op: Op, at: number): void {
+  type RowOp = Exclude<Op, { kind: 'food.use' | 'food.delete' }>;
+
+  function applyRowOp(op: RowOp, at: number): void {
     switch (op.kind) {
       case 'day.put':
         return putDay(op.date, op.value, at);
@@ -168,7 +203,7 @@ export function createDataRepo(
         .all()
         .map((row) => ({ date: text(row, 'date'), kg: num(row, 'kg') }));
       const measures = q.allMeasures.all().map(measureFromRow);
-      return { days, weights, measures, settings: readSettings() };
+      return { days, weights, measures, foods: readFoods(), settings: readSettings() };
     },
 
     settings: readSettings,
@@ -176,7 +211,19 @@ export function createDataRepo(
     apply(ops) {
       const at = now();
       transaction(db, () => {
-        for (const op of ops) applyOne(op, at);
+        // Food ops reuse the shared reducer: read once, fold the batch's food ops, write once.
+        let foods: FoodItem[] | null = null;
+        for (const op of ops) {
+          if (op.kind === 'food.use') {
+            foods = useFood(foods ?? readFoods(), op.value, op.date);
+          } else if (op.kind === 'food.delete') {
+            const key = foodKey(op.name);
+            foods = (foods ?? readFoods()).filter((f) => foodKey(f.name) !== key);
+          } else {
+            applyRowOp(op, at);
+          }
+        }
+        if (foods) writeFoods(foods);
       });
     },
 
@@ -187,6 +234,7 @@ export function createDataRepo(
         for (const [date, entry] of Object.entries(data.days)) putDay(date, entry, at);
         for (const w of data.weights) q.putWeight.run(w.date, w.kg, at);
         for (const m of data.measures) putMeasure(m.date, m, at);
+        writeFoods(data.foods);
         writeSettings(data.settings);
       });
     },

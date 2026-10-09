@@ -1,3 +1,1 @@
-export function RemindersScreen() {
-  return <div>Нагадування</div>;
-}
+export { RemindersScreen } from './RemindersScreen';

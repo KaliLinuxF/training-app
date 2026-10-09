@@ -1,0 +1,20 @@
+.dimmable {
+  transition: opacity 200ms ease;
+}
+
+/* Reminder switched off: picker and time row at .45, as in the prototype. */
+.off {
+  opacity: 0.45;
+}
+
+.timeRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.timeLabel {
+  font-size: 14px;
+  color: var(--muted);
+}

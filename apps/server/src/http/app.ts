@@ -2,10 +2,13 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createRateLimiter, LOGIN_RATE_LIMIT, type RateLimiter } from '../auth/rateLimit';
 import { createSessionStore } from '../auth/sessions';
-import type { Config } from '../config';
+import { DEFAULT_FOOD_DAILY_LIMIT, type Config } from '../config';
 import { createDataRepo } from '../db/data';
 import type { Database } from '../db/sqlite';
+import { createFoodBudget } from '../food/budget';
+import type { FoodEstimator } from '../food/estimator';
 import { silentLogger, type Logger } from '../logger';
+import { createPhotoStore } from '../photos/store';
 import type { PushService } from '../push/service';
 import { isApiPath, serveWebApp } from '../static';
 import { APP_VERSION } from '../version';
@@ -17,7 +20,9 @@ import { noStore, securityHeaders } from './middleware/securityHeaders';
 import { registerAuthRoutes } from './routes/auth';
 import { registerDataRoutes } from './routes/data';
 import type { RouteDeps } from './routes/deps';
+import { registerFoodRoutes } from './routes/food';
 import { registerHealthRoutes } from './routes/health';
+import { registerPhotoRoutes } from './routes/photos';
 import { registerPushRoutes } from './routes/push';
 import type { AppEnv } from './types';
 
@@ -30,6 +35,10 @@ export interface AppDeps {
   logger?: Logger;
   /** Null when Web Push could not be initialised (push routes answer 503 `push_unavailable`). */
   push?: PushService | null;
+  /** Food photo files, `${DATA_DIR}/photos` (created on the first upload). */
+  photosDir: string;
+  /** AI calorie estimate. No estimator (no ANTHROPIC_API_KEY): status `enabled: false`, estimate 503. */
+  food?: { estimator: FoodEstimator | null; dailyLimit?: number };
   /** Injectable clock, epoch ms. */
   now?: () => number;
   loginLimiter?: RateLimiter;
@@ -44,6 +53,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     data: createDataRepo(db, now, logger),
     sessions,
     push,
+    photos: createPhotoStore(db, deps.photosDir, now),
+    food: {
+      estimator: deps.food?.estimator ?? null,
+      budget: createFoodBudget(db, deps.food?.dailyLimit ?? DEFAULT_FOOD_DAILY_LIMIT),
+    },
     logger,
     now,
     loginLimiter: deps.loginLimiter ?? createRateLimiter(LOGIN_RATE_LIMIT),
@@ -61,7 +75,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     '/api/*',
     bodyLimit({
       maxSize: MAX_BODY_BYTES,
-      onError: (c) => apiError(c, 413, 'bad_request', MESSAGES.tooLarge),
+      onError: (c) => apiError(c, 413, 'payload_too_large', MESSAGES.tooLarge),
     }),
   );
   app.use('/api/*', mutationGuard(config));
@@ -70,6 +84,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   registerAuthRoutes(app, routeDeps);
   registerDataRoutes(app, routeDeps);
   registerPushRoutes(app, routeDeps);
+  registerFoodRoutes(app, routeDeps);
+  registerPhotoRoutes(app, routeDeps);
 
   if (config.staticDir) app.use('*', serveWebApp(config.staticDir));
 

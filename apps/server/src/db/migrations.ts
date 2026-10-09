@@ -61,6 +61,28 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (kind, date)
   ) STRICT;
   `,
+  // v2: food photo diary and «Часті страви».
+  `
+  ALTER TABLE days ADD COLUMN photos TEXT NOT NULL DEFAULT '[]';
+
+  CREATE TABLE foods (
+    key       TEXT PRIMARY KEY,
+    position  INTEGER NOT NULL,
+    name      TEXT NOT NULL,
+    portion   TEXT NOT NULL,
+    kcal      INTEGER NOT NULL,
+    count     INTEGER NOT NULL,
+    last_used TEXT NOT NULL
+  ) STRICT;
+
+  CREATE TABLE photos (
+    id          TEXT PRIMARY KEY,
+    date        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    bytes       INTEGER NOT NULL,
+    thumb_bytes INTEGER NOT NULL
+  ) STRICT;
+  `,
 ];
 
 export function schemaVersion(db: Database): number {

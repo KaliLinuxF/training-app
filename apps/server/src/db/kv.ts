@@ -7,6 +7,8 @@ export const KV = {
   settings: 'settings',
   vapidPublicKey: 'vapid_public_key',
   vapidPrivateKey: 'vapid_private_key',
+  /** `{ date, count }`: AI estimates attempted on the user's current local day. */
+  foodBudget: 'food_budget',
 } as const;
 
 export type KvKey = (typeof KV)[keyof typeof KV];

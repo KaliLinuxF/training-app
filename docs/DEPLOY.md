@@ -57,6 +57,7 @@ Only Caddy publishes ports — Docker-published ports bypass ufw, so the app mus
 | ---------------------------------------- | -------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`                      | enables the AI calorie estimate (text / photo); without it the UI hides it |
 | `FOOD_AI_MODEL`                          | optional model override for the estimate (default `claude-opus-5-5`)       |
+| `FOOD_DAILY_LIMIT`                       | estimates allowed per day (default `60`; `0` switches estimates off)       |
 | `LOG_LEVEL`                              | `debug`, `info` (default), `warn`, `error` or `silent`                     |
 | `VAPID_SUBJECT`                          | Web Push contact (`https:` URL or `mailto:`), default `PUBLIC_ORIGIN`      |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | only to pin keys; by default they are generated once and kept in the DB    |
@@ -121,6 +122,23 @@ ssh -t deploy@64.176.75.160 'cd /opt/training-app && docker compose exec app nod
 
 It asks twice with hidden input, stores a scrypt hash in the database and **revokes all sessions**.
 For scripting, `set-password --stdin` reads the password from one line of stdin (use `docker compose exec -T`).
+
+## AI calorie estimate
+
+- **Off until `ANTHROPIC_API_KEY` is in `.env`** (then `docker compose up -d`). Without it `GET /api/food/status`
+  answers `enabled: false` and the UI hides «✨ Порахувати» / «📷 Фото». The start-up log says which:
+  `AI calorie estimate enabled (model claude-opus-5-5, 60 per day)` or `… disabled (…)`.
+- The app container calls the Anthropic API (outbound HTTPS) with Claude Opus 5.5 (`FOOD_AI_MODEL`): structured JSON
+  output, effort `low`, server-side refusal fallback; 60 s timeout, one retry. An estimate usually takes 5–20 s.
+- **Cost guard:** at most `FOOD_DAILY_LIMIT` model calls (default 60) per day in the user's time zone; the counter is
+  in the database (survives restarts). Over the limit → «Ліміт підрахунків на сьогодні вичерпано» until midnight.
+- **Photos** arrive with the estimate (downscaled JPEG + thumbnail, made on the phone) and are stored in
+  `data/photos/` before the model is called. Photos that no day references 24 h later are deleted daily at ~03:40
+  Kyiv time (log line `photo gc: …`).
+- **Logs** never contain the description, the photo or the key. A failed estimate logs one line such as
+  `food estimate failed: HTTP 529 overloaded_error: …`, `request timed out` or `refusal (category: …)`; a rejected
+  key logs `Anthropic key rejected (HTTP 401): check ANTHROPIC_API_KEY` once, and estimates answer 503 until the key
+  is replaced (see [Rotating](#rotating-the-password-and-the-api-key)).
 
 ## Routine deploys
 
@@ -250,4 +268,5 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 | certificate / HTTPS errors         | `deploy/deploy.sh logs caddy`; DNS A record; ports 80/443 open in ufw    |
 | login always fails                 | password not set yet → `deploy/deploy.sh set-password` (the log says so) |
 | no «Порахувати» / «Фото» buttons   | `ANTHROPIC_API_KEY` missing in `.env` (or not applied with `up -d`)      |
+| AI estimates keep failing          | `deploy/deploy.sh logs` → `food estimate failed: …` / `key rejected`     |
 | disk filling up                    | `docker system df` on the server; deploys prune old images and cache     |

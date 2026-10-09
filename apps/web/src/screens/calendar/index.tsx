@@ -1,3 +1,1 @@
-export function CalendarScreen() {
-  return <div>Календар</div>;
-}
+export { CalendarScreen } from './CalendarScreen';

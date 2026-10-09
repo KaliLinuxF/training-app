@@ -4,7 +4,14 @@ import { createTestServer, json } from './helpers';
 
 const sample: AppData = {
   days: {
-    '2026-10-09': { food: 'Вівсянка', kcal: 1500, trained: true, types: ['Кардіо', 'Прес'], notes: 'легко' },
+    '2026-10-09': {
+      food: 'Вівсянка',
+      kcal: 1500,
+      trained: true,
+      types: ['Кардіо', 'Прес'],
+      notes: 'легко',
+      photos: ['AAAAAAAAAAAAAAAAAAAAAA', 'BBBBBBBBBBBBBBBBBBBBBB'],
+    },
     '2026-10-10': { food: '', kcal: 1800, trained: false, types: [], notes: '' },
   },
   weights: [
@@ -12,6 +19,10 @@ const sample: AppData = {
     { date: '2026-10-10', kg: 65.4 },
   ],
   measures: [{ date: '2026-10-10', chest: 90, waist: 70, hips: 98.5 }],
+  foods: [
+    { name: 'Вівсянка з бананом', portion: '250 г', kcal: 350, count: 4, lastUsed: '2026-10-09' },
+    { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60, count: 9, lastUsed: '2026-10-10' },
+  ],
   settings: { ...defaultSettings(), goal: 60, onboarded: true },
 };
 
@@ -44,11 +55,27 @@ describe('export / import', () => {
     const cookie = await s.login();
     await s.call('/api/ops', {
       cookie,
-      body: { ops: [{ kind: 'weight.put', date: '2025-01-01', kg: 80 }] },
+      body: {
+        ops: [
+          { kind: 'weight.put', date: '2025-01-01', kg: 80 },
+          { kind: 'food.use', date: '2025-01-01', value: { name: 'Борщ', portion: '300 г', kcal: 180 } },
+          { kind: 'food.use', date: '2025-01-01', value: { name: 'кава з молоком', portion: '', kcal: 40 } },
+        ],
+      },
     });
     await s.call('/api/import', { cookie, body: sample });
     const data = await json<AppData>(await s.call('/api/data', { cookie }));
     expect(data.weights).toEqual(sample.weights);
+    expect(data.foods).toEqual(sample.foods);
+  });
+
+  it('imports a backup made before «Часті страви» existed (no foods → none)', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    await s.call('/api/import', { cookie, body: sample });
+    const { foods: _foods, ...old } = sample;
+    expect((await s.call('/api/import', { cookie, body: old })).status).toBe(200);
+    expect(await json(await s.call('/api/data', { cookie }))).toEqual({ ...sample, foods: [] });
   });
 
   it('normalises imported records the same way ops do', async () => {
@@ -75,6 +102,14 @@ describe('export / import', () => {
     ['duplicate weight dates', { ...sample, weights: [...sample.weights, { date: '2026-10-10', kg: 65 }] }],
     ['invalid date key', { ...sample, days: { '2026-13-01': sample.days['2026-10-09'] } }],
     ['weight out of range', { ...sample, weights: [{ date: '2026-10-10', kg: 4 }] }],
+    [
+      'duplicate dish names',
+      { ...sample, foods: [...sample.foods, { ...sample.foods[0], name: ' ВІВСЯНКА з бананом' }] },
+    ],
+    [
+      'bad photo id',
+      { ...sample, days: { '2026-10-09': { ...sample.days['2026-10-09'], photos: ['../x'] } } },
+    ],
     ['not an object', [1, 2, 3]],
   ])('rejects %s with bad_request and keeps the old data', async (_name, body) => {
     const s = await createTestServer();

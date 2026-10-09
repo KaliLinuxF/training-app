@@ -1,0 +1,101 @@
+.strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.sm {
+  --thumb: 48px;
+  gap: 6px;
+}
+
+.md {
+  --thumb: 64px;
+  gap: 8px;
+}
+
+/* Room for the remove badges that stick out of the top-right corner. */
+.removable {
+  padding: 6px 6px 0 0;
+  gap: 10px;
+}
+
+.cell {
+  position: relative;
+  flex: none;
+  width: var(--thumb);
+  height: var(--thumb);
+}
+
+.thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r14);
+  overflow: hidden;
+  background: var(--line2);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.thumb:active {
+  transform: scale(0.97);
+}
+
+.img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  -webkit-touch-callout: none;
+}
+
+.broken {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 2px solid var(--paper);
+  border-radius: 50%;
+  background: var(--solid);
+  color: var(--onSolid);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 44px tap target around the 22px badge. */
+.remove::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
+}
+
+@media (hover: hover) {
+  .thumb:hover .img {
+    opacity: 0.88;
+  }
+}

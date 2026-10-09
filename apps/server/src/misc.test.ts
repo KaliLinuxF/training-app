@@ -23,7 +23,18 @@ describe('loadConfig', () => {
       logLevel: 'info',
       devPassword: null,
       vapid: { subject: DEFAULT_PUBLIC_ORIGIN, publicKey: null, privateKey: null },
+      foodAi: { apiKey: null, model: 'claude-opus-5-5', dailyLimit: 60 },
     });
+  });
+
+  it('reads the AI calorie estimate settings', () => {
+    const c = loadConfig(
+      { ANTHROPIC_API_KEY: ' sk-ant-test ', FOOD_AI_MODEL: 'claude-sonnet-5-5', FOOD_DAILY_LIMIT: '10' },
+      cwd,
+    );
+    expect(c.foodAi).toEqual({ apiKey: 'sk-ant-test', model: 'claude-sonnet-5-5', dailyLimit: 10 });
+    expect(loadConfig({ ANTHROPIC_API_KEY: '  ' }, cwd).foodAi.apiKey).toBeNull();
+    expect(loadConfig({ FOOD_DAILY_LIMIT: '0' }, cwd).foodAi.dailyLimit).toBe(0);
   });
 
   it('reads the environment', () => {
@@ -63,6 +74,9 @@ describe('loadConfig', () => {
     [{ LOG_LEVEL: 'loud' }],
     [{ VAPID_PUBLIC_KEY: 'only-one' }],
     [{ VAPID_SUBJECT: 'http://insecure.example' }],
+    [{ FOOD_DAILY_LIMIT: 'many' }],
+    [{ FOOD_DAILY_LIMIT: '-1' }],
+    [{ FOOD_DAILY_LIMIT: '2.5' }],
   ])('rejects %o', (env) => {
     expect(() => loadConfig(env, cwd)).toThrow(ConfigError);
   });

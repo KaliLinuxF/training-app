@@ -1,0 +1,170 @@
+/* Prototype line 146: padding 16/14/14, gap 12 (gap comes from <Card gap={12}>). */
+.card {
+  padding: 16px 14px 14px;
+}
+
+.nav {
+  padding: 0 4px;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+/* Weekday header + day grid; the 4px gap equals the prototype's single-grid row gap. */
+.calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /*
+   * No `touch-action: pan-y` here on purpose: with it, Chrome swallows the first tap after a
+   * horizontal swipe (fling-cancel tap suppression). The page cannot pan sideways anyway.
+   */
+}
+
+.weekdays,
+.days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.weekday {
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+  padding: 4px 0;
+}
+
+.cell {
+  position: relative;
+  min-width: 0;
+  aspect-ratio: 1 / 1.05;
+  border-radius: var(--r14);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 160ms ease;
+}
+
+/* Grow the tap area into the 4px gaps (cells are ~43px wide on a phone). */
+button.cell::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+}
+
+button.cell:active {
+  transform: scale(0.96);
+}
+
+.num {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.marks {
+  display: flex;
+  gap: 3px;
+  height: 5px;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+/* «Заливка» fills: selected → solid, else trained → accT, else food → acc2T. */
+.selected {
+  background: var(--solid);
+  color: var(--onSolid);
+}
+
+.selected .dot {
+  background: var(--onSolid);
+}
+
+.trained {
+  background: var(--accT);
+}
+
+.food {
+  background: var(--acc2T);
+}
+
+.today {
+  border-color: var(--ink);
+}
+
+.future {
+  color: var(--faint);
+  cursor: default;
+}
+
+@media (hover: hover) {
+  button.none:hover {
+    background: var(--paper);
+  }
+}
+
+.slideNext {
+  animation: from-right 220ms var(--ease-out);
+}
+
+.slidePrev {
+  animation: from-left 220ms var(--ease-out);
+}
+
+@keyframes from-right {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+
+@keyframes from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+
+/* Legend swatches for the fill mode (10px rounded squares with a 1.5px border). */
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.square {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1.5px solid;
+}
+
+.squareFood {
+  background: var(--acc2T);
+  border-color: var(--acc2);
+}
+
+.squareTrained {
+  background: var(--accT);
+  border-color: var(--acc);
+}

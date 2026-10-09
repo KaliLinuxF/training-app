@@ -1,0 +1,12 @@
+/* Tile grids inside the progress cards (prototype: weight/kcal 3 columns, workouts 2 columns, gap 8). */
+.tiles3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tiles2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}

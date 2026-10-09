@@ -1,0 +1,54 @@
+/* Quick buttons: full row, 2 columns on the phone, 4 on desktop (prototype `quickCols`). */
+.quick {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .quick {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.triple {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* Offline note: a small muted pill tucked under the header. */
+.offlineRow {
+  display: flex;
+  padding: 0 4px;
+  margin-top: -6px;
+}
+
+.offline {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 10px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.offlineDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex-shrink: 0;
+}

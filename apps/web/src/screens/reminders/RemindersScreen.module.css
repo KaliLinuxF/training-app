@@ -1,0 +1,7 @@
+/* Same rhythm as the grid itself (gap 14), so on phones it reads as two ordinary rows. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}

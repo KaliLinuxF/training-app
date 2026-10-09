@@ -1,0 +1,19 @@
+.error {
+  font-size: 13px;
+  color: var(--accD);
+}
+
+/* Prototype line 488: three measurement tiles in a row. */
+.measureGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.tileInvalid {
+  border-color: var(--accD);
+}
+
+.invalid input {
+  border-color: var(--accD);
+}

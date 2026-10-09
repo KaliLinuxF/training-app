@@ -14,6 +14,12 @@ export const MESSAGES = {
   needsJson: 'Потрібен Content-Type: application/json',
   notFound: 'Не знайдено',
   pushUnavailable: 'Сповіщення недоступні на сервері',
+  aiUnavailable: 'Підрахунок калорій зараз недоступний',
+  aiFailed: 'Не вдалося порахувати калорії. Спробуй ще раз або опиши страву словами',
+  foodLimit: 'Ліміт підрахунків на сьогодні вичерпано',
+  notJpeg: 'Фото має бути у форматі JPEG',
+  photoTooLarge: 'Фото завелике',
+  badPhotoId: 'Некоректний ідентифікатор фото',
   internal: 'Помилка сервера',
 } as const;
 

@@ -1,3 +1,1 @@
-export function ProgressScreen() {
-  return <div>Прогрес</div>;
-}
+export { ProgressScreen } from './ProgressScreen';

@@ -30,8 +30,11 @@ export function securityHeaders({ hsts }: { hsts: boolean }): MiddlewareHandler 
   };
 }
 
-/** API responses are personal data: never store them in any cache. */
+/**
+ * API responses are personal data: never store them in any cache — unless the route chose a
+ * policy itself (immutable food photos: `private`, i.e. the browser cache only).
+ */
 export const noStore: MiddlewareHandler = async (c, next) => {
   await next();
-  c.header('Cache-Control', 'no-store');
+  if (!c.res.headers.has('Cache-Control')) c.header('Cache-Control', 'no-store');
 };

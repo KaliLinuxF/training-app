@@ -1,0 +1,7 @@
+/* Lead paragraph, like the banner sub copy but at body size. */
+.intro {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}

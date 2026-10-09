@@ -1,0 +1,140 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.ai {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: var(--r14);
+  border: 1.5px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+
+.action:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.count {
+  background: var(--accT);
+  color: var(--accD);
+}
+
+.count[aria-expanded='true'] {
+  border-color: var(--acc);
+}
+
+.photo {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+.hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 12px 12px 14px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  transition: border-color 150ms ease;
+  animation: composer-in 200ms var(--ease-out);
+}
+
+.composer:focus-within {
+  border-color: var(--acc);
+}
+
+.composerInput {
+  display: block;
+  width: 100%;
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+}
+
+/* The composer border shows focus instead of the global ring around the bare textarea. */
+.composerInput:focus-visible {
+  outline: none;
+}
+
+.composerBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.composerNote {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.composerSubmit {
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+@keyframes composer-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (hover: hover) {
+  .count:hover:not(:disabled) {
+    border-color: var(--accLine);
+  }
+
+  .count[aria-expanded='true']:hover:not(:disabled) {
+    border-color: var(--acc);
+  }
+
+  .photo:hover:not(:disabled) {
+    border-color: var(--line3);
+  }
+}

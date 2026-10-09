@@ -1,0 +1,16 @@
+.header {
+  padding-bottom: 6px;
+}
+
+.action {
+  margin-top: 8px;
+}
+
+.foodText,
+.photos {
+  display: block;
+}
+
+.foodText + .photos {
+  margin-top: 8px;
+}
