@@ -176,7 +176,7 @@ function buildBanners(data: AppData, today: ISODate, showInstallHint: boolean): 
       dismissible: false,
     });
   }
-  for (const kind of dueReminders(data, today)) {
+  for (const kind of onboarded ? dueReminders(data, today) : []) {
     if (kind === 'weigh') {
       banners.push({
         id: kind,

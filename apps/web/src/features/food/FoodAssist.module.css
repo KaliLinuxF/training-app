@@ -138,3 +138,8 @@
     border-color: var(--line3);
   }
 }
+
+/* Nothing to show (AI off, no frequent dishes): take no space in the sheet's field. */
+.root:empty {
+  display: none;
+}

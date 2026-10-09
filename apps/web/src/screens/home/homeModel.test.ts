@@ -66,8 +66,8 @@ describe('buildHomeModel — empty data (new user)', () => {
     expect(model.offline).toBe(false);
   });
 
-  it('starts with the first-run banner, then the due reminders', () => {
-    expect(model.banners.map((b) => b.id)).toEqual(['setup', 'weigh', 'measure', 'workout']);
+  it('shows only the first-run banner until setup is done (no wall of reminder banners)', () => {
+    expect(model.banners.map((b) => b.id)).toEqual(['setup']);
     expect(model.banners[0]).toEqual({
       id: 'setup',
       title: 'Почнімо',
@@ -206,8 +206,10 @@ describe('buildHomeModel — details', () => {
   });
 
   it('puts the install hint last and makes it dismissible', () => {
-    const banners = buildHomeModel(emptyData(), MONDAY, { ...MORNING, showInstallHint: true }).banners;
-    expect(banners.map((b) => b.id)).toEqual(['setup', 'weigh', 'measure', 'workout', 'install']);
+    const banners = buildHomeModel(onboarded(), MONDAY, { ...MORNING, showInstallHint: true }).banners;
+    expect(banners.map((b) => b.id)).toEqual(['weigh', 'measure', 'workout', 'install']);
+    const first = buildHomeModel(emptyData(), MONDAY, { ...MORNING, showInstallHint: true }).banners;
+    expect(first.map((b) => b.id)).toEqual(['setup', 'install']);
     expect(banners.at(-1)).toEqual({
       id: 'install',
       title: 'Встанови Легко на iPhone',

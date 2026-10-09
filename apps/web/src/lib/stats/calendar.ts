@@ -18,7 +18,8 @@ export const DAY_STATUS_LABELS: Readonly<Record<DayStatus, string>> = {
   empty: 'Порожньо',
 };
 
-const hasFood = (e: DayEntry): boolean => e.food.trim() !== '';
+/** Food was recorded: a description or at least one food photo. */
+const hasFood = (e: DayEntry): boolean => e.food.trim() !== '' || (e.photos?.length ?? 0) > 0;
 
 /**
  * Calendar detail pill: «Заповнено» when food, kcal and the workout mark (yes or no) are all

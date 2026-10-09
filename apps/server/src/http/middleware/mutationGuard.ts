@@ -6,6 +6,9 @@ import type { AppEnv } from '../types';
 /** The Vite dev server (proxying `/api` to us). */
 export const DEV_ORIGINS = ['http://localhost:5173', 'http://127.0.0.1:5173'] as const;
 
+/** Outside production any loopback dev server may call us (several dev stacks can run side by side). */
+const LOOPBACK_DEV_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\]):\d{1,5}$/;
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 export interface MutationGuardOptions {
@@ -28,7 +31,8 @@ export function mutationGuard({
   return async (c, next) => {
     if (SAFE_METHODS.has(c.req.method)) return next();
     const origin = normalizeOrigin(c.req.header('origin'));
-    if (!origin || !(allowed.has(origin) || origin === requestOrigin(c, trustProxy))) {
+    const devLoopback = !production && origin !== null && LOOPBACK_DEV_ORIGIN.test(origin);
+    if (!origin || !(allowed.has(origin) || devLoopback || origin === requestOrigin(c, trustProxy))) {
       return apiError(c, 403, 'forbidden_origin', MESSAGES.forbiddenOrigin);
     }
     if (!isJsonContentType(c.req.header('content-type'))) {

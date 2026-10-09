@@ -11,6 +11,8 @@ describe('origin and content-type checks on POST', () => {
       'https://fit.triple-a.dev',
       'http://localhost:5173',
       'http://127.0.0.1:5173',
+      'http://localhost:5204',
+      'http://[::1]:5201',
     ]) {
       expect((await s.call('/api/auth/login', { ...login, origin })).status, origin).toBe(200);
     }
@@ -29,6 +31,7 @@ describe('origin and content-type checks on POST', () => {
     const s = await createTestServer({ production: true });
     const res = await s.call('/api/auth/login', { ...login, origin: 'http://localhost:5173' });
     expect(res.status).toBe(403);
+    expect((await s.call('/api/auth/login', { ...login, origin: 'http://127.0.0.1:5204' })).status).toBe(403);
     expect((await s.call('/api/auth/login', { ...login, origin: 'https://fit.triple-a.dev' })).status).toBe(
       200,
     );
