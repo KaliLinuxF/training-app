@@ -1,18 +1,72 @@
 /** Page-level helpers: navigation, sheets, toasts — written against roles and visible copy. */
 import { expect, type Locator, type Page } from '@playwright/test';
 
-export type Section = 'Головна' | 'Календар' | 'Прогрес' | 'Нагадування';
+/** The four sections of the tab bar / sidebar (redesign A). */
+export type Section = 'Головна' | 'Календар' | 'Прогрес' | 'Налаштування';
+
+/**
+ * @deprecated `'Нагадування'` — shim, type-compatible only; behaviour changed (quickAction('Харчування') opens
+ * «Їжа», go('Нагадування') lands on the list). The reminders moved to Settings: use `openSettings('Нагадування')`
+ * for the sub-page; `heading('Нагадування')` is the phone sub-page's <h1>. Removed in the kit prune.
+ */
+export type LegacySection = Section | 'Нагадування';
 
 /** <h1> of each section (Home greets by the hour: the fixed clock says 10:00 → «ранку»). */
-const SECTION_TITLES: Record<Section, string | RegExp> = {
+const SECTION_TITLES: Record<LegacySection, string | RegExp> = {
   Головна: /^Доброго (ранку|дня|вечора)$/,
   Календар: 'Календар',
   Прогрес: 'Мій прогрес',
+  Налаштування: 'Налаштування',
   Нагадування: 'Нагадування',
 };
 
+/**
+ * Dialog names (the sheet heading). `'Налаштування'` is @deprecated — shim, type-compatible only; behaviour changed
+ * (quickAction('Харчування') opens «Їжа», go('Нагадування') lands on the list). It was the old name of the first-run
+ * sheet, now «Перші кроки», and no longer matches any sheet. Removed in the kit prune.
+ */
 export type SheetName =
-  'Запис дня' | 'Контрольне зважування' | 'Заміри тіла' | 'Налаштування' | 'Встановлення на iPhone';
+  | 'Що записати?'
+  | 'Їжа'
+  | 'Тренування'
+  | 'Запис дня'
+  | 'Контрольне зважування'
+  | 'Заміри тіла'
+  | 'Перші кроки'
+  | 'Встановлення на iPhone'
+  | 'Налаштування';
+
+/** Rows of the «Що записати?» menu (opened by «+»), and «Повний запис дня →» under them. */
+export type RecordItem = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри' | 'Повний запис дня';
+
+/** The sheet each «Що записати?» item swaps the menu to. */
+const RECORD_SHEETS: Record<RecordItem, SheetName> = {
+  Їжа: 'Їжа',
+  Тренування: 'Тренування',
+  Вага: 'Контрольне зважування',
+  Заміри: 'Заміри тіла',
+  'Повний запис дня': 'Запис дня',
+};
+
+/** Action rows of the Home «Сьогодні» list. */
+export type HomeRow = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри';
+
+/** Rows of the «Налаштування» list. */
+export type SettingsSection = 'Нагадування' | 'Цілі' | 'Типи тренувань' | 'Вигляд' | 'Дані і копія';
+
+/** `/settings/:section` of each settings row. */
+export const SETTINGS_SLUGS: Record<SettingsSection, string> = {
+  Нагадування: 'reminders',
+  Цілі: 'goals',
+  'Типи тренувань': 'workouts',
+  Вигляд: 'appearance',
+  'Дані і копія': 'data',
+};
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Matches an accessible name that starts with `text` (rows are named «Title sub value»). */
+const startsWith = (text: string): RegExp => new RegExp(`^${escapeRegExp(text)}`);
 
 export class App {
   constructor(readonly page: Page) {}
@@ -36,14 +90,25 @@ export class App {
     return this.page.getByRole('navigation', { name: 'Основна навігація' });
   }
 
-  heading(section: Section): Locator {
+  /**
+   * The section's <h1>. `'Нагадування'` is a @deprecated shim — type-compatible only; behaviour changed
+   * (quickAction('Харчування') opens «Їжа», go('Нагадування') lands on the list). It is the <h1> of the phone
+   * sub-page `/settings/reminders`; on desktop that page's title is an <h2> under the <h1> «Налаштування».
+   */
+  heading(section: LegacySection): Locator {
     return this.page.getByRole('heading', { level: 1, name: SECTION_TITLES[section] });
   }
 
-  /** Taps a tab (mobile) / sidebar link (desktop) and waits for the screen title. */
-  async go(section: Section): Promise<void> {
-    await this.nav.getByRole('link', { name: section, exact: true }).click();
-    await expect(this.heading(section)).toBeVisible();
+  /**
+   * Taps a tab (mobile) / sidebar link (desktop) and waits for the screen title.
+   * `'Нагадування'` is a @deprecated shim — type-compatible only; behaviour changed (quickAction('Харчування')
+   * opens «Їжа», go('Нагадування') lands on the list): it taps «Налаштування» and waits for the list's <h1>.
+   * Use `openSettings('Нагадування')` to reach the reminders.
+   */
+  async go(section: LegacySection): Promise<void> {
+    const target: Section = section === 'Нагадування' ? 'Налаштування' : section;
+    await this.nav.getByRole('link', { name: target, exact: true }).click();
+    await expect(this.heading(target)).toBeVisible();
   }
 
   /** «+» in the tab bar / «+ Записати день» in the sidebar. */
@@ -64,10 +129,23 @@ export class App {
     await expect(this.dialogs).toHaveCount(0);
   }
 
+  /**
+   * «+» (tab bar) / «+ Записати день» (sidebar) → `item` in the «Що записати?» menu. Returns the sheet the menu
+   * swapped to (Їжа, Тренування, Контрольне зважування, Заміри тіла, or Запис дня), once it is visible.
+   */
+  async record(item: RecordItem): Promise<Locator> {
+    await this.recordButton().click();
+    await this.sheet('Що записати?')
+      .getByRole('button', { name: startsWith(item) })
+      .click();
+    const target = this.sheet(RECORD_SHEETS[item]);
+    await expect(target).toBeVisible();
+    return target;
+  }
+
   /** The «Збережено» pill (and other toasts): the live region whose whole text is `text`. */
   toast(text: string | RegExp): Locator {
-    const exact =
-      typeof text === 'string' ? new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`) : text;
+    const exact = typeof text === 'string' ? new RegExp(`^${escapeRegExp(text)}$`) : text;
     return this.page.locator('[role="status"][aria-atomic="true"]').filter({ hasText: exact });
   }
 
@@ -75,9 +153,55 @@ export class App {
     return this.page.getByRole('region', { name, exact: typeof name === 'string' });
   }
 
-  /** Home quick buttons «Додати Харчування / Тренування / Вага / Заміри». */
-  quickAction(label: 'Харчування' | 'Тренування' | 'Вага' | 'Заміри'): Locator {
-    return this.page.getByRole('button', { name: `Додати ${label}`, exact: true });
+  /** A Home «Сьогодні» row (opens its short sheet); the name starts with the row title. */
+  homeRow(name: HomeRow): Locator {
+    return this.region('Сьогодні').getByRole('button', { name: startsWith(name) });
+  }
+
+  /** The inline ✓ («Було») / ✕ («Не було») of the Home «Тренування» row (saves at once, no sheet). */
+  trainingToggle(name: 'Було' | 'Не було'): Locator {
+    return this.region('Сьогодні').getByRole('button', { name, exact: true });
+  }
+
+  /** The Home week row «Тиждень · 2 з 3 трен. …» → `/progress?period=week`. */
+  weekLink(): Locator {
+    return this.page.getByRole('link', { name: /^Тиждень/ });
+  }
+
+  /** A row of the «Налаштування» list (phone list / desktop sidebar of the split view). */
+  settingsRow(title: SettingsSection): Locator {
+    return this.page
+      .getByRole('navigation', { name: 'Розділи налаштувань' })
+      .getByRole('link', { name: startsWith(title) });
+  }
+
+  /** Tab «Налаштування» → the section's row → waits for the section heading (<h1> phone, <h2> desktop). */
+  async openSettings(title: SettingsSection): Promise<void> {
+    await this.go('Налаштування');
+    await this.settingsRow(title).click();
+    await expect(this.page.getByRole('heading', { name: title, exact: true }).first()).toBeVisible();
+  }
+
+  /** Opens `/settings/<slug>` directly (deep link: the back link replace-navigates to the list). */
+  async gotoSettings(title: SettingsSection): Promise<void> {
+    await this.goto(`/settings/${SETTINGS_SLUGS[title]}`);
+  }
+
+  /**
+   * «‹ Налаштування» above a settings sub-page title. Phone only — the desktop split view has no back link,
+   * so gate tests that use it to the `iphone` project.
+   */
+  settingsBack(): Locator {
+    return this.page.getByRole('link', { name: 'Назад: Налаштування' });
+  }
+
+  /**
+   * @deprecated shim — type-compatible only; behaviour changed (quickAction('Харчування') opens «Їжа»,
+   * go('Нагадування') lands on the list). The Home quick buttons are gone: this is
+   * `homeRow(label === 'Харчування' ? 'Їжа' : label)`. Removed in the kit prune.
+   */
+  quickAction(label: 'Харчування' | 'Їжа' | 'Тренування' | 'Вага' | 'Заміри'): Locator {
+    return this.homeRow(label === 'Харчування' ? 'Їжа' : label);
   }
 
   /** Saves the open sheet («Зберегти» / «Почати») and waits for it to close. */

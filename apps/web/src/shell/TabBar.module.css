@@ -10,9 +10,14 @@
   padding: 0 12px calc(14px + var(--safe-bottom));
 }
 
+/*
+ * Two flexible groups around a fixed centre: «+» stays exactly in the middle whatever the label widths,
+ * and each group shares its width between its two tabs. At 390px a group is 144px ≥ 46 + 79.4 («Прогрес» pill
+ * + «Налаштування» at 11/600).
+ */
 .inner {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr);
   align-items: center;
   background: var(--glass);
   backdrop-filter: blur(14px);
@@ -21,6 +26,11 @@
   border-radius: var(--r24);
   padding: 8px 6px;
   box-shadow: var(--shadow-bar);
+}
+
+.group {
+  display: flex;
+  min-width: 0;
 }
 
 .item {
@@ -41,6 +51,17 @@
   -webkit-user-select: none;
   /* No iOS link preview on long press. */
   -webkit-touch-callout: none;
+}
+
+/* Equal shares, but never narrower than the label (or the icon pill). */
+.group > .item {
+  flex: 1 1 0;
+  min-width: max-content;
+}
+
+.record {
+  justify-self: center;
+  width: 64px;
 }
 
 .plus {
@@ -91,4 +112,28 @@
 
 .active .label {
   color: var(--ink);
+}
+
+/* iPhone SE (1st gen) / small Android: 320px still fits «Налаштування» next to «Прогрес» (115 ≥ 40 + 72). */
+@media (max-width: 359px) {
+  .bar {
+    padding-inline: 8px;
+  }
+
+  .inner {
+    grid-template-columns: minmax(0, 1fr) 60px minmax(0, 1fr);
+  }
+
+  .record {
+    width: 60px;
+  }
+
+  .label {
+    font-size: 10px;
+    letter-spacing: -0.01em;
+  }
+
+  .icon {
+    width: 40px;
+  }
 }

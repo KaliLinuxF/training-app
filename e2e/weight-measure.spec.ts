@@ -7,8 +7,7 @@ test.describe('weigh-in sheet', () => {
     server,
   }) => {
     await app.goto('/');
-    await app.quickAction('Вага').click();
-    const sheet = app.sheet('Контрольне зважування');
+    const sheet = await app.record('Вага');
     const kg = sheet.getByRole('textbox', { name: 'Вага', exact: true });
     const save = sheet.getByRole('button', { name: 'Зберегти' });
     const prev = sheet.getByRole('button', { name: 'Попередній день' });
@@ -70,7 +69,8 @@ test.describe('weigh-in sheet', () => {
     await app.save(sheet);
 
     await expect(app.region('Поточна вага')).toContainText('65,3');
-    await expect(page.getByText('13 жовтня — 65,3 кг')).toBeVisible(); // «Останнє зважування»
+    // The Home «Вага» row names the last weigh-in.
+    await expect(app.homeRow('Вага')).toContainText('13 жовтня — 65,3 кг');
 
     await app.goto('/calendar?date=2026-10-13');
     await expect(app.region('13 жовтня 2026')).toContainText('65,3 кг');
@@ -85,8 +85,7 @@ test.describe('weigh-in sheet', () => {
 
   test('clearing the weight of a day deletes that weigh-in', async ({ app, server }) => {
     await app.goto('/');
-    await app.quickAction('Вага').click();
-    const sheet = app.sheet('Контрольне зважування');
+    const sheet = await app.record('Вага');
     await sheet.getByRole('button', { name: 'Попередній день' }).click();
     await sheet.getByRole('button', { name: 'Попередній день' }).click();
     await expect(sheet).toContainText('12 жовтня 2026');
@@ -103,8 +102,7 @@ test.describe('weigh-in sheet', () => {
 test.describe('measurements sheet', () => {
   test('shows the previous values as hints, validates the range and saves', async ({ app, server }) => {
     await app.goto('/');
-    await app.quickAction('Заміри').click();
-    const sheet = app.sheet('Заміри тіла');
+    const sheet = await app.record('Заміри');
     const chest = sheet.locator('input[name="chest"]');
     const waist = sheet.locator('input[name="waist"]');
     const hips = sheet.locator('input[name="hips"]');
@@ -129,11 +127,8 @@ test.describe('measurements sheet', () => {
     await expect(sheet.getByRole('alert')).toHaveCount(0);
     await app.save(sheet);
 
-    const measures = app.region('Поточні заміри');
-    await expect(measures).toContainText('14 жовтня');
-    await expect(measures).toContainText('89,5');
-    await expect(measures).toContainText('−3,5 см'); // chest 93 → 89,5
-    await expect(measures).toContainText('−5,5 см'); // waist 74,5 → 69
+    // The Home «Заміри» row shows the current values (the changes since the start are on «Прогрес»).
+    await expect(app.homeRow('Заміри')).toContainText('Груди 89,5 · Талія 69');
 
     await expect
       .poll(async () => (await server.getData()).measures.at(-1))
@@ -142,8 +137,7 @@ test.describe('measurements sheet', () => {
 
   test('day navigation loads that day; clearing all three removes the entry', async ({ app, server }) => {
     await app.goto('/');
-    await app.quickAction('Заміри').click();
-    const sheet = app.sheet('Заміри тіла');
+    const sheet = await app.record('Заміри');
     await sheet.getByRole('button', { name: 'Попередній день' }).click();
     await sheet.getByRole('button', { name: 'Попередній день' }).click();
     await expect(sheet).toContainText('12 жовтня 2026');

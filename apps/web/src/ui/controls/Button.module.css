@@ -81,11 +81,11 @@
   padding: 8px 0;
 }
 
-/* Grow the tap target to 44px without changing the layout. */
+/* Grow the tap target to 44px without changing the layout (35px box + 2 × 5 = 45). */
 .ghost::after {
   content: '';
   position: absolute;
-  inset: -4px -6px;
+  inset: -5px -6px;
 }
 
 .full {

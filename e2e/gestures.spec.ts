@@ -56,15 +56,15 @@ test.describe('touch gestures (iPhone)', () => {
     page,
   }) => {
     await app.goto('/');
-    await app.quickAction('Вага').click();
-    const sheet = app.sheet('Контрольне зважування');
+    // «+» → «Що записати?» → «Вага» swaps the menu to «Контрольне зважування».
+    const sheet = await app.record('Вага');
     const heading = sheet.getByRole('heading', { name: 'Контрольне зважування' });
 
     let start = await center(heading);
     await touchDrag(page, start, { x: start.x, y: start.y + 300 });
     await app.expectSheetClosed();
 
-    await app.quickAction('Вага').click();
+    await app.record('Вага');
     await sheet.getByRole('button', { name: 'Плюс 0,1 кг' }).click();
     start = await center(heading);
     // The in-app question shows while the panel waits off-screen; «Залишитись» slides it back.

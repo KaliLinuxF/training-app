@@ -11,6 +11,7 @@ import { Stepper } from './Stepper';
 import { Switch } from './Switch';
 import { TextArea } from './TextArea';
 import { TrainingToggle } from './TrainingToggle';
+import toggleStyles from './TrainingToggle.module.css';
 import { toggleWeekday, WeekdayPicker } from './WeekdayPicker';
 
 afterEach(cleanup);
@@ -54,6 +55,29 @@ describe('TrainingToggle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Було' }));
     fireEvent.click(screen.getByRole('button', { name: 'Не було' }));
     expect(onChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('sm: two glyph buttons that keep the names «Було» / «Не було»', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <TrainingToggle size="sm" value={null} onChange={onChange} aria-label="Тренування сьогодні" />,
+    );
+    const group = screen.getByRole('group', { name: 'Тренування сьогодні' });
+    expect(group.classList.contains(toggleStyles.sm ?? '')).toBe(true);
+    const yes = screen.getByRole('button', { name: 'Було' });
+    const no = screen.getByRole('button', { name: 'Не було' });
+    expect([yes.getAttribute('aria-pressed'), no.getAttribute('aria-pressed')]).toEqual(['false', 'false']);
+    // Visible glyphs only; the words are visually hidden.
+    expect(yes.querySelector('[aria-hidden="true"]')?.textContent).toBe('✓');
+    expect(no.querySelector('[aria-hidden="true"]')?.textContent).toBe('✕');
+    expect(yes.querySelector('.visually-hidden')?.textContent).toBe('Було');
+
+    rerender(<TrainingToggle size="sm" value={true} onChange={onChange} aria-label="Тренування сьогодні" />);
+    expect([yes.getAttribute('aria-pressed'), no.getAttribute('aria-pressed')]).toEqual(['true', 'false']);
+    fireEvent.click(yes);
+    fireEvent.click(yes);
+    fireEvent.click(no);
+    expect(onChange.mock.calls).toEqual([[true], [true], [false]]);
   });
 
   it('is labelled by the surrounding Field', () => {

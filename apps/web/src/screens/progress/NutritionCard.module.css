@@ -18,42 +18,115 @@
   pointer-events: none;
 }
 
+/* «Історія калорій»: its own block under the chart. */
 .history {
   display: flex;
   flex-direction: column;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
 }
 
 .historyTitle {
-  margin: 0;
-  padding-bottom: 4px;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--muted);
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
 }
 
 .historyEmpty {
   margin: 0;
-  padding: 9px 0;
-  border-top: 1px solid var(--line2);
+  padding: 10px 0;
   font-size: 14px;
   color: var(--muted);
 }
 
-/* Continues the history list: same divider, full-width 44px tap target. */
+/*
+ * One day: «Вт, 13 жовтня» · ● «1 740 ккал» · ›. The row reaches 8px past the text on both sides, so the
+ * pressed background has room while the text stays aligned with the card content.
+ */
+.row,
 .more {
-  width: 100%;
+  position: relative;
+  width: calc(100% + 16px);
   min-height: 44px;
-  padding: 0;
+  margin: 0 -8px;
+  padding: 10px 8px;
   border: 0;
-  border-top: 1px solid var(--line2);
+  border-radius: var(--r12);
   background: transparent;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 600;
   cursor: pointer;
-  transition: opacity 120ms ease;
+  transition: background-color 120ms ease;
 }
 
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 12px;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-align: left;
+}
+
+/* --line2 dividers between the rows (and above «Показати ще»), inset to the text. */
+.row + .row::before,
+.row + .more::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 1px;
+  background: var(--line2);
+}
+
+.row:active,
 .more:active {
-  opacity: 0.6;
+  background: var(--paper);
+}
+
+.date {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.kcal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.ok {
+  background: var(--acc2);
+}
+
+.over {
+  background: var(--acc);
+}
+
+/* The 16px glyph centred on the 12px column (its stroke sits inside 12px). */
+.chevron {
+  justify-self: center;
+  color: var(--faint);
+}
+
+.more {
+  display: block;
+  color: var(--accD);
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
 }

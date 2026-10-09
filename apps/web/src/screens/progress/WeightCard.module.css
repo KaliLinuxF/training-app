@@ -1,0 +1,67 @@
+/* «35% шляху» on the right of the header: plain text, not a pill. */
+.way {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accD);
+  white-space: nowrap;
+}
+
+/* «65,4 кг» and the «−2,9 кг від старту» pill beside it (the pill wraps below on a very narrow card). */
+.now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.current {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.value {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* «—» before the first weigh-in. */
+.none {
+  color: var(--faint);
+}
+
+.unit {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+
+/* Bar and the start · left · goal scale under it. */
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scale {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink2);
+  white-space: nowrap;
+}
+
+.num {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.left {
+  font-weight: 600;
+}

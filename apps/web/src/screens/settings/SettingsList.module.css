@@ -1,0 +1,27 @@
+/* The two groups of section links, 14 apart like every other block on the screen. */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* The push badge under «Нагадування». On the selected row (desktop, painted --accT) the acc pill, itself --accT,
+   would lose its chip: lift it onto the card colour. Three parts outrank Pill's one-class tone in any bundle order. */
+.nav [aria-current] .badge {
+  background: var(--card);
+}
+
+/* «● Синхронізовано» as the «Дані і копія» row value. */
+.sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.caption {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}

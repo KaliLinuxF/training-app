@@ -1,0 +1,74 @@
+.strip {
+  display: grid;
+  column-gap: 12px;
+  row-gap: 14px;
+  margin: 0;
+}
+
+.c1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.c2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.c3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.c4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/* dt then dd in the DOM (textContent «Тренувань2»), the value drawn on top. */
+.cell {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.value {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ink2);
+}
+
+.unit {
+  margin-left: 3px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink2);
+}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .d1 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .d2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .d3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .d4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

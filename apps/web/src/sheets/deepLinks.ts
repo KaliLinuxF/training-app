@@ -1,13 +1,16 @@
 /**
- * Deep links used by push notifications (SPEC §3.5, `DEEP_LINKS` in @legko/shared):
- * `/?sheet=day&trained=1`, `/?sheet=weight`, `/?sheet=measure` open that sheet for today.
+ * Sheet deep links, opened for today (plan §3.3). Push notifications use `DEEP_LINKS` in
+ * @legko/shared, which stay as they are: `/?sheet=day&trained=1` (the workout push, a legacy alias
+ * of «Тренування» with ✓), `/?sheet=weight`, `/?sheet=measure`. The app also understands
+ * `/?sheet=day` (the full «Запис дня»), `/?sheet=food` and `/?sheet=workout[&trained=1]`.
+ * The menu, setup and install sheets are not linkable.
  */
 import type { SheetPatch } from '@/store/ui';
 import type { RecordMode } from './record/model';
 
 const SHEET_PARAM = 'sheet';
 const TRAINED_PARAM = 'trained';
-const LINK_MODES: readonly RecordMode[] = ['day', 'weight', 'measure'];
+const LINK_MODES: readonly RecordMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
 
 export interface SheetDeepLink {
   mode: RecordMode;
@@ -21,8 +24,12 @@ export function parseSheetDeepLink(search: string): SheetDeepLink | null {
   const params = new URLSearchParams(search);
   const mode = params.get(SHEET_PARAM);
   if (!isLinkMode(mode)) return null;
-  // `trained` only makes sense for the day record.
-  return mode === 'day' && params.get(TRAINED_PARAM) === '1' ? { mode, patch: { trained: true } } : { mode };
+  // `trained` only means something for the workout; other sheets ignore it.
+  const trained = params.get(TRAINED_PARAM) === '1';
+  // Pushes already delivered (and the server's DEEP_LINKS.workout) say `sheet=day&trained=1`.
+  if (mode === 'day' && trained) return { mode: 'workout', patch: { trained: true } };
+  if (mode === 'workout' && trained) return { mode, patch: { trained: true } };
+  return { mode };
 }
 
 /** The URL to replace the current one with: same path, the deep-link params removed. */

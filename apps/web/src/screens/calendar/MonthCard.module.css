@@ -10,7 +10,7 @@
 .title {
   margin: 0;
   font-family: var(--display);
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
 }
 
@@ -40,10 +40,11 @@
   padding: 4px 0;
 }
 
+/* 42px tall on the phone (six weeks = 272px); proportional only in the desktop shell (below). */
 .cell {
   position: relative;
   min-width: 0;
-  aspect-ratio: 1 / 1.05;
+  height: 42px;
   border-radius: var(--r14);
   border: 1.5px solid transparent;
   background: transparent;
@@ -60,7 +61,7 @@
     background-color 160ms ease;
 }
 
-/* Grow the tap area into the 4px gaps (cells are ~43px wide on a phone). */
+/* Grow the tap area into the 4px gaps (cells are ~43 × 42px on a phone → ≥ 46 × 46). */
 button.cell::after {
   content: '';
   position: absolute;
@@ -72,7 +73,7 @@ button.cell:active {
 }
 
 .num {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -119,6 +120,14 @@ button.cell:active {
 @media (hover: hover) {
   button.none:hover {
     background: var(--paper);
+  }
+}
+
+/* Desktop shell (DESKTOP_QUERY): the column is wide, so the cells follow their width. */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .cell {
+    height: auto;
+    aspect-ratio: 1 / 0.86;
   }
 }
 

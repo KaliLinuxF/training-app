@@ -34,27 +34,32 @@ test.describe('offline', () => {
     await sheet.getByRole('button', { name: 'Прес', exact: true }).click();
     await sheet.getByRole('textbox', { name: 'Калорії за день' }).fill('1620');
     await app.save(sheet);
-    await expect(app.region('Сьогодні')).toContainText('1 620 ккал');
+    await expect(app.homeRow('Їжа')).toContainText('1 620 / 1 700 ккал');
     expect((await server.getData()).days[TODAY]?.kcal).toBeNull();
 
     // Reload without network: the service worker serves the app, IndexedDB the data.
     await page.reload();
     await app.ready();
-    await expect(app.region('Сьогодні')).toContainText('1 620 ккал');
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Прес');
+    await expect(app.homeRow('Їжа')).toContainText('1 620 / 1 700 ккал');
+    await expect(app.homeRow('Тренування')).toContainText('Прес');
+    await expect(app.trainingToggle('Було')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText(OFFLINE_NOTE)).toBeVisible();
-    await app.go('Нагадування');
+    // In-app navigation (the list row, not a page load): the sync status of the data sub-page.
+    await app.openSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Офлайн — 1 зміна чекає на інтернет');
 
     // Calendar and progress work offline too.
     await app.go('Календар');
-    await expect(app.region('14 жовтня 2026')).toContainText('✓ Прес');
+    await expect(app.region('14 жовтня 2026')).toContainText('Прес');
+    await expect(
+      app.region('14 жовтня 2026').getByRole('button', { name: /^Тренування/ }),
+    ).toHaveAccessibleName('Тренування: було, Прес');
 
     await context.setOffline(false);
     await expect
       .poll(async () => (await server.getData()).days[TODAY])
       .toEqual({ food: 'Вівсянка з бананом, кава', kcal: 1620, trained: true, types: ['Прес'], notes: '' });
-    await app.go('Нагадування');
+    await app.openSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     await app.go('Головна');
     await expect(page.getByText(OFFLINE_NOTE)).toBeHidden();
@@ -73,8 +78,8 @@ test.describe('offline', () => {
     await expect(app.region('Поточна вага')).toContainText('65,4');
 
     // Logged out (local data wiped) and offline: the login screen says why it cannot sign in.
-    await app.go('Нагадування');
-    await page.getByRole('button', { name: 'Вийти' }).click();
+    await app.go('Налаштування');
+    await page.getByRole('button', { name: 'Вийти', exact: true }).click();
     await page
       .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
       .getByRole('button', { name: 'Вийти', exact: true })

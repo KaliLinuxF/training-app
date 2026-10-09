@@ -1,7 +1,7 @@
 import type { AppData, ISODate, MeasureKey } from '@legko/shared';
 import { useCallback, useMemo, useState } from 'react';
 import type { Period } from '@/lib/stats';
-import { buildProgressModel, HISTORY_PAGE, type ProgressModel } from './model';
+import { buildProgressModel, HISTORY_FIRST, HISTORY_PAGE, type ProgressModel } from './model';
 import { usePeriod } from './period';
 
 export interface ProgressController {
@@ -16,7 +16,7 @@ export interface ProgressController {
 export function useProgressModel(data: AppData, today: ISODate): ProgressController {
   const [period, setPeriod] = usePeriod();
   const [measure, setMeasure] = useState<MeasureKey>('waist');
-  const [historyLimit, setHistoryLimit] = useState(HISTORY_PAGE);
+  const [historyLimit, setHistoryLimit] = useState(HISTORY_FIRST);
   const model = useMemo(
     () => buildProgressModel(data, today, { period, measure, historyLimit }),
     [data, today, period, measure, historyLimit],

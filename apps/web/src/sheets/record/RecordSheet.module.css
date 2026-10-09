@@ -1,0 +1,22 @@
+/* The sheet body for one mode (keyed by mode): the form blocks or the menu, spaced like the Sheet body. */
+.swap {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/*
+ * A menu row (or a deep link) swapped the body of the open sheet: the new one rises in. The global
+ * reduced-motion rule makes it instant.
+ */
+.enter {
+  animation: capture-swap 180ms var(--ease-out);
+}
+
+@keyframes capture-swap {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}

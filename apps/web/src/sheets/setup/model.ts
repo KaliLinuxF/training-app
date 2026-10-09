@@ -12,8 +12,14 @@ import {
   type MeasureTexts,
 } from '../validation';
 
-export const SETUP_HEADING = 'Налаштування';
-export const SETUP_INTRO = 'Ці дані потрібні, щоб рахувати прогрес. Змінити їх можна будь-коли в «Нагадуваннях».';
+/** Not «Налаштування»: that is the tab now (plan D18). */
+export const SETUP_HEADING = 'Перші кроки';
+/**
+ * Names the right place for each field: «Цілі» holds only the goal and the calories; the weigh-in
+ * and the measurements are changed through Home's rows or the calendar day.
+ */
+export const SETUP_INTRO =
+  'Ці дані потрібні, щоб рахувати прогрес. Ціль і калорії можна змінити будь-коли в «Налаштуваннях» → «Цілі», вагу й заміри — на головній або в календарі.';
 
 export interface SetupDraft extends MeasureTexts {
   /** Current weight → today's weigh-in. */

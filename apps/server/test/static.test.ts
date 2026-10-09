@@ -55,7 +55,15 @@ describe('static web app', () => {
   });
 
   it('falls back to index.html for client-side routes', async () => {
-    for (const path of ['/calendar', '/progress', '/reminders/', '/calendar?date=2026-10-10']) {
+    for (const path of [
+      '/calendar',
+      '/progress',
+      '/settings',
+      '/settings/reminders',
+      // Old bookmarks and delivered test notifications: the client redirects to /settings/reminders.
+      '/reminders/',
+      '/calendar?date=2026-10-10',
+    ]) {
       const res = await s.call(path);
       expect(res.status, path).toBe(200);
       expect(res.headers.get('Content-Type')).toContain('text/html');

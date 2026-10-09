@@ -1,4 +1,4 @@
-import { DEEP_LINKS, type ReminderKind } from '@legko/shared';
+import { DEEP_LINKS, SETTINGS_REMINDERS_PATH, type ReminderKind } from '@legko/shared';
 
 /** JSON payload read by the service worker's `push` handler. */
 export interface PushMessage {
@@ -29,9 +29,10 @@ export const REMINDER_MESSAGES: Readonly<Record<ReminderKind, PushMessage>> = {
   },
 };
 
+/** Opens «Налаштування → Нагадування», where the «Тест» button is. */
 export const TEST_MESSAGE: Readonly<PushMessage> = {
   title: 'Легко',
   body: 'Сповіщення працюють ✨',
-  url: '/reminders',
+  url: SETTINGS_REMINDERS_PATH,
   tag: 'test',
 };

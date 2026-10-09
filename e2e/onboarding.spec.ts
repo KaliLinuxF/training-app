@@ -10,7 +10,7 @@ test.describe('first-run setup', () => {
     server,
   }) => {
     await app.goto('/');
-    const setup = app.sheet('Налаштування');
+    const setup = app.sheet('Перші кроки');
     await expect(setup).toBeVisible();
     await expect(page.getByText('Почнімо', { exact: true })).toBeVisible();
 
@@ -48,13 +48,12 @@ test.describe('first-run setup', () => {
 
     await app.save(setup, 'Почати');
 
+    // Home: the current weight and what is left (start and goal live on «Мій прогрес», Q9).
     const hero = app.region('Поточна вага');
     await expect(hero).toContainText('72,5');
-    await expect(hero).toContainText('Старт 72,5');
-    await expect(hero).toContainText('Ціль 64,5');
-    await expect(hero).toContainText('8,0 кг'); // «До цілі»
+    await expect(hero).toContainText('до цілі 8,0 кг');
     await expect(page.getByText('Почнімо', { exact: true })).toBeHidden();
-    await expect(app.region('Поточні заміри')).toContainText('76');
+    await expect(app.homeRow('Заміри')).toContainText('76');
 
     await expect
       .poll(async () => {
@@ -74,7 +73,11 @@ test.describe('first-run setup', () => {
     // Onboarded: nothing pops up again after a reload.
     await app.reload();
     await expect(app.dialogs).toHaveCount(0);
-    await expect(app.region('Поточна вага')).toContainText('Старт 72,5');
+    await expect(app.region('Поточна вага')).toContainText('72,5');
+    await app.go('Прогрес');
+    const weightCard = app.region('Вага');
+    await expect(weightCard).toContainText('Старт 72,5');
+    await expect(weightCard).toContainText('Ціль 64,5');
   });
 
   test('closed without saving, it is offered again from the «Почнімо» banner, not re-opened in the session', async ({
@@ -82,7 +85,7 @@ test.describe('first-run setup', () => {
     page,
   }) => {
     await app.goto('/');
-    const setup = app.sheet('Налаштування');
+    const setup = app.sheet('Перші кроки');
     await expect(setup).toBeVisible();
     // A clean draft closes without asking.
     await setup.getByRole('button', { name: 'Закрити' }).click();

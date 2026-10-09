@@ -1,27 +1,20 @@
-/* The kit ghost button grows its tap area to 43px (35 + 2 × 4); make it a full 44+. */
-.openDay.openDay::after {
-  inset: -6px -6px;
+/* Food value: «1 240» (row value style) + « / 1 700 ккал» in 13 --muted. */
+.kcal {
+  white-space: nowrap;
 }
 
-.tiles {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.training {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.trainingLabel {
-  margin: 0;
+.goal {
   font-size: 13px;
+  font-weight: 500;
   color: var(--muted);
+  white-space: nowrap;
 }
 
-.trainingState {
-  color: var(--ink);
-  font-weight: 600;
+/* Sub prefixes of the Вага / Заміри rows: «✓ » done today (mint), «Пропущено · » missed (lavender). */
+.toneAcc {
+  color: var(--accD);
+}
+
+.toneAcc2 {
+  color: var(--acc2D);
 }

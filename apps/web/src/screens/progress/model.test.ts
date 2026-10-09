@@ -1,74 +1,166 @@
 import { f0, type AppData } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import type { Period } from '@/lib/stats';
-import { buildProgressModel, HISTORY_PAGE, type ProgressOptions, type ValueCell } from './model';
+import type { StatItem } from '@/ui';
+import {
+  buildProgressModel,
+  HISTORY_FIRST,
+  HISTORY_PAGE,
+  TYPES_SHOWN,
+  type ProgressOptions,
+  type SummaryItem,
+} from './model';
 import { freshData, progressData, TODAY } from './progress.fixtures';
 
 const opts = (patch: Partial<ProgressOptions> = {}): ProgressOptions => ({
   period: 'week',
   measure: 'waist',
-  historyLimit: HISTORY_PAGE,
+  historyLimit: HISTORY_FIRST,
   ...patch,
 });
 
-const build = (data: AppData, patch: Partial<ProgressOptions> = {}) => buildProgressModel(data, TODAY, opts(patch));
+const build = (data: AppData, patch: Partial<ProgressOptions> = {}) =>
+  buildProgressModel(data, TODAY, opts(patch));
 
-/** `[label, value, tone]` triples — compact to compare. */
-const cells = (list: readonly ValueCell[]) => list.map((c) => [c.label, c.value, c.tone]);
+/** `[label, value, unit, tone]` — compact to compare. */
+const items = (list: readonly SummaryItem[]) => list.map((c) => [c.label, c.value, c.unit, c.tone]);
+/** `[label, value, unit, tone]` of a StatStrip. */
+const stats = (list: readonly StatItem[]) => list.map((c) => [c.label, c.value, c.unit, c.tone]);
 
-describe('buildProgressModel — summary', () => {
-  it('summarises the current week like the prototype', () => {
-    const m = build(progressData());
-    expect(m.period.title).toBe('Цього тижня');
-    expect(cells(m.summary)).toEqual([
-      ['Тренувань', '2', 'ink'],
-      ['Середня калорійність', `${f0(1650)} ккал`, 'ink'],
-      ['Зміна ваги', '−0,4 кг', 'acc2'],
-      ['Талія', '−2 см', 'acc2'],
-      ['Стегна', '−0,5 см', 'acc2'],
-      ['Груди', '−0,5 см', 'acc2'],
+describe('buildProgressModel — summary sentence', () => {
+  it('summarises the current week in SPEC §1.1 #7 order and wording', () => {
+    const { summary } = build(progressData());
+    expect(summary.title).toBe('Цього тижня');
+    expect(summary.items.map((i) => i.key)).toEqual(['workouts', 'kcal', 'weight', 'waist', 'hips', 'chest']);
+    expect(items(summary.items)).toEqual([
+      ['Тренувань', '2', '', 'ink'],
+      ['сер. калорійність', f0(1650), 'ккал', 'ink'],
+      ['вага', '−0,4', 'кг', 'acc2'],
+      ['талія', '−2', 'см', 'acc2'],
+      ['стегна', '−0,5', 'см', 'acc2'],
+      ['груди', '−0,5', 'см', 'acc2'],
     ]);
   });
 
   it('follows the selected period', () => {
-    const m = build(progressData(), { period: 'month' });
-    expect(m.period.title).toBe('За останні 30 днів');
+    const { summary } = build(progressData(), { period: 'month' });
+    expect(summary.title).toBe('За останні 30 днів');
     // 10 Sep … 9 Oct: 7 cardio + 2 this week; 25 × 1600 + 6600 over 29 days.
-    expect(m.summary[0]?.value).toBe('9');
-    expect(m.summary[1]?.value).toBe(`${f0(46600 / 29)} ккал`);
-    // Baseline = last weigh-in before the period (7 Sep, 67,0).
-    expect(m.summary[2]?.value).toBe('−1,6 кг');
+    // Baselines = the last readings before the period (7 Sep: 67,0 kg; waist 72, hips 100, chest 92).
+    expect(items(summary.items)).toEqual([
+      ['Тренувань', '9', '', 'ink'],
+      ['сер. калорійність', f0(46600 / 29), 'ккал', 'ink'],
+      ['вага', '−1,6', 'кг', 'acc2'],
+      ['талія', '−2', 'см', 'acc2'],
+      ['стегна', '−0,5', 'см', 'acc2'],
+      ['груди', '−0,5', 'см', 'acc2'],
+    ]);
+    // 3 months from 12 July: no reading before, so first → last of the period.
+    const q = build(progressData(), { period: 'q' }).summary;
+    expect(q.title).toBe('За 3 місяці');
+    expect(items(q.items).slice(2)).toEqual([
+      ['вага', '−3,0', 'кг', 'acc2'],
+      ['талія', '−4', 'см', 'acc2'],
+      ['стегна', '−1,5', 'см', 'acc2'],
+      ['груди', '−1,5', 'см', 'acc2'],
+    ]);
   });
 
-  it('tones gains lavender and missing changes ink', () => {
+  it('tones gains lavender and no change ink, with signs', () => {
     const data = progressData();
     data.weights.push({ date: '2026-10-08', kg: 65.9 });
-    const m = build(data);
-    expect(m.summary[2]).toEqual({ label: 'Зміна ваги', value: '+0,1 кг', tone: 'acc' });
-
-    const fresh = build(freshData());
-    expect(cells(fresh.summary)).toEqual([
-      ['Тренувань', '0', 'ink'],
-      ['Середня калорійність', '—', 'ink'],
-      ['Зміна ваги', '—', 'ink'],
-      ['Талія', '—', 'ink'],
-      ['Стегна', '—', 'ink'],
-      ['Груди', '—', 'ink'],
+    data.measures.push({ date: '2026-10-08', chest: 92, waist: 72, hips: 99.5 });
+    expect(items(build(data).summary.items).slice(2)).toEqual([
+      ['вага', '+0,1', 'кг', 'acc'],
+      ['талія', '0', 'см', 'ink'],
+      ['стегна', '−0,5', 'см', 'acc2'],
+      ['груди', '0', 'см', 'ink'],
     ]);
+  });
+
+  it('shows a faint «—» without a unit for everything a fresh account lacks', () => {
+    const { summary } = build(freshData());
+    expect(items(summary.items)).toEqual([
+      ['Тренувань', '—', '', 'faint'],
+      ['сер. калорійність', '—', '', 'faint'],
+      ['вага', '—', '', 'faint'],
+      ['талія', '—', '', 'faint'],
+      ['стегна', '—', '', 'faint'],
+      ['груди', '—', '', 'faint'],
+    ]);
+  });
+
+  it('counts «0» workouts once the period has a day record, and leaves kcal out when none has kcal', () => {
+    const data = freshData();
+    data.days[TODAY] = { food: 'Суп', kcal: null, trained: false, types: [], notes: '' };
+    const [workouts, kcal] = build(data).summary.items;
+    expect(workouts).toEqual({ key: 'workouts', label: 'Тренувань', value: '0', unit: '', tone: 'ink' });
+    expect(kcal).toEqual({ key: 'kcal', label: 'сер. калорійність', value: '—', unit: '', tone: 'faint' });
   });
 });
 
 describe('buildProgressModel — weight', () => {
-  it('shows start / current / goal / lost / left / way', () => {
-    const m = build(progressData());
-    expect(cells(m.weight.tiles)).toEqual([
-      ['Початкова', '68,4', undefined],
-      ['Поточна', '65,4', undefined],
-      ['Цільова', '60,0', undefined],
-      ['Втрачено', '3,0 кг', 'acc2'],
-      ['Залишилось', '5,4 кг', undefined],
-      ['Шлях', '36%', 'acc'],
-    ]);
+  it('shows current, the all-time change «від старту», start, left, goal and the way', () => {
+    const w = build(progressData()).weight;
+    expect(w.current).toBe('65,4');
+    expect(w.change).toEqual({ text: '−3,0 кг від старту', tone: 'acc2' });
+    expect(w.start).toBe('68,4');
+    expect(w.goal).toBe('60,0');
+    expect(w.left).toBe('ще 5,4 кг');
+    // 3,0 of 8,4 kg.
+    expect(w.pct).toBeCloseTo((3 / 8.4) * 100);
+    expect(w.pctLabel).toBe('36% шляху');
+  });
+
+  it('shows a gain with a plus in lavender', () => {
+    const data = progressData();
+    data.weights.push({ date: '2026-10-08', kg: 69 });
+    const w = build(data).weight;
+    expect(w.current).toBe('69,0');
+    expect(w.change).toEqual({ text: '+0,6 кг від старту', tone: 'acc' });
+    expect(w.left).toBe('ще 9,0 кг');
+    expect(w.pct).toBe(0);
+    expect(w.pctLabel).toBe('0% шляху');
+  });
+
+  it('shows no change in the neutral tone', () => {
+    const data = freshData();
+    data.weights = [
+      { date: '2026-10-01', kg: 70 },
+      { date: TODAY, kg: 70 },
+    ];
+    expect(build(data).weight.change).toEqual({ text: '0,0 кг від старту', tone: 'neutral' });
+  });
+
+  it('is empty before the first weigh-in', () => {
+    const w = build(freshData()).weight;
+    expect(w).toMatchObject({
+      current: '—',
+      change: null,
+      start: '—',
+      goal: '60,0',
+      left: '',
+      pct: 0,
+      pctLabel: '',
+    });
+    expect(w.chart.enough).toBe(false);
+    expect(w.chart.emptyHint).toBe('Запиши перше зважування, щоб бачити динаміку');
+    expect(w.chart.ariaLabel).toBe('');
+  });
+
+  it('has no «від старту» change with a single weigh-in (it is the start)', () => {
+    const data = freshData();
+    data.weights = [{ date: TODAY, kg: 70 }];
+    const w = build(data).weight;
+    expect(w).toMatchObject({
+      current: '70,0',
+      change: null,
+      start: '70,0',
+      left: 'ще 10,0 кг',
+      pctLabel: '0% шляху',
+    });
+    expect(w.chart.enough).toBe(false);
+    expect(w.chart.emptyHint).toBe('Потрібно щонайменше два зважування');
   });
 
   it('charts the last 4 weigh-ins when the period has fewer', () => {
@@ -83,28 +175,6 @@ describe('buildProgressModel — weight', () => {
 
   it('charts every weigh-in of a long period', () => {
     expect(build(progressData(), { period: 'all' }).weight.chart.geometry.dots).toHaveLength(9);
-  });
-
-  it('shows a gain with a typographic minus', () => {
-    const data = progressData();
-    data.weights.push({ date: '2026-10-08', kg: 69 });
-    expect(build(data).weight.tiles[3]).toEqual({ label: 'Втрачено', value: '−0,6 кг', tone: 'acc' });
-  });
-
-  it('asks for more weigh-ins instead of drawing a chart from one point', () => {
-    const none = build(freshData()).weight;
-    expect(none.chart.enough).toBe(false);
-    expect(none.chart.emptyHint).toBe('Запиши перше зважування, щоб бачити динаміку');
-    expect(none.chart.ariaLabel).toBe('');
-    expect(cells(none.tiles).map((c) => c[1])).toEqual(['—', '—', '60,0', '—', '—', '—']);
-
-    const data = freshData();
-    data.weights = [{ date: TODAY, kg: 70 }];
-    const one = build(data).weight;
-    expect(one.chart.enough).toBe(false);
-    expect(one.chart.emptyHint).toBe('Потрібно щонайменше два зважування');
-    expect(one.tiles[3]).toEqual({ label: 'Втрачено', value: '0,0 кг', tone: 'acc2' });
-    expect(one.tiles[5]).toEqual({ label: 'Шлях', value: '0%', tone: 'acc' });
   });
 });
 
@@ -147,14 +217,14 @@ describe('buildProgressModel — measurements', () => {
 });
 
 describe('buildProgressModel — workouts', () => {
-  it('counts workouts and ranks the types of the period', () => {
-    const { tiles, typesHeading, types } = build(progressData()).workouts;
-    expect(cells(tiles).map((c) => [c[0], c[1]])).toEqual([
-      ['Всього', '10'],
-      ['Цього тижня', '2'],
-      ['Цього місяця', '3'],
+  it('counts workouts in a 4-cell strip and ranks the types of the period', () => {
+    const { stats: cells, typesHeading, types } = build(progressData()).workouts;
+    expect(stats(cells)).toEqual([
+      ['Всього', '10', undefined, undefined],
+      ['Цього тижня', '2', undefined, undefined],
+      ['Цього місяця', '3', undefined, undefined],
       // 10 workouts over 60 days since 10 Aug.
-      ['В середньому / тиж.', '1,2'],
+      ['В сер. / тиж.', '1,2', undefined, undefined],
     ]);
     expect(typesHeading).toBe('Найчастіше · цього тижня');
     expect(types.map((t) => [t.label, t.value, t.pct])).toEqual([
@@ -172,21 +242,33 @@ describe('buildProgressModel — workouts', () => {
     expect(types[1]?.pct).toBeCloseTo(100 / 7);
   });
 
+  it(`lists only the ${TYPES_SHOWN} most frequent types`, () => {
+    const data = progressData();
+    // Seven more types this week, «Йога» twice: it ranks first, the long tail is cut off.
+    const extra = ['Йога', 'Біг', 'Плавання', 'Стретчинг', 'Велосипед', 'Танці', 'Бокс'];
+    data.days['2026-10-06'] = { ...data.days['2026-10-06']!, trained: true, types: extra };
+    data.days['2026-10-08'] = { ...data.days['2026-10-08']!, trained: true, types: ['Йога'] };
+    const { types } = build(data).workouts;
+    expect(types).toHaveLength(TYPES_SHOWN);
+    expect(types.map((t) => t.label)).toEqual(['Йога', 'Верх тіла', 'Біг', 'Плавання', 'Стретчинг']);
+    expect(types[0]).toEqual({ label: 'Йога', value: '2', pct: 100 });
+  });
+
   it('is empty for a period without workouts', () => {
-    const { tiles, types } = build(freshData()).workouts;
+    const { stats: cells, types } = build(freshData()).workouts;
     expect(types).toEqual([]);
-    expect(tiles.map((t) => t.value)).toEqual(['0', '0', '0', '0']);
+    expect(cells.map((t) => t.value)).toEqual(['0', '0', '0', '0']);
   });
 });
 
 describe('buildProgressModel — nutrition', () => {
-  it('shows averages, the goal and 7 labelled bars for the week', () => {
+  it('shows the two averages, the goal and 7 labelled bars for the week', () => {
     const n = build(progressData()).nutrition;
     expect(n.goal).toBe(`ціль ${f0(1700)} ккал`);
-    expect(cells(n.tiles).map((c) => [c[0], c[1]])).toEqual([
-      ['Цей тиждень', f0(1650)],
-      ['Цей місяць', f0(1625)],
-      ['Період', f0(1650)],
+    // Week: (1600 + 1800 + 1500 + 1700) / 4; month from 1 Oct: (4 × 1600 + 6600) / 8. Both within 1 700.
+    expect(stats(n.stats)).toEqual([
+      ['Сер. цього тижня', f0(1650), 'ккал', 'acc2'],
+      ['Сер. цього місяця', f0(1625), 'ккал', 'acc2'],
     ]);
     expect(n.labeled).toBe(true);
     expect(n.gap).toBe('8px');
@@ -204,6 +286,24 @@ describe('buildProgressModel — nutrition', () => {
     expect(n.chartLabel).toBe(`Калорії цього тижня, ціль ${f0(1700)} ккал`);
   });
 
+  it('has no «Період» cell (the summary sentence has the period average)', () => {
+    for (const period of ['week', 'month', 'q', 'all'] as const) {
+      expect(build(progressData(), { period }).nutrition.stats.map((c) => c.label)).toEqual([
+        'Сер. цього тижня',
+        'Сер. цього місяця',
+      ]);
+    }
+  });
+
+  it('tones an average above the goal lavender', () => {
+    const data = progressData();
+    data.settings.kcalGoal = 1640;
+    expect(stats(build(data).nutrition.stats)).toEqual([
+      ['Сер. цього тижня', f0(1650), 'ккал', 'acc'],
+      ['Сер. цього місяця', f0(1625), 'ккал', 'acc2'],
+    ]);
+  });
+
   it.each<[Period, number, string]>([
     ['month', 30, ''],
     // Weeks from Monday 6 July (the week of today − 89) to Monday 5 October.
@@ -218,27 +318,48 @@ describe('buildProgressModel — nutrition', () => {
     expect(n.gap).toBe('3px');
   });
 
-  it('lists the kcal history newest first, 7 at a time', () => {
-    const n = build(progressData()).nutrition;
-    expect(n.history).toHaveLength(7);
-    expect(n.hasMore).toBe(true);
-    expect(n.history.slice(0, 3).map((r) => [r.label, r.value, r.tone, r.href])).toEqual([
-      ['8 жовтня', `${f0(1700)} ккал`, 'acc2', '/calendar?date=2026-10-08'],
-      ['7 жовтня', `${f0(1500)} ккал`, 'acc2', '/calendar?date=2026-10-07'],
-      ['6 жовтня', `${f0(1800)} ккал`, 'acc', '/calendar?date=2026-10-06'],
+  it('lists the kcal history newest first with the weekday, 3 rows at first', () => {
+    const data = progressData();
+    data.days[TODAY] = { ...data.days[TODAY]!, kcal: 1750 };
+    const n = build(data).nutrition;
+    expect(HISTORY_FIRST).toBe(3);
+    expect(n.history.map((r) => [r.label, r.value, r.tone, r.href])).toEqual([
+      ['Пт, 9 жовтня', `${f0(1750)} ккал`, 'over', '/calendar?date=2026-10-09'],
+      ['Чт, 8 жовтня', `${f0(1700)} ккал`, 'ok', '/calendar?date=2026-10-08'],
+      ['Ср, 7 жовтня', `${f0(1500)} ккал`, 'ok', '/calendar?date=2026-10-07'],
     ]);
-    expect(n.history[0]?.ariaLabel).toBe(`8 жовтня: ${f0(1700)} ккал. Відкрити в календарі`);
-    // Same scale as the chart: max(goal × 1.25, largest bar) = 2125.
-    expect(n.history[0]?.pct).toBeCloseTo((1700 / 2125) * 100);
+    expect(n.history[0]?.ariaLabel).toBe(`9 жовтня: ${f0(1750)} ккал. Відкрити в календарі`);
+    expect(n.hasMore).toBe(true);
 
-    const all = build(progressData(), { historyLimit: 100 }).nutrition;
-    expect(all.history).toHaveLength(32);
+    const more = build(data, { historyLimit: HISTORY_FIRST + HISTORY_PAGE }).nutrition;
+    expect(more.history).toHaveLength(10);
+    expect(more.history.at(-1)?.label).toBe('Ср, 30 вересня');
+    expect(more.hasMore).toBe(true);
+
+    const all = build(data, { historyLimit: 100 }).nutrition;
+    expect(all.history).toHaveLength(33);
     expect(all.hasMore).toBe(false);
+  });
+
+  it('labels each weekday of a week correctly', () => {
+    const n = build(progressData(), { historyLimit: 7 }).nutrition;
+    expect(n.history.map((r) => r.label)).toEqual([
+      'Чт, 8 жовтня',
+      'Ср, 7 жовтня',
+      'Вт, 6 жовтня',
+      'Пн, 5 жовтня',
+      'Нд, 4 жовтня',
+      'Сб, 3 жовтня',
+      'Пт, 2 жовтня',
+    ]);
   });
 
   it('has an intentional empty state', () => {
     const n = build(freshData()).nutrition;
-    expect(n.tiles.map((t) => t.value)).toEqual(['—', '—', '—']);
+    expect(stats(n.stats)).toEqual([
+      ['Сер. цього тижня', '—', undefined, 'faint'],
+      ['Сер. цього місяця', '—', undefined, 'faint'],
+    ]);
     expect(n.hasBarData).toBe(false);
     expect(n.history).toEqual([]);
     expect(n.hasMore).toBe(false);

@@ -1,0 +1,115 @@
+/* The card's first line (no card header). */
+.intro {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+.types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.builtin,
+.custom {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Built-in types can't be removed: quiet paper pills. */
+.builtin {
+  padding: 0 14px;
+  background: var(--paper);
+  color: var(--muted);
+}
+
+/* Her own types: same look as a selected chip in the day sheet, with a remove button. */
+.custom {
+  padding: 0 2px 0 14px;
+  gap: 2px;
+  background: var(--accT);
+  color: var(--accD);
+  border: 1.5px solid var(--acc);
+}
+
+.name {
+  overflow-wrap: anywhere;
+}
+
+.remove {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accD);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    transform 120ms ease,
+    background-color 150ms ease;
+}
+
+/* 44×44 tap target. */
+.remove::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+}
+
+.remove:active {
+  transform: scale(0.92);
+}
+
+@media (hover: hover) {
+  .remove:hover {
+    background: var(--accLine);
+  }
+}
+
+.form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.input {
+  min-width: 0;
+  min-height: 50px;
+  padding: 0 14px;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r14);
+  transition: border-color 150ms ease;
+}
+
+.input:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.error {
+  margin: -6px 0 0;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--accD);
+}

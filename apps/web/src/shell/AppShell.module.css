@@ -14,14 +14,28 @@
   max-width: 1280px;
 }
 
+/*
+ * Phone shell only (AppShell sets <html data-shell="phone"> while it is mounted): keyboard focus (Tab, Full Keyboard
+ * Access) and scrollIntoView stop above the floating tab bar and below the status bar (WCAG 2.2 SC 2.4.11, C43).
+ * The bar is 70 tall + its 14px offset + safe-bottom; 12 breathing room on top of that = 96 + safe-bottom.
+ * Desktop has no tab bar and keeps the default (no attribute).
+ */
+:global(html[data-shell='phone']) {
+  scroll-padding-top: var(--safe-top);
+  scroll-padding-bottom: calc(96px + var(--safe-bottom));
+}
+
 .main {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  /* Bottom padding keeps the last card clear of the floating tab bar. */
-  padding: calc(20px + var(--safe-top)) 18px calc(120px + var(--safe-bottom));
+  /*
+   * Top 12 gives Home its one-screen budget and the Settings list its no-scroll budget;
+   * bottom 120 keeps the last card clear of the floating tab bar.
+   */
+  padding: calc(12px + var(--safe-top)) 18px calc(120px + var(--safe-bottom));
 }
 
 .desktop .main {

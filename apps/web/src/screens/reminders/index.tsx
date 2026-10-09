@@ -1,1 +1,0 @@
-export { RemindersScreen } from './RemindersScreen';

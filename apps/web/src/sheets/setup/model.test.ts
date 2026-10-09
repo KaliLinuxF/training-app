@@ -1,7 +1,16 @@
 import { emptyData } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import { FIELD_ERRORS } from '../validation';
-import { hasSetupErrors, initSetupDraft, isSetupDirty, setupOps, validateSetup, type SetupDraft } from './model';
+import {
+  hasSetupErrors,
+  initSetupDraft,
+  isSetupDirty,
+  SETUP_HEADING,
+  SETUP_INTRO,
+  setupOps,
+  validateSetup,
+  type SetupDraft,
+} from './model';
 
 const TODAY = '2026-10-09';
 
@@ -16,6 +25,13 @@ const draft = (patch: Partial<SetupDraft> = {}): SetupDraft => ({
 });
 
 describe('setup sheet model', () => {
+  it('is «Перші кроки» (the tab is «Налаштування»); goals → «Цілі», weight and measurements → Home or the calendar', () => {
+    expect(SETUP_HEADING).toBe('Перші кроки');
+    expect(SETUP_INTRO).toBe(
+      'Ці дані потрібні, щоб рахувати прогрес. Ціль і калорії можна змінити будь-коли в «Налаштуваннях» → «Цілі», вагу й заміри — на головній або в календарі.',
+    );
+  });
+
   it('starts from the settings goals and today’s entries', () => {
     const data = emptyData();
     data.settings.goal = 58.5;

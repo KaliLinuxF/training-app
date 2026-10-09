@@ -1,0 +1,38 @@
+/*
+ * Sticky period bar. The paper band reaches 8px above and below the switcher (negative margins keep its
+ * place in the grid at the switcher's own 48px), so the 14px grid gaps hold: 8px band + 6px fade below.
+ * z-index 5 keeps scrolled cards underneath; the screen header (z-index 6, ProgressScreen.module.css) stays
+ * above the band's notch extension while the bar is not stuck yet.
+ */
+.bar {
+  position: sticky;
+  top: var(--safe-top);
+  z-index: 5;
+  grid-column: 1 / -1;
+  padding: 8px 0;
+  margin: -8px 0;
+  background: var(--paper);
+}
+
+/* Covers the notch / status-bar inset above the stuck bar. */
+.bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: var(--safe-top);
+  background: var(--paper);
+}
+
+/* Soft edge: cards fade in under the bar instead of being cut by a hard line. */
+.bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 6px;
+  background: linear-gradient(var(--paper), transparent);
+  pointer-events: none;
+}

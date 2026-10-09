@@ -2,15 +2,19 @@ import type { ISODate } from '@legko/shared';
 import { create } from 'zustand';
 
 /**
- * - `day`     — full day record (training, food, kcal, optional weight & measurements, notes)
- * - `weight`  — control weigh-in only
- * - `measure` — body measurements only
- * - `setup`   — first-run setup (start weight, goal, calorie goal)
- * - `install` — how to add the app to the iPhone home screen (needed for push)
+ * - `menu`    — «Що записати?»: four actions for the date (Їжа, Тренування, Вага, Заміри), opened by «+»
+ * - `day`     — the full «Запис дня» (training, food, kcal, weight, measurements, notes): calendar, history,
+ *               «Відкрити день»
+ * - `food`    — «Їжа»: food text, photos, FoodAssist, kcal
+ * - `workout` — «Тренування»: ✓/✕, types, optional notes
+ * - `weight`  — «Контрольне зважування»
+ * - `measure` — «Заміри тіла»
+ * - `setup`   — «Перші кроки» (first run: start weight, goal, calorie goal)
+ * - `install` — «Встановлення на iPhone» (adding the app to the home screen, needed for push)
  */
-export type SheetMode = 'day' | 'weight' | 'measure' | 'setup' | 'install';
+export type SheetMode = 'menu' | 'day' | 'food' | 'workout' | 'weight' | 'measure' | 'setup' | 'install';
 
-/** Pre-filled draft values when opening the day sheet (e.g. «✓ Було» on Home). */
+/** Pre-filled draft values: `trained` pre-fills the `workout` and `day` sheets (the workout push deep link). */
 export interface SheetPatch {
   trained?: boolean;
 }

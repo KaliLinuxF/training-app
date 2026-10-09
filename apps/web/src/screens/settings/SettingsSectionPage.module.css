@@ -1,0 +1,8 @@
+/* Desktop detail pane: the section's cards in one column, 14 apart, never wider than 640. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  max-width: 640px;
+}

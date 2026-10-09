@@ -42,3 +42,34 @@
   color: var(--onSolid);
   border-color: var(--ink);
 }
+
+/* Inline pair next to a list row: two 44×44 glyph buttons (names «Було» / «Не було» stay, visually hidden). */
+.sm {
+  grid-template-columns: 44px 44px;
+  gap: 6px;
+}
+
+.sm .option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: var(--r14);
+}
+
+.sm .option:active {
+  transform: scale(0.96);
+}
+
+.glyph {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sm .yes {
+  color: var(--accD);
+}

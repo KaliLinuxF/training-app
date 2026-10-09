@@ -1,3 +1,53 @@
-.header {
-  padding-bottom: 6px;
+/*
+ * `section.card` outranks the kit's single-class `.tint` padding whatever order the stylesheets load in.
+ * 18px at the sides keeps the sentence aligned with the text of the white cards below (kit padding 18px).
+ */
+section.card {
+  padding: 16px 18px;
+}
+
+/* One wrapped sentence: words 15/500 --ink2, numbers 17/700 in their tone. */
+.line {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--ink2);
+}
+
+/* «label number unit ·» never splits across lines. */
+.item {
+  white-space: nowrap;
+}
+
+.num {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  /* The bigger digits must not stretch the line box. Colour: the item's tone (tones.module.css). */
+  line-height: 1;
+}
+
+/*
+ * « · » between items, inside the item it follows: 4px before the dot; the real space after it is the break,
+ * so the dot always ends a line and never starts one.
+ */
+.sep {
+  margin: 0 0 0 4px;
+  color: var(--faint);
+}
+
+/*
+ * Phones: «Тренувань 41 · сер. калорійність 1 708 ккал ·» needs ~333px at 15/17, but the text box is 318px at
+ * 390, so «Тренувань N ·» sat alone in a 4-line sentence; at 14/16 it is ~304px → 3 lines, a ~130px card (D22).
+ */
+@media (max-width: 430px) {
+  .line {
+    font-size: 14px;
+  }
+
+  .num {
+    font-size: 16px;
+  }
 }

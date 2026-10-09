@@ -1,0 +1,24 @@
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The menu's date when it is not today: «13 жовтня · вівторок». */
+.dateLine {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+
+/*
+ * «Повний запис дня →» right-aligned under the rows' chevrons: keeps the bottom strip above the
+ * tab-bar «+» free of controls, so a double tap on «+» cannot open the full day.
+ * (Margin, not padding: the kit `.ghost` padding stays as it is.)
+ */
+.fullDay {
+  align-self: flex-end;
+  margin-right: 4px;
+}

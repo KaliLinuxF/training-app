@@ -59,13 +59,16 @@ light **and** dark theme, calendar marks mode **«Заливка»** (fill).
 - 1b radius scale: `--r28 32px · --r24 28px · --r20 24px · --r18 18px · --r16 18px · --r14 16px · --r12 12px`.
 - Font: `Manrope Variable` (self-hosted via `@fontsource-variable/manrope`, already imported in `main.tsx`).
   `--display` = `--font` in 1b. Numbers use `font-variant-numeric: tabular-nums` (set on body).
-- Layout (from the prototype's `renderVals`):
+- Layout (from the prototype's `renderVals`, as changed by redesign A, §2.1):
   - **Mobile** (< 900px, `useIsDesktop()` false): column `max-width: 440px`, centered, padding
-    `20px 18px 120px`; floating glass tab bar at the bottom (5 slots: Головна · Календар · **+** · Прогрес ·
-    Нагадування); sheets slide up from the bottom (`max-width 440px`, top radius `--r28`).
-  - **Desktop** (≥ 900px): container `max-width 1280px`; left sidebar 248px (logo «Л Легко», nav, «+ Записати день»);
-    main padding `32px 36px 48px`; content grid `repeat(2, minmax(0,1fr))` with `gap 14px` (full-width rows use
-    `grid-column: 1/-1`); quick buttons in 4 columns; sheets are centered modals (`max-width 560px`, all radii `--r28`).
+    `calc(12px + safe-top) 18px calc(120px + safe-bottom)`; floating glass tab bar at the bottom:
+    **Головна · Календар · + · Прогрес · Налаштування** in a 3-part grid (`minmax(0,1fr) 64px minmax(0,1fr)`,
+    labels 11/600, 10px below 360px); «+» opens the «Що записати?» menu; sheets slide up from the bottom
+    (`max-width 440px`, top radius `--r28`).
+  - **Desktop** (≥ 900px): container `max-width 1280px`; left sidebar 248px (logo «Л Легко», nav, «+ Записати день»,
+    which opens the same «Що записати?» menu); main padding `32px 36px 48px`; content grid
+    `repeat(2, minmax(0,1fr))` with `gap 14px` (full-width rows use `grid-column: 1/-1`); sheets are centered
+    modals (`max-width 560px`, all radii `--r28`). (The prototype's «quick buttons in 4 columns» are gone, §2.1.)
 - iPhone: respect safe areas (`--safe-top`, `--safe-bottom` tokens): the tab bar sits `14px + safe-bottom` from
   the bottom; screens get `safe-top` extra top padding; the sheet footer gets `safe-bottom`. Inputs ≥ 16px font
   (no zoom). Tap targets ≥ 44px. `apple-mobile-web-app-status-bar-style=default` + `theme-color` metas = paper colour.
@@ -79,13 +82,34 @@ light **and** dark theme, calendar marks mode **«Заливка»** (fill).
   every confirmation uses the in-app `ui.confirm()` dialog (never `window.confirm`, which looks foreign in the
   standalone iPhone app); month ‹ › in the calendar only change the shown month (selection stays, as in the prototype).
 
+### 2.1 Redesign A «Чек-лист дня» (deliberate deviation from the prototype layout)
+
+The visual language stays 1b (tokens, Manrope, radii, colours, light/dark); the prototype's **layout** is replaced:
+Home is one phone screen — header, compact hero (current weight, signed change badge, progress bar, «N% шляху»,
+«до цілі X кг»), one «Сьогодні» list of four action rows (Їжа, Тренування with inline ✓/✕, Вага, Заміри; due /
+missed / done states live in the rows) and one week row linking to `/progress?period=week`; at most one compact banner
+(setup > iPhone install hint). «+» opens «Що записати?» (four 72px rows + «Повний запис дня →»), each row opens a short
+sheet with only that action's fields in the same dialog; «Запис дня» stays for full editing (calendar, «Відкрити день»).
+Settings is an iOS-style grouped list with summaries (`/settings`) and sub-pages (`/settings/reminders|goals|workouts|
+appearance|data`) with an in-app «‹ Налаштування» back; re-tapping the active tab pops to the list; push problems show
+as a badge on the Нагадування row; desktop shows list + detail. Progress has a sticky period bar with a paper backdrop,
+the summary as one sentence line (the §1.1 #7 example wording), unboxed stat strips instead of tile grids. The calendar
+is month grid + the selected day as a check-list whose rows open short sheets for that date (inline ✓/✕ for the
+workout, as on Home); «Останні записи» is removed. Shared row primitives: `ListGroup` / `ListRow` (60px, 72px in the
+menu), `Icon`, `StatStrip` (see `apps/web/src/ui/README.md`). Plan: `docs/redesign-a.md`.
+
+§1.1 #9 «quick buttons «+ Харчування / + Тренування / + Вага / + Заміри»» are satisfied by the four «Сьогодні» rows
+(one tap → that action's short sheet; Тренування also has inline ✓/✕) and by the «+» menu with the same four actions;
+there is no separate button grid. The UI says «Їжа» where the prototype said «Харчування» (calendar legend, Home,
+menu); the setup sheet is «Перші кроки» (the tab is «Налаштування»); the Settings list sits right under its header.
+
 ## 3. Architecture
 
 ```
 packages/shared   @legko/shared  — types, zod schemas, ops reducer, dates/format helpers, API contract (TS source, no build)
 apps/server       @legko/server  — Node 24 + Hono + node:sqlite + web-push; bundled by esbuild into dist/ (single file, no node_modules at runtime)
 apps/web          @legko/web     — React 19 + Vite 8 + TypeScript + CSS Modules + zustand + wouter + vite-plugin-pwa (injectManifest)
-e2e/              Playwright (WebKit iPhone + Chromium desktop) against the built app served by the server
+e2e/              Playwright (system Chrome: iPhone 390×844 with the iPhone UA + desktop 1280×800) against the built app served by the server
 deploy/           compose.yaml, Caddyfile, deploy.sh (build on the VPS)
 Dockerfile        multi-stage: build web + server → node:24-alpine runtime serving API + static files on :3000
 docs/             SPEC.md (this), DEPLOY.md
@@ -136,7 +160,7 @@ Contract: `packages/shared/src/api.ts` (paths, bodies, responses, error codes) a
   - workout: «Час тренування 💪» / «Не забудь відмітити, як пройшло» → url `DEEP_LINKS.workout`
   - weigh: «Контрольне зважування ⚖️» / «Найточніше — зранку, натщесерце» → `DEEP_LINKS.weigh`
   - measure: «Час замірів 📏» / «Груди, талія, стегна — займе хвилину» → `DEEP_LINKS.measure`
-  - test: «Легко» / «Сповіщення працюють ✨» → `/reminders`
+  - test: «Легко» / «Сповіщення працюють ✨» → `/settings/reminders` (`SETTINGS_REMINDERS_PATH`)
 - The server box reboots for updates at 02:00 UTC; nothing else to do about it (15-min catch-up window covers restarts).
 
 ### 3.4 Server runtime
@@ -158,8 +182,12 @@ Env: `PORT` (3000) · `DATA_DIR` (`/data`, dev `./data`) · `STATIC_DIR` (dir wi
 
 ### 3.5 Web app
 
-- Entry: `main.tsx` → `App.tsx` = `AuthGate` → `AppShell` → routes (`/`, `/calendar?date=YYYY-MM-DD`, `/progress`,
-  `/reminders`). These files and the stubs' exported names are the contract between tasks.
+- Entry: `main.tsx` → `App.tsx` = `AuthGate` → `AppShell` → routes `/`, `/calendar?date=YYYY-MM-DD`,
+  `/progress[?period=week|month|q|all]` (selects + stores the period, then removes the param with replace),
+  `/settings`, `/settings/:section` (reminders | goals | workouts | appearance | data; anything else → `/settings`),
+  `/reminders` → redirect to `/settings/reminders` (old bookmarks and test notifications), catch-all → `/`.
+  Screens export `HomeScreen`, `CalendarScreen`, `ProgressScreen`, `SettingsScreen` (`screens/settings`). These
+  files and the exported names are the contract between tasks.
 - **Data**: `apps/web/src/store/data.ts` — `useAppData()`, `useSettings()`, `useSyncState()`, `dataActions.*`,
   `startSync()`. Screens never call the API for data directly.
   Implementation: zustand state; device cache in IndexedDB (`idb-keyval`: keys `legko.data`, `legko.outbox`);
@@ -172,12 +200,20 @@ Env: `PORT` (3000) · `DATA_DIR` (`/data`, dev `./data`) · `STATIC_DIR` (dir wi
   erase each other's weigh-ins). `settings.timezone` follows the phone that receives reminders (sent with the
   push subscription, canonicalised), not whichever browser opened the app last.
 - **UI state**: `apps/web/src/store/ui.ts` — `ui.openSheet(date, mode, patch?)`, `ui.closeSheet()`, `ui.flash(text)`.
+  `SheetMode = 'menu' | 'day' | 'food' | 'workout' | 'weight' | 'measure' | 'setup' | 'install'` («Що записати?»,
+  «Запис дня», «Їжа», «Тренування», «Контрольне зважування», «Заміри тіла», «Перші кроки», «Встановлення на
+  iPhone»); `SheetPatch { trained? }` pre-fills the `workout` and `day` sheets. The menu and every record form share
+  one sheet instance (the body swaps in place). One-tap workout marks go through `store/dayMarks.ts`
+  (`setTrainedMark`, Home and the calendar day card).
 - **Today**: `useToday()` (`lib/useToday.ts`). Weeks start on Monday (`mondayOf`).
 - **Platform**: `lib/platform.ts` (`isIOS`, `isStandalone`, `useIsDesktop`). **Theme**: `lib/theme.ts`.
 - **Push client**: `lib/push.ts` contract (`getPushStatus`, `enablePush`, `disablePush`, `syncPushSubscription`,
   `sendTestPush`). On iPhone, push works only in the installed app (iOS ≥ 16.4) → status `needs-install`.
-- **Deep links**: `/?sheet=day&trained=1`, `/?sheet=weight`, `/?sheet=measure` open that sheet for today and
-  clean the URL (handled by `SheetHost`). Notification clicks focus an open window and navigate it.
+- **Deep links** (client parsing; the server's `DEEP_LINKS` are unchanged): `/?sheet=day&trained=1` opens
+  «Тренування» with ✓ pre-selected (legacy alias kept for delivered workout pushes), `/?sheet=day` the full day,
+  `/?sheet=food` «Їжа», `/?sheet=workout[&trained=1]` «Тренування», `/?sheet=weight`, `/?sheet=measure`; each opens
+  that sheet for today and cleans the URL (handled by `SheetHost`). `menu`, `setup`, `install` and unknown values are
+  not linkable: ignored and removed. Notification clicks focus an open window and navigate it.
 - **PWA**: `vite-plugin-pwa` `injectManifest` with `src/sw.ts` (precache app shell, SPA navigation fallback
   excluding `/api/`, never cache `/api/`, push + notificationclick handlers, `skipWaiting` + `clientsClaim`).
   Manifest: name «Легко — трекер схуднення», short_name «Легко», lang `uk`, display `standalone`, start_url `/`,
@@ -201,15 +237,22 @@ Env: `PORT` (3000) · `DATA_DIR` (`/data`, dev `./data`) · `STATIC_DIR` (dir wi
 - Charts (`chart()` in the prototype): points in period; if fewer than 4, the last 4 overall. SVG viewBox 320×h,
   6px side inset, 18% vertical padding, min span 1; dots 7px (hidden when > 16 points), last dot 12px + value tag.
 - Workouts: total (all time), this week (from Monday), this calendar month, average per week since `all` start.
-  Type ranking = counts of `types` among trained days in the selected period, desc.
+  Type ranking = counts of `types` among trained days in the selected period, desc; the top 5 are shown.
 - Kcal bars: week → 7 bars Mon…Sun with labels; month → 30 daily bars; 3 months / all → weekly averages
   (weeks from Monday) with note «· середнє за тиждень». Bar colour: no data → `--line`, ≤ goal → `--acc2`,
   > goal → `--acc`. Max = max(goal × 1.25, max value). Dashed goal line.
-- Kcal history: days with kcal, newest first (show 7, then «Показати ще» loads more).
+- Kcal history: days with kcal, newest first (show 3, then each «Показати ще» loads 7 more).
 - Day status (calendar detail pill): «Заповнено» if food + kcal + workout mark all present; «Частково» if the day
   exists; else «Порожньо».
 - Next weigh-in / measurements: next date with the reminder weekday from today (today counts unless already done)
-  → «Сьогодні», «Завтра», or «Пн, 12 жовтня»; plus « · HH:MM»; «вимкнено» if the reminder is off.
+  → «Сьогодні», «Завтра», or «Пн, 12 жовтня»; plus « · HH:MM»; «вимкнено» if the reminder is off
+  (`nextReminderLabel().text` keeps the time for other uses). On Home the date is shown without the time
+  («Пн, 19 жовтня» / «Завтра»; the « · HH:MM» time is part of the row's accessible name), and due today shows a
+  «Сьогодні» pill.
+- Home weigh-in / measurement rows (`weeklyCheck` in `lib/stats/reminders.ts`): «✓ Сьогодні — 65,0 кг» when done
+  today; «Пропущено · 12 жовтня — 65,4 кг» when the last scheduled day in the past 6 days was missed after an earlier
+  record (never for a brand-new account, never before the first-run setup); otherwise the latest record and the next
+  date. Order of the rules: done → off → due → overdue → upcoming.
 
 ### 3.7 AI calorie estimate, food photos, frequent dishes
 
@@ -251,7 +294,8 @@ to the day's kcal and appends a line to the food text.
   the row «змінено» and shows «✨ Перерахувати»: one `POST /api/food/estimate` in *recalculate* mode with all rows
   `{ name, portion }` (her values are authoritative) plus the stored `photoId` for context; only the changed rows
   take the new kcal (rows whose kcal she typed herself keep it). Counts as one estimate against the daily budget. Loading state «Рахую калорії…». Thumbnails strip of the day's photos (tap → full-screen viewer,
-  remove). Calendar day detail shows the thumbnails under «Харчування».
+  remove). Calendar day detail shows the thumbnails under its «Їжа» row. The same FoodAssist block (estimate, photos,
+  «Часті страви») is in the short «Їжа» sheet; «Додати N ккал» still waits for «Зберегти» there.
 
 ## 4. Conventions
 

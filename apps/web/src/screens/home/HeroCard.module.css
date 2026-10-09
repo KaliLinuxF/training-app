@@ -1,22 +1,17 @@
+/*
+ * Compact hero (~146px on the phone): 16 + 58 value + 14 + 8 bar + 14 + 20 line + 16.
+ * The doubled class outranks the kit's `.hero` padding/gap whatever order the stylesheets load in.
+ */
+.hero.hero {
+  padding: 16px 20px;
+  gap: 14px;
+}
+
 .top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-}
-
-.current {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.label {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--onSolidMuted);
 }
 
 .valueRow {
@@ -24,6 +19,7 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
+  min-width: 0;
 }
 
 .value {
@@ -32,6 +28,13 @@
   font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The lone «—» before the first weigh-in: muted so the 58/700 dash does not read as a solid slab.
+   --onSolidMuted, not --faint: the hero is --solid in both themes. */
+.none {
+  color: var(--onSolidMuted);
 }
 
 .unit {
@@ -39,23 +42,34 @@
   color: var(--onSolidMuted);
 }
 
-.progress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.badge {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.scale {
+/* «35% шляху ······ до цілі 5,4 кг»: numbers 15/700 --onSolid, words 13 --onSolidMuted. */
+.line {
   margin: 0;
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 20px;
   font-size: 13px;
+  line-height: 20px;
   color: var(--onSolidMuted);
 }
 
-.tiles {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+.num {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--onSolid);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --onSolid, never --acc: lavender on the light-grey dark-theme hero is ≈2:1. */
+.reached {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--onSolid);
 }

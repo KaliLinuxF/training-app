@@ -3,7 +3,7 @@
   flex-direction: column;
 }
 
-/* Prototype row: padding 11px 12px, r14, paper background when it drives the chart. */
+/* Each row is the chart selector (aria-pressed): 44px tap target, mint tint when it drives the chart. */
 .row {
   display: flex;
   justify-content: space-between;
@@ -11,7 +11,7 @@
   gap: 12px;
   width: 100%;
   min-height: 44px;
-  padding: 11px 12px;
+  padding: 10px 12px;
   border: 0;
   border-radius: var(--r14);
   background: transparent;
@@ -22,7 +22,7 @@
 }
 
 .selected {
-  background: var(--paper);
+  background: var(--acc2T);
 }
 
 .label {
@@ -39,11 +39,29 @@
 }
 
 .range {
-  color: var(--muted);
+  color: var(--ink2);
 }
 
 .delta {
+  min-width: 64px;
+  font-size: 15px;
   font-weight: 700;
-  min-width: 56px;
   text-align: right;
+}
+
+/* 320px phones: «Стегна  101 → 99,5 см  −1,5 см» needs ~218px; the 64px delta column does not fit there. */
+@media (max-width: 359px) {
+  .row {
+    gap: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .values {
+    gap: 8px;
+  }
+
+  .delta {
+    min-width: 0;
+  }
 }

@@ -5,8 +5,12 @@ gap, font size/weight, letter-spacing, radius and colour below is copied from th
 only from `styles/tokens.css`. Line numbers refer to `Tracker.dc.html`.
 
 ```tsx
-import { Card, CardHeader, Tile, Button, Sheet, useRetained, deltaTone } from '@/ui';
+import { Card, ListGroup, ListRow, Button, Sheet, useRetained, deltaTone } from '@/ui';
 ```
+
+Redesign A «Чек-лист дня» (`docs/redesign-a.md`) builds screens from rows instead of tile grids: `ListGroup` /
+`ListRow`, `Icon`, `StatStrip`, `ScreenHeader back`, compact `Banner`, `TrainingToggle size="sm"`. Components marked
+**legacy** below are not used by redesign A and are scheduled for removal (kit prune after the redesign).
 
 General rules
 
@@ -32,9 +36,18 @@ General rules
 
 ### `ScreenHeader` — lines 35–41, 140–145, 211–214, 352–355
 
-`{ title, subtitle?, right?, className? }`. Subtitle 14 muted above an `<h1>` title (display 30/700, −0.025em,
-line-height 1.1); column gap 4; row `space-between`, `align-items: flex-end`, padding `8px 4px 4px`; always full width.
-Home: `<ScreenHeader subtitle="Субота, 10 жовтня" title={greeting()} right={<Avatar />} />`.
+`{ title, subtitle?, right?, back?, focusTitle?, className? }`. Subtitle 14 muted above an `<h1>` title (display
+30/700, −0.025em, line-height 1.1); column gap 4; row `space-between`, `align-items: flex-end`, padding `8px 4px 4px`;
+always full width. Home: `<ScreenHeader subtitle="Субота, 10 жовтня" title={greeting()} right={<Avatar />} />`.
+
+- `back?: { href, label }` — sub-page back link above the subtitle/title row (the header becomes a column, gap 2):
+  `Icon chevronLeft` 20 + label, 15/600 `--accD`, inline-flex gap 2, min-height 44, padding `0 10px 0 4px`,
+  margin-left −8 (the chevron lines up with the title), `--r12`, `:active` → `--accT`. Accessible name
+  `Назад: ${label}`. A click runs `useBackTo(href)` (see Navigation): `history.back()` when the page was opened from
+  `href`, else a replace navigation to `href`. The hook lives in a private `BackLink` component, never in the handler.
+- `focusTitle?` — on mount the `<h1>` gets `tabIndex={-1}` and `focus({ preventScroll: true })`, so VoiceOver and
+  the keyboard start on the new page's title. Settings sub-pages:
+  `<ScreenHeader back={{ href: '/settings', label: 'Налаштування' }} focusTitle={cameFrom(history.state, '/settings')} title="Нагадування" />`.
 
 ### `ContentGrid` — lines 34, 139, 210, 351 (`cols` in `renderVals`)
 
@@ -76,15 +89,16 @@ one column. Gap 14, `align-items: start`. Also exports `FullRow` (div spanning a
 - `right`: any node, e.g. `<Button variant="ghost">Відкрити день →</Button>`.
   Row `space-between`, gap 12, title/subtitle column gap 2. The tint summary title has `padding-bottom: 6px` (className).
 
-### `SectionTitle` / `Section` — lines 99–100, 191–192
+### `SectionTitle` / `Section` — lines 99–100, 191–192 (`Section` is legacy: not used by redesign A, scheduled for removal; `SectionTitle` stays — it is the desktop Settings pane `<h2>` in `screens/settings/SettingsSectionPage.tsx`)
 
-`SectionTitle { children, id?, as?, className? }`: display 18/700, −0.01em, padding `6px 4px 0`.
+`SectionTitle { children, id?, as?, className? }`: display 18/700, −0.01em, padding `6px 4px 0`. Redesign A uses it
+as the `aria-labelledby` `<h2>` of the desktop Settings detail pane.
 `Section { title, children, gap?: 8 | 10 (default 10), full?, className? }`: `<section>` column = title + content.
 «Цей тиждень» → `<Section title="Цей тиждень">`, «Останні записи» → `<Section title="Останні записи" gap={8} full>`.
 
 ## Tiles & rows
 
-### `Tile` — lines 67–68, 78–79, 118–122, 235–238, 288–291, 314–317
+### `Tile` — lines 67–68, 78–79, 118–122, 235–238, 288–291, 314–317 (legacy: not used by redesign A, scheduled for removal)
 
 `{ label, value, sub?, subTone? = 'acc2', tone?, variant?, onClick?, 'aria-label'?, className? }` — paper tile inside cards.
 
@@ -99,7 +113,7 @@ one column. Gap 14, `align-items: start`. Also exports `FullRow` (div spanning a
 With `onClick` the tile is a `<button>`. Tiles don't lay themselves out: wrap them in your own grid
 (`1fr 1fr` gap 10, or `repeat(3, minmax(0,1fr))` gap 8, as in the prototype).
 
-### `StatTile` — lines 103–106
+### `StatTile` — lines 103–106 (legacy: not used by redesign A, scheduled for removal; use `StatStrip`)
 
 `{ label, value, unit?, tone? = 'ink', className? }`. `--card`, border `--line`, `--r20`, padding `14px 16px`, gap 4;
 label 13 muted; value 24/700 (−0.02em) in `tone`; unit 14/500 muted after a space. Home «Цей тиждень».
@@ -109,11 +123,12 @@ label 13 muted; value 24/700 (−0.02em) in `tone`; unit 14/500 muted after a sp
 `{ label, value, variant?, tone?, className? }`
 
 - `control` (default): label 14 muted, value 15/600 right-aligned, padding `13px 0`, `--line2` divider below,
-  none after the last row. Put them in `<Card variant="list">`.
-- `summary`: label 15 `--ink2`, value 16/700 in `tone`, padding `8px 0`, `--accLine` divider above each row. In `<Card variant="tint">`.
+  none after the last row. Put them in `<Card variant="list">`. (legacy: not used by redesign A, scheduled for removal)
+- `summary`: label 15 `--ink2`, value 16/700 in `tone`, padding `8px 0`, `--accLine` divider above each row. In
+  `<Card variant="tint">`. (legacy: not used by redesign A, scheduled for removal)
 - `plain`: label 15 `--ink2`, `value` rendered as-is (e.g. `<Stepper …/>`), no divider. «Мої цілі».
 
-### `DetailRow` — lines 183–186
+### `DetailRow` — lines 183–186 (legacy: not used by redesign A, scheduled for removal)
 
 `{ label, value, className? }`. Grid `104px minmax(0,1fr)`, gap 12, padding `11px 0`, `--line2` divider above;
 label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` render a `--faint` «—».
@@ -126,6 +141,266 @@ label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` re
 - `history`: grid `96px / 1fr / 78px`, gap 10, padding `9px 0`, min-height 44 (tap target), `--line2` divider above; label 14; 6px bar; value
   14/600. «Історія калорій»: `tone={item.tone === 'over' ? 'acc' : 'acc2'}`, `onClick` → open that day.
 
+### `StatStrip` — redesign A (Progress «Тренування», «Харчування»)
+
+`{ items: { label, value, unit?, tone? }[], columns?: 2|3|4, desktopColumns?: 2|3|4, 'aria-label'?, className? }`.
+Big unboxed numbers instead of a tile grid. `columns` defaults to `min(items.length, 4)`, `desktopColumns` to
+`columns` (inside the literal `DESKTOP_QUERY` media query).
+
+- `<dl>` grid, `repeat(n, minmax(0,1fr))`, column-gap 12, row-gap 14, margin 0. Each cell is a `<div>` with `<dt>`
+  label then `<dd>` value (+ `<span>` unit), so the text reads «Тренувань 2» (`textContent` «Тренувань2»); the cell is
+  `flex-direction: column-reverse` (gap 2), which draws the value on top.
+- Value 22/700, −0.02em, line-height 1.15, nowrap, coloured by `tone` (`toneClass`); a value of «—» is always `--faint`.
+  Label 13/500 lh 1.3 `--ink2` (wraps; ≥ 4.5:1 on `--card` and `--accT`). Unit 13/600 `--ink2`, margin-left 3.
+- The Progress period summary is **not** a strip (it is one sentence line).
+
+```tsx
+<StatStrip
+  aria-label="Тренування"
+  items={[
+    { label: 'Всього', value: '41' },
+    { label: 'Цього тижня', value: '2' },
+    { label: 'Цього місяця', value: '7' },
+    { label: 'В сер. / тиж.', value: '4' },
+  ]}
+/>
+```
+
+## Lists, icons & navigation (redesign A)
+
+### `Icon` — `ui/icons/Icon.tsx`, `ui/icons/paths.ts`
+
+`{ name: IconName, size?: 16 | 20 | 22 | 24 (default 24), className? }`. Line icons on a 24×24 grid, content inside
+3–21 (unit-tested on every path's end points), `fill="none" stroke="currentColor" strokeWidth={1.8}`, round caps and
+joins, `aria-hidden="true" focusable="false"` — always decorative: name the control around it.
+`IconName` = `home calendar chart gear` (tab bar / sidebar) · `food workout weight measure notes` (actions, day rows) ·
+`bell target theme data logout` (settings rows) · `chevronRight chevronLeft`. `ICON_PATHS[name]` is the list of path
+strings (`home`, `calendar`, `chart`, `bell` are the former `shell/NavIcon` glyphs; `gear` is the ISC-licensed lucide
+cog scaled into the 3–21 box; its licence notice heads `icons/paths.ts` as a `/*! @license */` comment — keep it).
+No emoji in rows.
+
+### `ListGroup` — `ui/lists/ListGroup.tsx`
+
+`{ children (ListRow only), title?, titleSize?: 'md'|'lg', titleId?, subtitle?, headerRight?, footer?, caption?, note?, 'aria-label'?, 'aria-labelledby'?, full?, flush?, className? }`
+
+```
+ caption              <h2> 14/600 --muted, padding 0 16px          (optional, above the card)
+ ┌ card ─────────────────────────────────────────┐  --card, 1px --line, --r24, overflow clip
+ │ title (h2)                       headerRight  │  header only with `title`: padding 12px 16px 2px, gap 12
+ │ subtitle                                      │  title md 18/700 −0.01em · lg 20/700 −0.015em; subtitle 14 --muted
+ │ <ul role="list">  ListRow · ListRow · …       │  padding 4px 0 (`flush` → 0)
+ │ footer                                        │  padding 4px 16px 16px
+ └───────────────────────────────────────────────┘
+ note                 13 --muted, line-height 1.4, padding 0 16px  (optional, below the card)
+```
+
+- Root column, gap 8 (caption / card / note); `full` → `grid-column: 1 / -1`; `className` on the root.
+- Name: with `title` the root is `<section aria-labelledby={title id}>` (named by the title only, never by the
+  subtitle; `titleId` sets the id); with only `caption` it is named by the caption; with only `aria-label` /
+  `aria-labelledby` it is a `<section>` with those; otherwise a plain `<div>`.
+- `flush` is for single-row groups (the Home week row: 2 + 60 = 62px).
+
+### `ListRow` — `ui/lists/ListRow.tsx`
+
+`{ title, titleTone?: 'ink'|'accent', sub?, subTone?, subWrap?, icon?, iconTone?: 'acc'|'acc2'|'neutral', value?, valueVariant?: 'strong'|'soft', valueTone?, meter?: { value, tone: 'acc'|'acc2' }, chevron?, trailing?, children?, size?: 'md'|'lg', 'aria-label'?, 'aria-describedby'?, describeSub?, className? }`
+plus exactly one of: `{ href, replace?, current? }` (wouter `<Link>`) · `{ onClick, disabled?, 'aria-haspopup'?: 'dialog' }`
+(`<button type="button">`) · neither (static `<div>`). Render it inside a `ListGroup`.
+
+Anatomy — `<li>` → action element → `<div class=trailing>` (a **sibling** of the action, never inside it) →
+`<div class=extra>{children}</div>` (under the row, outside the action, e.g. a `PhotoStrip`). Inside the action, in
+DOM order: icon square (`aria-hidden`), title, sub, meter (decorative `ProgressBar sm`, `aria-hidden`), value, chevron
+(`Icon chevronRight` 16 in `--faint`, `aria-hidden`). The accessible name is the visible title, sub and value (spaces
+between them) unless `aria-label` is given.
+
+```
+ ┌──────┬──────────────────────────────┬──────────────┬───┐
+ │ icon │ title                        │        value │ › │   grid: auto · minmax(0,1fr) · fit-content(60%) · auto
+ │      │ sub (2 lines)                               │   │   areas 'icon title value chev' / 'icon sub sub chev'
+ │      │ ███████░░░░ meter                           │   │         / 'icon meter meter chev' (only rows that exist)
+ └──────┴─────────────────────────────────────────────┴───┘
+```
+
+- **Spacing without empty-column gaps**: `column-gap: 0` — CSS grid keeps a gap next to an empty `auto` track, so the
+  spacing is a margin on each part that exists: icon `margin-right: 14px`, value `margin-left: 12px`, chevron
+  `margin-left: 8px`. A row without an icon starts its title at the 16px padding. Row-gap 2, centred vertically —
+  except the icon of a `subWrap` row (class `top`, `align-self: start`), which stays beside the title when the sub
+  runs several lines (calendar «Їжа»); its value and chevron stay centred. The
+  value track is `fit-content(60%)`: at most 60% of the row, right-aligned, wraps, tabular numbers. (A `max-width: 60%`
+  on the value would resolve against its own `auto` track and wrap it needlessly.)
+- **md** (default): min-height 60, padding `10px 16px`; icon 40×40 `--r12`, 22px glyph; title 16/600 lh 1.3 `--ink`.
+- **lg** («Що записати?» menu): min-height 72, padding `12px 16px`; icon 48×48 `--r14`, 24px glyph; title 17/600.
+- Text: `titleTone="accent"` → `--accD` («Вийти»). Sub 14/500 lh 1.35 `--ink2`, clamped to 2 lines; `subWrap` → no
+  clamp, `white-space: pre-line`, `overflow-wrap: anywhere` (calendar food text / notes); `subTone` recolours it.
+  Value `strong` 15/700 `--ink` (default) · `soft` 15/500 `--ink2` (settings summaries); `valueTone` recolours it; a
+  `<Pill>` is fine as a value. Meter: 6px, margin-top 6.
+- Icon tones: `acc` → `--accT` square / `--accD` glyph · `acc2` → `--acc2T` / `--acc2D` · `neutral` (default) →
+  `--line2` / `--ink2`.
+- Chevron: shown by default for `href` / `onClick`, hidden for a static row; `chevron` overrides.
+- Divider: `.item + .item::before`, 1px `--line2`, from `--inset` to the right edge — 70px (md with icon), 78px (lg
+  with icon), 16px without an icon — i.e. where the title starts.
+- `trailing` (e.g. `TrainingToggle size="sm"`, `Switch`): the `<li>` becomes a grid `minmax(0,1fr) auto`; the action
+  keeps padding-right 8 and `.trailing` has padding-right 16 (flex, centred, gap 8). Pressing the toggle never fires
+  the row's `onClick`.
+- `.extra`: padding `0 16px 12px <inset>`, `position: relative` (thumbnail buttons stay tappable).
+- **≤ 359px** (`@media (max-width: 359px)`, 320px Display Zoom): action padding-left 12; md icon 36×36 with a 20px
+  glyph and margin-right 12; `.trailing` padding-right 12; divider inset 60 (md with icon). At 320 the Home training
+  row keeps a ~108px title column next to the toggle.
+- States: `:active` → `--line2` (background transition 120ms, killed by the global reduced-motion rule);
+  `@media (hover: hover) and (pointer: fine)` `:hover` → `--paper`; **`aria-current` (`current`) → `--accT`
+  background and an `--accD` title** (the sidebar's active pattern; `--line2` on `--card` is ≈1.1:1, invisible);
+  `:focus-visible` → `outline: 2px solid var(--focus); outline-offset: -3px; border-radius: var(--r20)` (inset, so the
+  group's overflow clip never cuts it); `disabled` → opacity .45, no press.
+- `aria-label` replaces the name on the link / button. `describeSub` (with a short `aria-label`) gives the sub an id
+  from a top-level `useId()` and adds it to the action's `aria-describedby` (after any given `aria-describedby`), so the
+  food text / notes stay audible. A static row with `aria-label` reads the label from visually hidden text (ARIA
+  forbids `aria-label` on a plain `<div>`) and hides the visible copy from screen readers.
+- `href` rows stamp `history.state` with `{ legkoFrom: <current path> }` (see Navigation); `current` sets
+  `aria-current="page"`, `replace` replaces the history entry.
+
+### Recipes
+
+Home «Сьогодні» — title + ghost button, training row with an inline toggle:
+
+```tsx
+<ListGroup
+  title="Сьогодні"
+  headerRight={
+    <Button variant="ghost" onClick={openDay}>
+      Відкрити день →
+    </Button>
+  }
+>
+  <ListRow
+    icon="food"
+    iconTone="acc2"
+    title="Їжа"
+    value="1 240 / 1 700 ккал"
+    meter={{ value: 73, tone: 'acc2' }}
+    aria-label="Їжа: 1 240 з 1 700 ккал"
+    onClick={() => ui.openSheet(today, 'food')}
+    aria-haspopup="dialog"
+  />
+  <ListRow
+    icon="workout"
+    iconTone="acc"
+    title="Тренування"
+    sub="За планом о 18:00"
+    subTone="acc"
+    chevron={false}
+    onClick={() => ui.openSheet(today, 'workout')}
+    aria-haspopup="dialog"
+    trailing={
+      <TrainingToggle
+        size="sm"
+        value={entry?.trained ?? null}
+        aria-label="Тренування сьогодні"
+        onChange={(v) => setTrainedMark(today, v)}
+      />
+    }
+  />
+  <ListRow
+    icon="weight"
+    title="Вага"
+    sub="12 жовтня — 65,4 кг"
+    value={
+      <Pill tone="acc" size="sm">
+        Сьогодні
+      </Pill>
+    }
+    onClick={() => ui.openSheet(today, 'weight')}
+    aria-haspopup="dialog"
+  />
+  <ListRow
+    icon="measure"
+    title="Заміри"
+    sub="Груди 90 · Талія 70 · Стегна 98"
+    value="Пн, 19 жовтня"
+    valueVariant="soft"
+    onClick={() => ui.openSheet(today, 'measure')}
+    aria-haspopup="dialog"
+  />
+</ListGroup>
+```
+
+(`setTrainedMark` comes from `@/store/dayMarks`, not from `@/ui`: it saves and toasts «Відмічено: тренування було» /
+«Відмічено: без тренування», and does nothing when the day is already marked that way.)
+
+The «Що записати?» menu — four `lg` rows in a group without a title (the dialog heading names it):
+
+```tsx
+<ListGroup aria-label="Що записати?">
+  <ListRow
+    size="lg"
+    icon="food"
+    iconTone="acc2"
+    title="Їжа"
+    sub="Опис або фото"
+    value="1 240 ккал"
+    onClick={() => ui.openSheet(date, 'food')}
+  />
+  {/* Тренування · Вага · Заміри */}
+</ListGroup>
+```
+
+A settings group — `href` rows with soft values, a `Pill` in the sub, and «Вийти» on its own:
+
+```tsx
+<nav aria-label="Розділи налаштувань">
+  <ListGroup>
+    <ListRow href="/settings/reminders" icon="bell" iconTone="acc" title="Нагадування" value="3 увімк."
+      valueVariant="soft" sub={<Pill tone="acc" size="sm">Сповіщення вимкнені</Pill>} current={section === 'reminders'} />
+    <ListRow href="/settings/goals" icon="target" title="Цілі" value="60 кг · 1 700 ккал" valueVariant="soft" />
+  </ListGroup>
+</nav>
+<ListGroup>
+  <ListRow icon="logout" title="Вийти" titleTone="accent" chevron={false} onClick={logout} />
+</ListGroup>
+```
+
+The calendar day card — large title, subtitle, status pill, footer, wrapped text with photos, described rows:
+
+```tsx
+<ListGroup title="14 жовтня 2026" titleSize="lg" subtitle="середа · сьогодні"
+  headerRight={<Pill tone="acc">Частково</Pill>}
+  footer={<Button variant="outline" fullWidth onClick={() => ui.openSheet(date, 'day')}>Редагувати день</Button>}>
+  <ListRow icon="food" iconTone="acc2" title="Їжа" sub={day.food} subWrap value="1 880 ккал"
+    aria-label="Їжа: 1 880 ккал" describeSub onClick={() => ui.openSheet(date, 'food')}>
+    <PhotoStrip … />
+  </ListRow>
+  <ListRow icon="workout" iconTone="acc" title="Тренування" sub="Низ тіла, Прес" chevron={false}
+    onClick={() => ui.openSheet(date, 'workout')}
+    trailing={<TrainingToggle size="sm" value={day.trained} onChange={(v) => setTrainedMark(date, v)} />} />
+  <ListRow icon="notes" title="Нотатки" sub={day.notes} subWrap aria-label="Нотатки" describeSub
+    onClick={() => ui.openSheet(date, 'day')} />
+</ListGroup>
+```
+
+The Home week row — one link row in a `flush` group:
+
+```tsx
+<ListGroup flush>
+  <ListRow
+    href="/progress?period=week"
+    title="Тиждень"
+    value="2 з 3 трен. · сер. 1 795 ккал"
+    aria-label="Тиждень: 2 з 3 тренувань, середня калорійність 1 795 ккал. Відкрити прогрес"
+  />
+</ListGroup>
+```
+
+### Navigation — `ui/internal/backNav.ts`
+
+`BACK_STATE_KEY = 'legkoFrom'`, `backState(from)` → `{ legkoFrom: from }`, `cameFrom(state, parent)` (true only for an
+object whose `legkoFrom === parent`), `useBackTo(parent)` → `(e?) => void`.
+
+- A `ListRow href` stamps `history.state.legkoFrom` with the page it was opened from (wouter `Link state`).
+- `useBackTo(parent)` (a hook: call it at the top level of a component) returns a click handler that calls
+  `e?.preventDefault()`, then `history.back()` when `cameFrom(history.state, parent)` — the history does not grow;
+  the shell still scrolls to the top on the route change — else `navigate(parent, { replace: true })` (deep link,
+  reload, push URL).
+  `ScreenHeader back` and the active «Налаштування» tab on a sub-route use it.
+- Use flat absolute routes (`/settings`, `/settings/:section`), no wouter `nest` — `backState` stores the absolute path.
+
 ## Controls
 
 ### `Button` — lines 28, 50, 75, 188, 361, 506
@@ -133,7 +408,9 @@ label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` re
 `{ variant?, size?, fullWidth?, ...button props }` (`type="button"` by default; `:active` scale .98; disabled = opacity .45)
 
 - variants: `solid` (default; `--solid`/`--onSolid`), `accent` (`--acc`/`--onAcc`, 700, nowrap), `outline` (`--card` +
-  1px `--line`, ink), `ghost` (transparent, muted 14/500, padding `8px 0`; tap area grown invisibly to 44px; ignores `size`).
+  1px `--line`, ink), `ghost` (transparent, muted 14/500, padding `8px 0`; ignores `size`). The ghost box is 35px tall;
+  its `::after { inset: -5px -6px }` grows the tap area to 45px (it was 43 with −4px) — «Відкрити день →»,
+  «Повний запис дня →» and «+ Нотатка до дня» rely on it, no local overrides needed.
 - sizes: `sm` 14/600, padding `10px 14px`, `--r12`, min-height 40 (44 for `accent`), tap area grown invisibly to 44 —
   banner CTA, notifications CTA;
   `md` (default) 15/600, `--r14`, min-height 50 — «Редагувати день» (add `margin-top: 8px`);
@@ -152,11 +429,16 @@ label 14 muted; value 15/500, line-height 1.4, wraps. `null` / `''` / `'—'` re
 
 ### `TrainingToggle` — lines 84–85, 446–447
 
-`{ value: boolean | null, onChange(trained: boolean), size?: 'md'|'lg', 'aria-label'?, 'aria-labelledby'?, className? }`.
+`{ value: boolean | null, onChange(trained: boolean), size?: 'sm'|'md'|'lg', 'aria-label'?, 'aria-labelledby'?, className? }`.
 Grid `1fr 1fr` gap 10; buttons 600, border 1.5px. `md` (Home): 15px, `--r14`, min-height 50. `lg` (sheet): 16px,
 `--r16`, min-height 54. «✓ Було» selected → `--accT` + `--acc` border; «✕ Не було» selected → `--solid` bg,
 `--onSolid` text, `--ink` border; unselected → `--card` + `--line`. `aria-pressed` on both; `onChange` fires on every
-press (Home «✓ Було» opens the sheet even if already marked). Group name: Field label, else «Тренування».
+press (also on the already pressed option — callers decide what a repeat means). Group name: Field label, else «Тренування».
+
+`sm` (redesign A, `trailing` of a `ListRow`: Home «Тренування», calendar day): grid `44px 44px`, gap 6; each option
+44×44, `--r14`, 1.5px border, padding 0, `:active` scale .96. Content = glyph «✓» / «✕» 18/700 `aria-hidden` +
+visually hidden «Було» / «Не було», so the buttons keep those accessible names. Pressed ✓ draws the glyph in `--accD`
+on `--accT`; pressed ✕ as above. Give the group an `aria-label` («Тренування сьогодні»).
 
 ### `Chip` / `ChipGroup` — lines 450–453
 
@@ -228,7 +510,7 @@ padding `10px 12px`, min-height 44, focus → 2px `--focus` ring. Empty values (
 `inputMode="decimal"`, focus → 2px `--focus` ring on the tile. Placeholder = previous value (`fN(prev)`); a placeholder with a
 digit is drawn in `--muted` (it is data, ≥ 4.5:1), the plain «—» stays `--faint`. Lay three out in `repeat(3, minmax(0,1fr))` gap 8.
 
-### `QuickAction` — lines 92–95
+### `QuickAction` — lines 92–95 (legacy: not used by redesign A, scheduled for removal)
 
 `{ label, caption? = 'Додати', tone?: 'acc'|'acc2'|'neutral', onClick, className? }`. `--card`, 1px `--line`, `--r20`,
 padding 14, gap 12, min-height 64; 36px `--r12` square with «+» (20/500) on `--acc2T` / `--accT` / `--line2`;
@@ -245,14 +527,24 @@ caption 12 muted, label 15/600. Grid: `1fr 1fr` mobile, `repeat(4, minmax(0,1fr)
 
 ### `Banner` — lines 44–51
 
-`{ title, sub?, cta, onAction, full? = true, className? }`. `--accT`, `--r20`, padding `14px 14px 14px 16px`, gap 12;
-10px `--acc` dot; title 15/600, sub 13 `--ink2`; CTA = `Button size="sm"`.
+`{ title, sub?, size?: 'md'|'compact', cta?, onAction?, onDismiss?, dismissLabel? = 'Сховати', full? = true, className? }`
+(`cta` and `onAction` come together or not at all). `md` (default): `--accT`, `--r20`, padding `14px 14px 14px 16px`,
+gap 12; 10px `--acc` dot; title 15/600, sub 13 `--ink2`; CTA = `Button size="sm"`.
+
+- `size="compact"` (redesign A Home: setup «Почнімо» / iPhone install hint — at most one): min-height 56, padding
+  `8px 8px 8px 14px`, gap 10, `--r16`, 8px dot; title 14/600 clamped to **2 lines**, sub 13 lh 1.35 `--ink2` clamped
+  to **3 lines** (never an ellipsis mid-sentence: at 390px the text column beside «Налаштувати» is ~185px and the
+  setup sub needs 3 lines, ≈90px tall). Below 360px (Display Zoom, ~120px column) the sub is not clamped at all.
+- `onDismiss` adds a ✕ button named `dismissLabel` (any size): 32×32, transparent, glyph 13/600 `--ink2`
+  (`aria-hidden`), `::after { inset: -6px }` → 44px tap area, `:active` scale .94. Replaces `screens/home/DismissibleBanner`.
+- Without `cta` there is no button besides the optional ✕.
 
 ### `ProgressBar` — lines 63, 299, 341
 
 `{ value (0–100, clamped), size?: 'sm' 6 | 'md' 8 | 'lg' 10, track?: 'line2'|'onSolid', tone?: 'acc'|'acc2', label?, className? }`.
 Radius 99. Hero: `<ProgressBar value={pct} track="onSolid" />` (`--solidSub2` track). With `label` it is a
-`role="progressbar"`, otherwise `aria-hidden`.
+`role="progressbar"`, otherwise `aria-hidden`. It renders `display: block` spans (phrasing content), so it may sit
+inside a `<button>` — the `ListRow` meter.
 
 ### `Legend` / `LegendItem` — lines 167–171, 331–335
 
@@ -364,10 +656,14 @@ const shownItem = useRetained(editing);        // keeps the editor filled while 
 
 ## App shell (`@/shell/AppShell`)
 
-Not part of `@/ui`, listed for reference. Mobile: column `max-width 440`, padding `20px 18px 120px` (+ safe areas),
-floating glass tab bar (Головна · Календар · «+» · Прогрес · Нагадування) centred between the side safe areas.
+Not part of `@/ui`, listed for reference. Mobile: column `max-width 440`, padding
+`calc(12px + var(--safe-top)) 18px calc(120px + var(--safe-bottom))`, floating glass tab bar
+(Головна · Календар · «+» · Прогрес · Налаштування, `Icon` glyphs `home calendar chart gear`) centred between the side
+safe areas; «+» → `ui.openSheet(today, 'menu')` (the «Що записати?» menu). Tapping the active «Налаштування» tab on a
+sub-route goes back to the list with `useBackTo('/settings')`.
 Desktop (`DESKTOP_QUERY`: ≥ 900px **and** a mouse/trackpad, so a phone in landscape keeps the mobile shell): container
 1280, 248px sticky sidebar (logo, links, «+ Записати день»), main padding `32px 36px 48px`. `#root` is padded by
 `--safe-left` / `--safe-right` (notched iPhone in landscape). `<main>` is a flex column with gap 14;
-screens render a `<ContentGrid>` inside it. «+» → `ui.openSheet(today, 'day')`. The page scrolls to the top on every
-route change; tapping the current section scrolls to the top. Renders `<Toast />` and `<SheetHost />`.
+screens render a `<ContentGrid>` inside it. The sidebar's «+ Записати день» opens the same `'menu'` sheet (centred
+modal). The page scrolls to the top on every route change; tapping the current section scrolls to the top. Renders
+`<Toast />` and `<SheetHost />`.

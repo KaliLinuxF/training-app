@@ -1,16 +1,18 @@
 import { cx } from '@/ui';
-import { NAV_ITEMS, isNavActive } from './nav';
+import { NAV_ITEMS, isNavActive, isNavRoot } from './nav';
 import { NavLink } from './NavLink';
 import s from './Sidebar.module.css';
 
 interface SidebarProps {
   location: string;
-  /** «+ Записати день»: open today's day sheet. */
+  /** «+ Записати день»: open the «Що записати?» menu for today. */
   onRecord: () => void;
+  /** The «Що записати?» menu is open (announced on the button as `aria-expanded`). */
+  recordOpen?: boolean;
 }
 
 /** Desktop left sidebar: logo, section links, «+ Записати день». */
-export function Sidebar({ location, onRecord }: SidebarProps) {
+export function Sidebar({ location, onRecord, recordOpen = false }: SidebarProps) {
   return (
     <aside className={s.sidebar}>
       <div className={s.logo}>
@@ -27,6 +29,7 @@ export function Sidebar({ location, onRecord }: SidebarProps) {
               key={item.href}
               href={item.href}
               active={active}
+              atRoot={isNavRoot(item.href, location)}
               className={cx(s.link, active && s.active)}
             >
               <span className={s.dot} aria-hidden="true" />
@@ -35,7 +38,13 @@ export function Sidebar({ location, onRecord }: SidebarProps) {
           );
         })}
       </nav>
-      <button type="button" className={s.record} onClick={onRecord}>
+      <button
+        type="button"
+        className={s.record}
+        onClick={onRecord}
+        aria-haspopup="dialog"
+        aria-expanded={recordOpen}
+      >
         + Записати день
       </button>
     </aside>

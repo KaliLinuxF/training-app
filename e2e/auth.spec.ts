@@ -23,7 +23,8 @@ test.describe('session', () => {
     await password.fill(PASSWORD);
     await page.getByRole('button', { name: 'Увійти' }).click();
     await app.ready();
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+    await expect(app.homeRow('Тренування')).toContainText('Не було');
+    await expect(app.trainingToggle('Не було')).toHaveAttribute('aria-pressed', 'true');
     await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(false);
   });
 
@@ -39,22 +40,23 @@ test.describe('session', () => {
   });
 
   test('«Вийти» always asks first, says what happens, and can be cancelled', async ({ app, page }) => {
-    await app.goto('/reminders');
-    await page.getByRole('button', { name: 'Вийти' }).click();
+    await app.goto('/settings');
+    await page.getByRole('button', { name: 'Вийти', exact: true }).click();
     const dialog = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
     await expect(dialog).toContainText('Нагадування сюди більше не приходитимуть');
     await expect(dialog).toContainText('Усі записи залишаться на сервері.');
     await dialog.getByRole('button', { name: 'Скасувати' }).click();
     await expect(dialog).toBeHidden();
-    await expect(app.heading('Нагадування')).toBeVisible();
+    await expect(app.heading('Налаштування')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Вийти', exact: true })).toBeEnabled();
     expect((await app.deviceCache()).data).toBeTruthy();
     const me = await page.context().request.get('/api/auth/me');
     expect(me.status()).toBe(200);
   });
 
   test('logging out and back in without a reload loads the data again', async ({ app, page }) => {
-    await app.goto('/reminders');
-    await page.getByRole('button', { name: 'Вийти' }).click();
+    await app.goto('/settings');
+    await page.getByRole('button', { name: 'Вийти', exact: true }).click();
     await page
       .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
       .getByRole('button', { name: 'Вийти', exact: true })
@@ -63,13 +65,20 @@ test.describe('session', () => {
     await password.fill(PASSWORD);
     await page.getByRole('button', { name: 'Увійти' }).click();
     await app.ready();
+    // In-app navigation only (no page load): the data came back with the login.
+    await app.go('Налаштування');
+    await app.settingsRow('Дані і копія').click();
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     await app.go('Головна');
     await expect(app.region('Поточна вага')).toContainText('65,4');
     await app.go('Календар');
+    await expect(app.region('14 жовтня 2026')).toContainText('Вівсянка з бананом, кава');
+    await app.go('Прогрес');
     await expect(
-      page.locator('section').filter({ hasText: 'Останні записи' }).getByRole('listitem'),
-    ).toHaveCount(8);
+      page
+        .getByRole('group', { name: 'Історія калорій' })
+        .getByRole('button', { name: /Відкрити в календарі$/ }),
+    ).toHaveCount(3);
   });
 });
 

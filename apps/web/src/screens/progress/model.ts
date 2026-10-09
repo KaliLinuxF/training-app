@@ -4,21 +4,22 @@
  */
 import {
   dLong,
+  DOW_SHORT,
   f0,
   f1,
   fN,
-  MINUS,
   sgn,
+  weekdayOf,
   type AppData,
   type ISODate,
   type MeasureKey,
 } from '@legko/shared';
 import {
-  changeTone,
   chartGeometry,
   kcalAverages,
   kcalBars,
   kcalHistory,
+  kcalTone,
   MEASURE_LABELS,
   measureSummary,
   periodMeta,
@@ -28,24 +29,43 @@ import {
   typeRanking,
   weightSummary,
   workoutStats,
-  type ChangeTone,
   type ChartGeometry,
   type DatedValue,
   type KcalBar,
   type Period,
   type PeriodMeta,
-  type WeightSummary,
 } from '@/lib/stats';
-import type { Tone } from '@/ui';
+import { deltaTone, type PillTone, type StatItem, type Tone } from '@/ui';
 
-/** Rows added by each «Показати ще» in «Історія калорій». */
+/** Rows of «Історія калорій» before the first «Показати ще». */
+export const HISTORY_FIRST = 3;
+/** Rows added by each «Показати ще». */
 export const HISTORY_PAGE = 7;
+/** Workout types listed under «Найчастіше». */
+export const TYPES_SHOWN = 5;
 
-/** A labelled value: summary rows and the paper tiles. `tone` unset = inherit (ink). */
-export interface ValueCell {
+const DASH = '—';
+const CHART_VIEWBOX_HEIGHT = 120;
+
+export type SummaryKey = 'workouts' | 'kcal' | 'weight' | 'waist' | 'hips' | 'chest';
+
+/** One «label number unit» part of the summary sentence («вага −0,3 кг»). */
+export interface SummaryItem {
+  key: SummaryKey;
+  /** «Тренувань», then lower-case inside the sentence: «сер. калорійність», «вага», «талія»… */
   label: string;
+  /** «2», «1 795», «−0,3», or «—» without data. */
   value: string;
-  tone?: Tone;
+  /** «ккал», «кг», «см»; '' for the count and for a missing value. */
+  unit: string;
+  /** Colour of the number: changes via `deltaTone`, counts `ink`, a missing value `faint`. */
+  tone: Tone;
+}
+
+export interface SummaryModel {
+  /** Period title, also the region name: «Цього тижня», «За 3 місяці»… */
+  title: string;
+  items: SummaryItem[];
 }
 
 export interface LineChartModel {
@@ -56,6 +76,24 @@ export interface LineChartModel {
   emptyHint: string;
   /** Text alternative of the chart ('' when not `enough`). */
   ariaLabel: string;
+}
+
+export interface WeightModel {
+  /** Latest weigh-in «65,4», or «—». */
+  current: string;
+  /** All-time change «−2,9 кг від старту» (lost → mint, gained → lavender); null below two weigh-ins. */
+  change: { text: string; tone: PillTone } | null;
+  /** First weigh-in «68,3», or «—». */
+  start: string;
+  /** Goal from the settings «60,0». */
+  goal: string;
+  /** «ще 5,4 кг», or '' without weigh-ins. */
+  left: string;
+  /** Way travelled towards the goal, 0–100 (bar width). */
+  pct: number;
+  /** «35% шляху», or '' without weigh-ins. */
+  pctLabel: string;
+  chart: LineChartModel;
 }
 
 export interface MeasureRowModel {
@@ -77,32 +115,33 @@ export interface TypeBarModel {
   pct: number;
 }
 
+export interface WorkoutsModel {
+  /** Всього · Цього тижня · Цього місяця · В сер. / тиж. */
+  stats: StatItem[];
+  /** «Найчастіше · цього тижня» */
+  typesHeading: string;
+  /** The `TYPES_SHOWN` most frequent types of the period. */
+  types: TypeBarModel[];
+}
+
 export interface HistoryRowModel {
   date: ISODate;
-  /** «15 вересня» */
+  /** «Вт, 13 жовтня» */
   label: string;
   /** «1 650 ккал» */
   value: string;
-  pct: number;
-  tone: 'acc' | 'acc2';
+  /** Dot colour: within the kcal goal (mint) or above it (lavender). */
+  tone: 'ok' | 'over';
   ariaLabel: string;
   /** Calendar route of that day. */
   href: string;
 }
 
-export interface ProgressModel {
-  period: PeriodMeta;
-  summary: ValueCell[];
-  weight: { tiles: ValueCell[]; chart: LineChartModel };
-  measures: { rows: MeasureRowModel[]; chart: LineChartModel; chartLabel: string };
-  workouts: { tiles: ValueCell[]; typesHeading: string; types: TypeBarModel[] };
-  nutrition: NutritionModel;
-}
-
 export interface NutritionModel {
   /** «ціль 1 700 ккал» */
   goal: string;
-  tiles: ValueCell[];
+  /** «Сер. цього тижня» · «Сер. цього місяця» */
+  stats: StatItem[];
   bars: KcalBar[];
   goalPct: number;
   gap: string;
@@ -117,6 +156,15 @@ export interface NutritionModel {
   hasMore: boolean;
 }
 
+export interface ProgressModel {
+  period: PeriodMeta;
+  summary: SummaryModel;
+  weight: WeightModel;
+  measures: { rows: MeasureRowModel[]; chart: LineChartModel; chartLabel: string };
+  workouts: WorkoutsModel;
+  nutrition: NutritionModel;
+}
+
 export interface ProgressOptions {
   period: Period;
   /** Parameter shown in the «Заміри тіла» chart. */
@@ -125,23 +173,12 @@ export interface ProgressOptions {
   historyLimit: number;
 }
 
-const DASH = '—';
-const CHART_VIEWBOX_HEIGHT = 120;
-const CHANGE_TONES: Readonly<Record<ChangeTone, Tone>> = { down: 'acc2', up: 'acc', flat: 'ink' };
-
-export const toneOfChange = (n: number | null): Tone => CHANGE_TONES[changeTone(n)];
-
-/** «−0,4 кг» / «+1 см» / «—», toned like the prototype's `tone()`. */
-function changeCell(label: string, n: number | null, unit: string, f: (x: number) => string = fN): ValueCell {
-  return { label, value: n === null ? DASH : `${sgn(n, f)} ${unit}`, tone: toneOfChange(n) };
-}
-
 export function buildProgressModel(data: AppData, today: ISODate, opts: ProgressOptions): ProgressModel {
   const period = periodMeta(opts.period);
   const from = periodStart(data, opts.period, today);
   return {
     period,
-    summary: summaryRows(data, from, today),
+    summary: summaryModel(data, from, today, period),
     weight: weightModel(data, from),
     measures: measuresModel(data, from, opts.measure),
     workouts: workoutsModel(data, from, today, period),
@@ -149,36 +186,50 @@ export function buildProgressModel(data: AppData, today: ISODate, opts: Progress
   };
 }
 
-function summaryRows(data: AppData, from: ISODate, today: ISODate): ValueCell[] {
+const missing = (key: SummaryKey, label: string): SummaryItem => ({
+  key,
+  label,
+  value: DASH,
+  unit: '',
+  tone: 'faint',
+});
+
+/** A signed change of the period («вага −0,3 кг»), toned like the prototype's `tone()`. */
+function changeItem(
+  key: SummaryKey,
+  label: string,
+  n: number | null,
+  unit: string,
+  f: (x: number) => string = fN,
+): SummaryItem {
+  return n === null ? missing(key, label) : { key, label, value: sgn(n, f), unit, tone: deltaTone(n) };
+}
+
+/** SPEC §1.1 #7 as one sentence: «Тренувань 2 · сер. калорійність 1 795 ккал · вага −0,3 кг · талія …». */
+function summaryModel(data: AppData, from: ISODate, today: ISODate, period: PeriodMeta): SummaryModel {
   const r = rangeStats(data, from, today);
-  return [
-    { label: 'Тренувань', value: String(r.trainings), tone: 'ink' },
-    { label: 'Середня калорійність', value: r.avgKcal === null ? DASH : `${f0(r.avgKcal)} ккал`, tone: 'ink' },
-    changeCell('Зміна ваги', r.weightChange, 'кг', f1),
-    changeCell('Талія', r.waistChange, 'см'),
-    changeCell('Стегна', r.hipsChange, 'см'),
-    changeCell('Груди', r.chestChange, 'см'),
-  ];
+  return {
+    title: period.title,
+    items: [
+      // No day recorded in the period: «—» rather than a «0» that reads like a result.
+      r.entries === 0
+        ? missing('workouts', 'Тренувань')
+        : { key: 'workouts', label: 'Тренувань', value: f0(r.trainings), unit: '', tone: 'ink' },
+      r.avgKcal === null
+        ? missing('kcal', 'сер. калорійність')
+        : { key: 'kcal', label: 'сер. калорійність', value: f0(r.avgKcal), unit: 'ккал', tone: 'ink' },
+      changeItem('weight', 'вага', r.weightChange, 'кг', f1),
+      changeItem('waist', 'талія', r.waistChange, 'см'),
+      changeItem('hips', 'стегна', r.hipsChange, 'см'),
+      changeItem('chest', 'груди', r.chestChange, 'см'),
+    ],
+  };
 }
 
-/** «Втрачено»: mint like the prototype; a gain is shown with a minus in lavender. */
-function lostCell(lost: number | null): ValueCell {
-  const label = 'Втрачено';
-  if (lost === null) return { label, value: DASH };
-  if (lost < -0.04) return { label, value: `${MINUS}${f1(-lost)} кг`, tone: 'acc' };
-  return { label, value: `${f1(Math.max(0, lost))} кг`, tone: 'acc2' };
-}
-
-function weightTiles(w: WeightSummary): ValueCell[] {
-  return [
-    { label: 'Початкова', value: w.first ? f1(w.first.kg) : DASH },
-    { label: 'Поточна', value: w.last ? f1(w.last.kg) : DASH },
-    { label: 'Цільова', value: f1(w.goal) },
-    lostCell(w.lost),
-    { label: 'Залишилось', value: w.left === null ? DASH : `${f1(w.left)} кг` },
-    // Without any weigh-in there is no way travelled yet («0%» would read as a result).
-    w.last ? { label: 'Шлях', value: `${Math.round(w.pct)}%`, tone: 'acc' } : { label: 'Шлях', value: DASH },
-  ];
+/** Pill tone of the all-time change: lost → mint, gained → lavender, about the same → neutral. */
+function changePillTone(delta: number): PillTone {
+  const tone = deltaTone(delta);
+  return tone === 'acc2' ? 'acc2' : tone === 'acc' ? 'acc' : 'neutral';
 }
 
 interface ChartCopy {
@@ -208,9 +259,23 @@ function lineChart(points: readonly DatedValue[], copy: ChartCopy): LineChartMod
   };
 }
 
-function weightModel(data: AppData, from: ISODate): ProgressModel['weight'] {
+function weightModel(data: AppData, from: ISODate): WeightModel {
+  const w = weightSummary(data);
+  const { first, last } = w;
+  // A single weigh-in is the start itself: «0,0 кг від старту» would be noise.
+  const change =
+    first && last && data.weights.length >= 2
+      ? { text: `${sgn(last.kg - first.kg, f1)} кг від старту`, tone: changePillTone(last.kg - first.kg) }
+      : null;
   return {
-    tiles: weightTiles(weightSummary(data)),
+    current: last ? f1(last.kg) : DASH,
+    change,
+    start: first ? f1(first.kg) : DASH,
+    goal: f1(w.goal),
+    left: w.left === null ? '' : `ще ${f1(w.left)} кг`,
+    pct: w.pct,
+    // Without any weigh-in there is no way travelled yet («0%» would read as a result).
+    pctLabel: last ? `${Math.round(w.pct)}% шляху` : '',
     chart: lineChart(seriesInRange(data, 'kg', from), {
       title: 'Вага',
       unit: 'кг',
@@ -231,9 +296,11 @@ function measuresModel(data: AppData, from: ISODate, selected: MeasureKey): Prog
       label,
       range,
       delta: deltaText,
-      deltaTone: has ? toneOfChange(delta) : 'faint',
+      deltaTone: has ? deltaTone(delta) : 'faint',
       selected: key === selected,
-      ariaLabel: has ? `${label}: ${fN(first)} → ${fN(last)} см, зміна ${deltaText}` : `${label}: замірів ще немає`,
+      ariaLabel: has
+        ? `${label}: ${fN(first)} → ${fN(last)} см, зміна ${deltaText}`
+        : `${label}: замірів ще немає`,
     };
   });
   const label = MEASURE_LABELS[selected];
@@ -250,37 +317,42 @@ function measuresModel(data: AppData, from: ISODate, selected: MeasureKey): Prog
   };
 }
 
-function workoutsModel(
-  data: AppData,
-  from: ISODate,
-  today: ISODate,
-  period: PeriodMeta,
-): ProgressModel['workouts'] {
+function workoutsModel(data: AppData, from: ISODate, today: ISODate, period: PeriodMeta): WorkoutsModel {
   const w = workoutStats(data, today);
   return {
-    tiles: [
-      { label: 'Всього', value: String(w.total) },
-      { label: 'Цього тижня', value: String(w.thisWeek) },
-      { label: 'Цього місяця', value: String(w.thisMonth) },
-      { label: 'В середньому / тиж.', value: fN(w.avgPerWeek) },
+    stats: [
+      { label: 'Всього', value: f0(w.total) },
+      { label: 'Цього тижня', value: f0(w.thisWeek) },
+      { label: 'Цього місяця', value: f0(w.thisMonth) },
+      { label: 'В сер. / тиж.', value: fN(w.avgPerWeek) },
     ],
     typesHeading: `Найчастіше · ${period.short}`,
-    types: typeRanking(data, from, today).map((t) => ({ label: t.label, value: String(t.n), pct: t.pct })),
+    types: typeRanking(data, from, today)
+      .slice(0, TYPES_SHOWN)
+      .map((t) => ({ label: t.label, value: String(t.n), pct: t.pct })),
   };
 }
 
-function nutritionModel(data: AppData, today: ISODate, opts: ProgressOptions, period: PeriodMeta): NutritionModel {
+/** An average-kcal cell: lavender above the goal, mint within it, a faint «—» without data. */
+function kcalStat(label: string, avg: number | null, goal: number): StatItem {
+  if (avg === null) return { label, value: DASH, tone: 'faint' };
+  return { label, value: f0(avg), unit: 'ккал', tone: kcalTone(avg, goal) === 'over' ? 'acc' : 'acc2' };
+}
+
+function nutritionModel(
+  data: AppData,
+  today: ISODate,
+  opts: ProgressOptions,
+  period: PeriodMeta,
+): NutritionModel {
   const goal = data.settings.kcalGoal;
   const chart = kcalBars(data, opts.period, today);
   const avg = kcalAverages(data, today, opts.period);
   const history = kcalHistory(data, opts.historyLimit, chart.max);
   return {
     goal: `ціль ${f0(goal)} ккал`,
-    tiles: [
-      { label: 'Цей тиждень', value: f0(avg.week) },
-      { label: 'Цей місяць', value: f0(avg.month) },
-      { label: 'Період', value: f0(avg.period) },
-    ],
+    // The period's own average is in the summary sentence above, so it is not repeated here.
+    stats: [kcalStat('Сер. цього тижня', avg.week, goal), kcalStat('Сер. цього місяця', avg.month, goal)],
     bars: chart.bars,
     goalPct: chart.goalPct,
     gap: chart.gap,
@@ -288,14 +360,12 @@ function nutritionModel(data: AppData, today: ISODate, opts: ProgressOptions, pe
     note: chart.note,
     hasBarData: chart.bars.some((b) => b.value !== null),
     chartLabel:
-      `Калорії ${period.short}${chart.note ? ', середнє за тиждень' : ''}, ` +
-      `ціль ${f0(goal)} ккал`,
-    history: history.items.map(({ date, kcal, pct, tone }) => ({
+      `Калорії ${period.short}${chart.note ? ', середнє за тиждень' : ''}, ` + `ціль ${f0(goal)} ккал`,
+    history: history.items.map(({ date, kcal, tone }) => ({
       date,
-      label: dLong(date),
+      label: `${DOW_SHORT[weekdayOf(date)]}, ${dLong(date)}`,
       value: `${f0(kcal)} ккал`,
-      pct,
-      tone: tone === 'over' ? 'acc' : 'acc2',
+      tone,
       ariaLabel: `${dLong(date)}: ${f0(kcal)} ккал. Відкрити в календарі`,
       href: `/calendar?date=${date}`,
     })),

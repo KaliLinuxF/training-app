@@ -18,21 +18,52 @@ test.describe('deep links', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test('/?sheet=day&trained=1 opens the day record with «Було» pre-selected', async ({ app, page }) => {
+  test('/?sheet=day&trained=1 (the workout push) opens «Тренування» with «Було» pre-selected', async ({
+    app,
+    page,
+  }) => {
     await app.goto('/?sheet=day&trained=1');
-    const sheet = app.sheet('Запис дня');
+    const sheet = app.sheet('Тренування');
     await expect(sheet.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
     await expect(sheet.getByRole('button', { name: 'Верх тіла', exact: true })).toBeVisible();
+    await expect(sheet).toContainText('14 жовтня 2026');
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
+  });
 
+  test('/?sheet=day opens the full day, /?sheet=food «Їжа», /?sheet=workout «Тренування»', async ({
+    app,
+    page,
+  }) => {
     await app.goto('/?sheet=day');
-    await expect(app.sheet('Запис дня').getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
+    const day = app.sheet('Запис дня');
+    await expect(day.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
       'aria-pressed',
       'false',
     );
+    await expect(day.getByRole('textbox', { name: 'Що я їла' })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+
+    await app.goto('/?sheet=food');
+    const food = app.sheet('Їжа');
+    await expect(food.getByRole('textbox', { name: 'Що я їла' })).toHaveValue('Вівсянка з бананом, кава');
+    await expect(page).toHaveURL(/\/$/);
+
+    await app.goto('/?sheet=workout');
+    await expect(app.sheet('Тренування').getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    await expect(page).toHaveURL(/\/$/);
+  });
+
+  test('the menu is not linkable', async ({ app, page }) => {
+    await app.goto('/?sheet=menu');
+    await expect(page).toHaveURL(/\/$/);
+    await expect(app.dialogs).toHaveCount(0);
   });
 
   test('unknown sheets are ignored and other query params are kept', async ({ app, page }) => {
@@ -61,9 +92,8 @@ test.describe('deep links', () => {
 
   test('a notification tap while a draft is open asks before dropping it', async ({ app, page }) => {
     await app.goto('/');
-    await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
-    const day = app.sheet('Запис дня');
-    const food = day.getByRole('textbox', { name: 'Що я їла' });
+    const sheet = await app.record('Їжа');
+    const food = sheet.getByRole('textbox', { name: 'Що я їла' });
     await food.fill('Вівсянка з бананом, кава, борщ — ще пишу…');
 
     // The in-app question (not a native confirm); «Залишитись» keeps the draft.
@@ -79,13 +109,14 @@ test.describe('deep links', () => {
     await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
     await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
     await expect(app.sheet('Контрольне зважування')).toBeVisible();
-    await expect(app.sheet('Запис дня')).toHaveCount(0);
+    await expect(app.sheet('Їжа')).toHaveCount(0);
+    await expect(app.dialogs).toHaveCount(1);
     await expect(page).toHaveURL(/\/$/);
   });
 
   test('a notification tap over an untouched sheet just opens the linked one', async ({ app, page }) => {
     await app.goto('/');
-    await app.quickAction('Заміри').click();
+    await app.record('Заміри');
     await expect(app.sheet('Заміри тіла')).toBeVisible();
     await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
     await expect(app.sheet('Контрольне зважування')).toBeVisible();
@@ -99,9 +130,9 @@ test.describe('deep links', () => {
       await app.goto('/?sheet=weight');
       const weigh = app.sheet('Контрольне зважування');
       await expect(weigh).toBeVisible();
-      await expect(app.sheet('Налаштування')).toHaveCount(0);
+      await expect(app.sheet('Перші кроки')).toHaveCount(0);
       await weigh.getByRole('button', { name: 'Закрити' }).click();
-      await expect(app.sheet('Налаштування')).toBeVisible();
+      await expect(app.sheet('Перші кроки')).toBeVisible();
     });
   });
 

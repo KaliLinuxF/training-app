@@ -1,0 +1,303 @@
+/*
+ * One list row. The divider starts at --inset (the title's x): 70 = 16 + 40 + 14 for md with an icon,
+ * 78 = 16 + 48 + 14 for lg, 16 without an icon.
+ */
+.item {
+  position: relative;
+  --inset: 16px;
+}
+
+.withIcon {
+  --inset: 70px;
+}
+
+.lg.withIcon {
+  --inset: 78px;
+}
+
+.item + .item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: var(--inset);
+  height: 1px;
+  background: var(--line2);
+  pointer-events: none;
+}
+
+/* A trailing control sits next to the action, never inside it. */
+.withTrailing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+/*
+ * icon | title | value | chevron, with the sub and the meter under the title.
+ * column-gap stays 0: a grid keeps its gap next to an empty `auto` track, so the spacing is a margin on each element
+ * that exists (icon 14 right, value 12 left, chevron 8 left). The value track is capped at 66% of the row and wraps:
+ * 66% keeps the Home week value «2 з 3 трен. · сер. 1 795 ккал» (~193px + 12) on one line at 390px (cap 211px).
+ */
+.action {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) fit-content(66%) auto;
+  grid-template-areas: 'icon title value chev';
+  align-items: center;
+  align-content: center;
+  column-gap: 0;
+  row-gap: 2px;
+  width: 100%;
+  min-height: 60px;
+  margin: 0;
+  padding: 10px 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
+  transition: background-color 120ms ease;
+}
+
+.lg .action {
+  min-height: 72px;
+  padding: 12px 16px;
+}
+
+.withTrailing .action {
+  padding-right: 8px;
+}
+
+.hasSub {
+  grid-template-areas:
+    'icon title value chev'
+    'icon sub sub chev';
+}
+
+.hasMeter {
+  grid-template-areas:
+    'icon title value chev'
+    'icon meter meter chev';
+}
+
+.hasSub.hasMeter {
+  grid-template-areas:
+    'icon title value chev'
+    'icon sub sub chev'
+    'icon meter meter chev';
+}
+
+.icon {
+  grid-area: icon;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-right: 14px;
+  border-radius: var(--r12);
+  background: var(--line2);
+  color: var(--ink2);
+}
+
+.lg .icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r14);
+}
+
+/*
+ * A wrapping sub (calendar food text) can run several lines: the icon stays beside the title instead of drifting to
+ * the middle of the block. The value and the chevron stay centred.
+ */
+.top .icon {
+  align-self: start;
+}
+
+.acc {
+  background: var(--accT);
+  color: var(--accD);
+}
+
+.acc2 {
+  background: var(--acc2T);
+  color: var(--acc2D);
+}
+
+.neutral {
+  background: var(--line2);
+  color: var(--ink2);
+}
+
+.title {
+  grid-area: title;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow-wrap: break-word;
+}
+
+.lg .title {
+  font-size: 17px;
+}
+
+.accent {
+  color: var(--accD);
+}
+
+.sub {
+  grid-area: sub;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ink2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.wrap {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+  overflow: visible;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.meter {
+  grid-area: meter;
+  margin-top: 6px;
+}
+
+.value {
+  grid-area: value;
+  min-width: 0;
+  margin-left: 12px;
+  font-size: 15px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  overflow-wrap: break-word;
+}
+
+.strong {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.soft {
+  font-weight: 500;
+  color: var(--ink2);
+}
+
+.chevron {
+  grid-area: chev;
+  display: flex;
+  margin-left: 8px;
+  color: var(--faint);
+}
+
+.trailing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 16px;
+}
+
+/* Under the row, outside the action (photo thumbnails stay their own buttons). */
+.extra {
+  grid-column: 1 / -1;
+  position: relative;
+  padding: 0 16px 12px var(--inset);
+}
+
+/* ---- states ---- */
+
+.interactive {
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .interactive:hover {
+    background: var(--paper);
+  }
+}
+
+/* The selected row (desktop Settings list): the sidebar's active pattern; --line2 on --card would be ≈1.1:1. */
+.action[aria-current] {
+  background: var(--accT);
+}
+
+.action[aria-current] .title {
+  color: var(--accD);
+}
+
+/* An --accT icon square would vanish on the --accT row: every tone's square turns --card there. */
+.action[aria-current] .icon {
+  background: var(--card);
+}
+
+.interactive:active {
+  background: var(--line2);
+}
+
+/* Inset ring: the group's overflow clip never cuts it. */
+.action:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -3px;
+  border-radius: var(--r20);
+}
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: transparent;
+}
+
+/* 320px (Display Zoom): narrower paddings and a 36px icon keep ~108px for «Тренування» next to the toggle. */
+@media (max-width: 359px) {
+  .item {
+    --inset: 12px;
+  }
+
+  .md.withIcon {
+    --inset: 60px;
+  }
+
+  .lg.withIcon {
+    --inset: 74px;
+  }
+
+  .action,
+  .lg .action {
+    padding-left: 12px;
+  }
+
+  .md .icon {
+    width: 36px;
+    height: 36px;
+    margin-right: 12px;
+  }
+
+  .md .icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .trailing {
+    padding-right: 12px;
+  }
+
+  .extra {
+    padding-right: 12px;
+  }
+}

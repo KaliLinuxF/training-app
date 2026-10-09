@@ -35,9 +35,10 @@ export function ProgressBar({
         'aria-valuenow': Math.round(pct),
       }
     : { 'aria-hidden': true };
+  // Block-level spans, not divs: the bar is phrasing content, so it may sit inside a <button> (a ListRow meter).
   return (
-    <div className={cx(s.track, s[size], s[track], className)} {...a11y}>
-      <div className={cx(s.fill, s[tone])} style={{ width: `${pct}%` }} />
-    </div>
+    <span className={cx(s.track, s[size], s[track], className)} {...a11y}>
+      <span className={cx(s.fill, s[tone])} style={{ width: `${pct}%` }} />
+    </span>
   );
 }

@@ -7,8 +7,12 @@ export interface TrainingToggleProps {
   value: boolean | null;
   /** Called on every press (also when the pressed option is already selected). */
   onChange: (trained: boolean) => void;
-  /** `md` — Home card (min-height 50, r14, 15px); `lg` — day sheet (54, r16, 16px). */
-  size?: 'md' | 'lg';
+  /**
+   * - `sm` — two 44×44 glyph buttons «✓» / «✕» (gap 6) next to a list row; names stay «Було» / «Не було»
+   * - `md` — Home card (min-height 50, r14, 15px)
+   * - `lg` — day sheet (54, r16, 16px)
+   */
+  size?: 'sm' | 'md' | 'lg';
   'aria-label'?: string;
   'aria-labelledby'?: string;
   className?: string;
@@ -18,6 +22,7 @@ export interface TrainingToggleProps {
 export function TrainingToggle({ value, onChange, size = 'md', className, ...aria }: TrainingToggleProps) {
   const a11y = useFieldA11y(aria);
   const groupLabel = a11y['aria-label'] ?? (a11y['aria-labelledby'] ? undefined : 'Тренування');
+  const compact = size === 'sm';
   return (
     <div
       role="group"
@@ -31,7 +36,18 @@ export function TrainingToggle({ value, onChange, size = 'md', className, ...ari
         className={cx(s.option, value === true && s.yes)}
         onClick={() => onChange(true)}
       >
-        <span aria-hidden="true">✓</span> Було
+        {compact ? (
+          <>
+            <span className={s.glyph} aria-hidden="true">
+              ✓
+            </span>
+            <span className="visually-hidden">Було</span>
+          </>
+        ) : (
+          <>
+            <span aria-hidden="true">✓</span> Було
+          </>
+        )}
       </button>
       <button
         type="button"
@@ -39,7 +55,18 @@ export function TrainingToggle({ value, onChange, size = 'md', className, ...ari
         className={cx(s.option, value === false && s.no)}
         onClick={() => onChange(false)}
       >
-        <span aria-hidden="true">✕</span> Не було
+        {compact ? (
+          <>
+            <span className={s.glyph} aria-hidden="true">
+              ✕
+            </span>
+            <span className="visually-hidden">Не було</span>
+          </>
+        ) : (
+          <>
+            <span aria-hidden="true">✕</span> Не було
+          </>
+        )}
       </button>
     </div>
   );

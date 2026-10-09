@@ -20,6 +20,14 @@ export { KeyValueRow, type KeyValueRowProps, type KeyValueRowVariant } from './t
 export { DetailRow, type DetailRowProps } from './tiles/DetailRow';
 export { BarRow, type BarRowProps, type BarRowVariant } from './tiles/BarRow';
 
+// Lists, icons & navigation
+export { Icon, type IconProps } from './icons/Icon';
+export { ICON_PATHS, type IconName } from './icons/paths';
+export { ListGroup, type ListGroupProps } from './lists/ListGroup';
+export { ListRow, type ListRowProps, type ListIconTone } from './lists/ListRow';
+export { StatStrip, type StatStripProps, type StatItem } from './tiles/StatStrip';
+export { BACK_STATE_KEY, backState, cameFrom, useBackTo } from './internal/backNav';
+
 // Controls
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './controls/Button';
 export { IconButton, type IconButtonProps } from './controls/IconButton';

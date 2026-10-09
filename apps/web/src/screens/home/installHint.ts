@@ -21,5 +21,4 @@ export function rememberInstallHintDismissed(): void {
 }
 
 /** iPhone/iPad Safari (not the installed app) and the hint was not hidden before. */
-export const shouldShowInstallHint = (): boolean =>
-  isIOS() && !isStandalone() && !isInstallHintDismissed();
+export const shouldShowInstallHint = (): boolean => isIOS() && !isStandalone() && !isInstallHintDismissed();

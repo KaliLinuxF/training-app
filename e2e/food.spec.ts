@@ -161,7 +161,7 @@ test.describe('AI calorie estimate (mocked)', () => {
     );
     await expect(kcal).toHaveValue('640');
     await app.save(sheet);
-    await expect(app.region('Сьогодні')).toContainText('640 ккал');
+    await expect(app.homeRow('Їжа')).toContainText('640 / 1 700 ккал');
 
     await expect
       .poll(async () => {
@@ -180,6 +180,39 @@ test.describe('AI calorie estimate (mocked)', () => {
         borshch: { name: 'Борщ', portion: '300 г', kcal: 180, count: 4, lastUsed: TODAY },
         bread: { name: 'Хліб житній', portion: '2 скибки', kcal: 160, count: 1, lastUsed: TODAY },
       });
+  });
+
+  test('the short «Їжа» sheet from «+» runs the same estimate; «Додати N ккал» still waits for «Зберегти»', async ({
+    app,
+    page,
+    server,
+  }) => {
+    const mocks = await mockFood(page);
+    await app.goto('/');
+    const sheet = await app.record('Їжа');
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveValue(TODAY_FOOD);
+
+    await estimateText(sheet, 'борщ 300 г і дві скибки житнього хліба');
+    const card = estimateCard(sheet);
+    await expect(card).toContainText('Разом320 ккал');
+    await card.getByRole('button', { name: 'Додати 320 ккал' }).click();
+    await expect(card).toBeHidden();
+    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toHaveValue('320');
+    // Nothing is stored before «Зберегти» (owner decision Q12): the text and the kcal can still be fixed.
+    expect((await server.getData()).days[TODAY]?.kcal).toBeNull();
+
+    await app.save(sheet);
+    await expect(app.homeRow('Їжа')).toContainText('320 / 1 700 ккал');
+    await expect
+      .poll(async () => (await server.getData()).days[TODAY])
+      .toEqual({
+        food: `${TODAY_FOOD}\nБорщ (300 г), хліб житній (2 скибки) — 320 ккал`,
+        kcal: 320,
+        trained: null,
+        types: [],
+        notes: '',
+      });
+    expect(mocks.estimates).toEqual([{ date: TODAY, text: 'борщ 300 г і дві скибки житнього хліба' }]);
   });
 
   test('«✨ Порахувати» counts what she typed in «Що я їла» and replaces it with the itemised line', async ({
@@ -938,7 +971,7 @@ test.describe('«Часті страви»', () => {
       `${TODAY_FOOD}\nКава з молоком (1 чашка) — 60 ккал\nКава з молоком (1 чашка) — 60 ккал`,
     );
     await app.save(sheet);
-    await expect(app.region('Сьогодні')).toContainText('120 ккал');
+    await expect(app.homeRow('Їжа')).toContainText('120 / 1 700 ккал');
 
     await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
     await sheet.getByRole('button', { name: 'Змінити' }).click();
@@ -977,7 +1010,7 @@ test.describe('«Часті страви»', () => {
       .getByRole('button', { name: 'Закрити' })
       .click();
     await app.expectSheetClosed();
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     const data = await server.getData();
     expect(data.days[TODAY]?.kcal).toBeNull();

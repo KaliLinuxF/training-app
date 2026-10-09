@@ -8,13 +8,13 @@ const discardQuestion = (page: Page) => page.getByRole('alertdialog', { name: '�
 test.describe('day record', () => {
   test('training + types (incl. a new own type), food, kcal ±50, notes, weight and measurements', async ({
     app,
-    page,
     server,
   }) => {
     await app.goto('/');
     const todayCard = app.region('Сьогодні');
-    await expect(todayCard).toContainText('Записано');
-    await expect(todayCard).toContainText('Тренування · ще не відмічено');
+    await expect(app.homeRow('Їжа')).toContainText('Записано');
+    // The demo seed's Wednesday is a planned workout day, not marked yet.
+    await expect(app.homeRow('Тренування')).toContainText('За планом о 18:00');
 
     await todayCard.getByRole('button', { name: 'Відкрити день' }).click();
     const sheet = app.sheet('Запис дня');
@@ -70,22 +70,20 @@ test.describe('day record', () => {
     await sheet.locator('input[name="waist"]').fill('69,5');
     await sheet.locator('input[name="hips"]').fill('97');
 
+    // The full day shows the notes open (no «+ Нотатка до дня» fold).
+    await expect(sheet.getByRole('button', { name: '+ Нотатка до дня' })).toHaveCount(0);
     await sheet.getByRole('textbox', { name: 'Нотатки' }).fill('Легке тренування, 2 л води');
 
     await app.save(sheet);
 
     const expectHome = async () => {
-      await expect(todayCard).toContainText('Записано');
-      await expect(todayCard).toContainText('1 550 ккал');
-      await expect(todayCard).toContainText('Тренування · Кардіо, Йога');
-      await expect(todayCard.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      );
+      await expect(app.homeRow('Їжа')).toContainText('1 550');
+      await expect(app.homeRow('Тренування')).toContainText('Кардіо, Йога');
+      await expect(app.trainingToggle('Було')).toHaveAttribute('aria-pressed', 'true');
       await expect(app.region('Поточна вага')).toContainText('65,1');
-      await expect(app.region('Поточні заміри')).toContainText('69,5');
-      // The workout reminder for today is done now.
-      await expect(page.getByText('Тренування за планом')).toBeHidden();
+      await expect(app.homeRow('Заміри')).toContainText('69,5');
+      // The workout planned for today is done now.
+      await expect(app.homeRow('Тренування')).not.toContainText('За планом');
     };
     await expectHome();
     await app.reload();
@@ -97,7 +95,7 @@ test.describe('day record', () => {
     await expect(day).toContainText('Вівсянка з бананом, кава');
     await expect(day).toContainText('Борщ, салат');
     await expect(day).toContainText('1 550 ккал');
-    await expect(day).toContainText('✓ Кардіо, Йога');
+    await expect(day).toContainText('Кардіо, Йога');
     await expect(day).toContainText('65,1 кг');
     await expect(day).toContainText('Груди 89,5 · Талія 69,5 · Стегна 97');
     await expect(day).toContainText('Легке тренування, 2 л води');
@@ -105,7 +103,7 @@ test.describe('day record', () => {
 
     // The calendar detail survives a reload too.
     await app.reload();
-    await expect(app.region('14 жовтня 2026')).toContainText('✓ Кардіо, Йога');
+    await expect(app.region('14 жовтня 2026')).toContainText('Кардіо, Йога');
 
     await expect
       .poll(async () => {
@@ -131,20 +129,21 @@ test.describe('day record', () => {
       });
   });
 
-  test('«✕ Не було» on Home marks the day at once and keeps the food', async ({ app, page, server }) => {
+  test('«✕» and «✓» on Home mark the day at once and keep the food; types are added through the row', async ({
+    app,
+    page,
+    server,
+  }) => {
     await app.goto('/');
-    const todayCard = app.region('Сьогодні');
-    await expect(page.getByText('Тренування за планом')).toBeVisible();
+    const workout = app.homeRow('Тренування');
+    await expect(workout).toContainText('За планом о 18:00');
 
-    await todayCard.getByRole('button', { name: 'Не було', exact: true }).click();
+    await app.trainingToggle('Не було').click();
     await expect(app.toast('Відмічено: без тренування')).toBeVisible();
-    await expect(todayCard).toContainText('Тренування · Не було');
-    await expect(todayCard.getByRole('button', { name: 'Не було', exact: true })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    await expect(todayCard).toContainText('Записано');
-    await expect(page.getByText('Тренування за планом')).toBeHidden();
+    await expect(workout).toContainText('Не було');
+    await expect(workout).not.toContainText('За планом');
+    await expect(app.trainingToggle('Не було')).toHaveAttribute('aria-pressed', 'true');
+    await expect(app.homeRow('Їжа')).toContainText('Записано');
     await expect(app.dialogs).toHaveCount(0);
 
     await expect
@@ -152,30 +151,46 @@ test.describe('day record', () => {
       .toEqual({ food: 'Вівсянка з бананом, кава', kcal: null, trained: false, types: [], notes: '' });
 
     await app.reload();
-    await expect(todayCard.getByRole('button', { name: 'Не було', exact: true })).toHaveAttribute(
+    await expect(app.trainingToggle('Не було')).toHaveAttribute('aria-pressed', 'true');
+
+    // «✓ Було» saves at once too; the row then asks for a type.
+    await app.trainingToggle('Було').click();
+    await expect(app.toast('Відмічено: тренування було')).toBeVisible();
+    await expect(app.trainingToggle('Було')).toHaveAttribute('aria-pressed', 'true');
+    await expect(workout).toContainText('Було · додай тип');
+    await expect(app.dialogs).toHaveCount(0);
+    await expect
+      .poll(async () => (await server.getData()).days[TODAY])
+      .toEqual({ food: 'Вівсянка з бананом, кава', kcal: null, trained: true, types: [], notes: '' });
+
+    // The row opens «Тренування» with ✓; a type left unsaved is a change, so closing asks first.
+    await workout.click();
+    const sheet = app.sheet('Тренування');
+    await expect(sheet.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-
-    // «✓ Було» opens the sheet pre-set to «Було»; dropping that draft asks first.
-    await todayCard.getByRole('button', { name: 'Було', exact: true }).click();
-    const sheet = app.sheet('Запис дня');
-    await expect(
-      sheet
-        .getByRole('group', { name: 'Тренування' })
-        .first()
-        .getByRole('button', { name: 'Було', exact: true }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    await sheet.getByRole('button', { name: 'Низ тіла', exact: true }).click();
     await sheet.getByRole('button', { name: 'Закрити' }).click();
     const ask = discardQuestion(page);
     await expect(ask).toContainText('Закрити без збереження?');
     await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
     await expect(ask).toBeHidden();
     await app.expectSheetClosed();
-    await expect(todayCard).toContainText('Тренування · Не було');
+    await expect(workout).toContainText('Було · додай тип');
+
+    // Saved, the type shows in the row.
+    await workout.click();
+    await sheet.getByRole('button', { name: 'Низ тіла', exact: true }).click();
+    await app.save(sheet);
+    await expect(workout).toContainText('Низ тіла');
+    await expect.poll(async () => (await server.getData()).days[TODAY]?.types).toEqual(['Низ тіла']);
   });
 
-  test('saving the day on a device that missed another device’s weigh-in keeps it', async ({ app, server }) => {
+  test('saving the workout on a device that missed another device’s weigh-in keeps it', async ({
+    app,
+    server,
+  }) => {
     await app.goto('/');
     // Meanwhile the phone records today's weigh-in and measurements (this tab has not re-read the server).
     const phone = await server.getData();
@@ -183,8 +198,8 @@ test.describe('day record', () => {
     phone.measures.push({ date: TODAY, chest: 89.5, waist: 69.5, hips: 97.5 });
     await server.importData(phone);
 
-    await app.recordButton().click();
-    const sheet = app.sheet('Запис дня');
+    const sheet = await app.record('Тренування');
+    await sheet.getByRole('button', { name: '+ Нотатка до дня' }).click();
     await sheet.getByRole('textbox', { name: 'Нотатки' }).fill('Сон 8 годин');
     await app.save(sheet);
 
@@ -194,6 +209,7 @@ test.describe('day record', () => {
         return {
           notes: d.days[TODAY]?.notes,
           food: d.days[TODAY]?.food,
+          trained: d.days[TODAY]?.trained,
           weight: d.weights.find((w) => w.date === TODAY)?.kg,
           measure: d.measures.find((m) => m.date === TODAY),
         };
@@ -201,29 +217,42 @@ test.describe('day record', () => {
       .toEqual({
         notes: 'Сон 8 годин',
         food: 'Вівсянка з бананом, кава',
+        trained: null,
         weight: 65.1,
         measure: { date: TODAY, chest: 89.5, waist: 69.5, hips: 97.5 },
       });
   });
 
-  test('quick buttons, the «+» / «Записати день» button and Escape', async ({ app, page }) => {
+  test('the «Що записати?» menu: each item swaps to its sheet; Escape and unsaved changes', async ({
+    app,
+    page,
+  }) => {
     await app.goto('/');
 
-    await app.quickAction('Харчування').click();
-    let sheet = app.sheet('Запис дня');
+    let sheet = await app.record('Повний запис дня');
     await expect(sheet.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
       'aria-pressed',
       'false',
     );
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toBeVisible();
     await page.keyboard.press('Escape');
     await app.expectSheetClosed();
 
-    await app.quickAction('Тренування').click();
+    sheet = await app.record('Їжа');
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveValue('Вівсянка з бананом, кава');
+    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toBeVisible();
+    await expect(sheet.getByRole('group', { name: 'Тренування' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await app.expectSheetClosed();
+
+    sheet = await app.record('Тренування');
     await expect(sheet.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
       'aria-pressed',
-      'true',
+      'false',
     );
-    // Pre-set «Було» is a change: Escape asks; Escape again answers «stay» and keeps the sheet open.
+    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveCount(0);
+    await sheet.getByRole('button', { name: 'Було', exact: true }).click();
+    // A change: Escape asks; Escape again answers «stay» and keeps the sheet open.
     await page.keyboard.press('Escape');
     const ask = discardQuestion(page);
     await expect(ask).toBeVisible();
@@ -234,23 +263,20 @@ test.describe('day record', () => {
     await sheet.getByRole('button', { name: 'Не було', exact: true }).click();
     await expect(sheet.getByRole('button', { name: 'Прес', exact: true })).toBeHidden();
     await app.save(sheet);
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+    await expect(app.homeRow('Тренування')).toContainText('Не було');
 
-    await app.quickAction('Вага').click();
-    sheet = app.sheet('Контрольне зважування');
-    await expect(sheet).toBeVisible();
+    sheet = await app.record('Вага');
     await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Закрити' }).click();
     await app.expectSheetClosed();
 
-    await app.quickAction('Заміри').click();
-    sheet = app.sheet('Заміри тіла');
+    sheet = await app.record('Заміри');
     await expect(sheet.locator('input[name="waist"]')).toBeVisible();
     await expect(sheet.getByRole('textbox', { name: /Вага/ })).toHaveCount(0);
     await sheet.getByRole('button', { name: 'Закрити' }).click();
     await app.expectSheetClosed();
 
     await app.recordButton().click();
-    await expect(app.sheet('Запис дня')).toBeVisible();
+    await expect(app.sheet('Що записати?')).toBeVisible();
   });
 });

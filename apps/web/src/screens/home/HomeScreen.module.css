@@ -1,49 +1,36 @@
 /*
- * Quick buttons: full row, 2 columns on the phone, 4 on desktop (prototype `quickCols`).
- * The switch depends on the row's own width, not the viewport: a button needs ~166px
- * (14+14 padding, 2 border, 36 icon, 12 gap, «Харчування» 15/600 ≈ 88), so 4 columns fit from
- * 4 × 166 + 3 × 10 gaps ≈ 700px. That is the 1280px desktop of the prototype (960px of content),
- * but not a 900–1020px window next to the sidebar, nor the 440px phone column in landscape.
+ * Phone: one column (ContentGrid, gap 14) — header · [offline] · [banner] · hero · «Сьогодні» · week.
+ * Desktop 900–1059px: the same three blocks stacked across both columns.
+ * Desktop ≥ 1060px: hero and week in column 1, «Сьогодні» in column 2 over both rows.
+ * DOM order stays hero → «Сьогодні» → week (focus order); sizes are the phone's.
  */
-.quick {
-  grid-column: 1 / -1;
-  container-type: inline-size;
-}
-
-.quickGrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-@container (min-width: 700px) {
-  .quickGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-/*
- * «Останнє зважування / Наступне…» rows need a ~360px card («Наступне зважування» 146 + gap 12 +
- * «Ср, 30 вересня · 20:30» 163 + padding/border 38). Half of the desktop grid is
- * (viewport − 248 sidebar − 72 padding − 14 gap) / 2, i.e. narrower below ~1060px, where label and
- * value would both wrap — so the card takes the full row there. A no-op in the one-column phone layout.
- */
-@media (max-width: 1059px) {
-  .control {
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .hero,
+  .today,
+  .week {
     grid-column: 1 / -1;
   }
 }
 
-.pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
+@media (min-width: 1060px) and (hover: hover) and (pointer: fine) {
+  .hero {
+    grid-column: 1;
+  }
 
-.triple {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  .today {
+    grid-column: 2;
+    grid-row: span 2;
+  }
+
+  /*
+   * The week spans its row and one empty implicit row after it. A track no single-row item sizes takes the extra
+   * height of «Сьогодні» (which spans the hero's and the week's rows), so the hero row keeps the hero's height and
+   * the week sits 14px under it; otherwise that extra was shared out and left a ~55px hole above the week.
+   */
+  .week {
+    grid-column: 1;
+    grid-row: span 2;
+  }
 }
 
 /* Offline note: a small muted pill tucked under the header. */

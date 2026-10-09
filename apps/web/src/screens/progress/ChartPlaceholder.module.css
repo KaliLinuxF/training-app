@@ -1,22 +1,15 @@
-/* Stands in for a line chart with fewer than two points; same height as the plot it replaces. */
+/* Stands in for a 120px line chart with fewer than two points. */
 .box {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 0 16px;
+  min-height: 120px;
+  padding: 14px 16px;
   border-radius: var(--r14);
   background: var(--paper);
   text-align: center;
-}
-
-.h150 {
-  min-height: 150px;
-}
-
-.h120 {
-  min-height: 120px;
 }
 
 .title {
@@ -29,4 +22,8 @@
   font-size: 13px;
   line-height: 1.35;
   color: var(--muted);
+}
+
+.action {
+  margin-top: 8px;
 }

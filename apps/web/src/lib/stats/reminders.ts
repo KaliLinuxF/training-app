@@ -53,8 +53,77 @@ export const nextMeasurements = (data: AppData, today: ISODate): NextReminder =>
   nextReminderLabel(data.settings.rem.measure, measuredOn(data, today), today);
 
 /**
- * Home banners: reminders scheduled for today whose action is not done yet, in banner order
- * (weigh-in, measurements, workout). Workout counts as done once the day has a yes/no mark.
+ * Where a weekly check (weigh-in / measurements) stands today:
+ * - `done`     — recorded today (wins over everything, even a reminder that is off);
+ * - `off`      — the reminder is switched off;
+ * - `due`      — today is the reminder's weekday and nothing is recorded yet;
+ * - `overdue`  — the scheduled day in the past 6 days was missed (nothing recorded from it up to today)
+ *                after an earlier record, so a brand-new user is never nagged;
+ * - `upcoming` — anything else.
+ */
+export type WeeklyCheckState = 'done' | 'due' | 'overdue' | 'upcoming' | 'off';
+
+export interface WeeklyCheck {
+  state: WeeklyCheckState;
+  /** Next occurrence (`nextReminderLabel` with «done today» = a record exists today). */
+  next: NextReminder;
+  /** The missed scheduled day when `overdue`, else `null`. */
+  missed: ISODate | null;
+}
+
+/**
+ * Home «Вага» / «Заміри» row state from the reminder and the dates that have a record.
+ * Rule order: done → off → due → overdue → upcoming (see `WeeklyCheckState`).
+ */
+export function weeklyCheck(
+  reminder: WeeklyReminder,
+  recordDates: readonly ISODate[],
+  today: ISODate,
+): WeeklyCheck {
+  const doneToday = recordDates.includes(today);
+  const next = nextReminderLabel(reminder, doneToday, today);
+  if (doneToday) return { state: 'done', next, missed: null };
+  if (!reminder.on) return { state: 'off', next, missed: null };
+  if (weekdayOf(today) === reminder.day) return { state: 'due', next, missed: null };
+  const missed = lastScheduledBefore(reminder, today);
+  if (
+    missed !== null &&
+    !recordDates.some((d) => d >= missed && d <= today) &&
+    recordDates.some((d) => d < missed)
+  ) {
+    return { state: 'overdue', next, missed };
+  }
+  return { state: 'upcoming', next, missed: null };
+}
+
+/** The latest day in [today − 6, today − 1] that falls on the reminder's weekday (`null` for an invalid weekday). */
+function lastScheduledBefore(reminder: WeeklyReminder, today: ISODate): ISODate | null {
+  for (let i = 1; i <= 6; i++) {
+    const date = addDays(today, -i);
+    if (weekdayOf(date) === reminder.day) return date;
+  }
+  return null;
+}
+
+/** Home «Вага» row: the weigh-in reminder against the weigh-in dates. */
+export const weighCheck = (data: AppData, today: ISODate): WeeklyCheck =>
+  weeklyCheck(
+    data.settings.rem.weigh,
+    data.weights.map((w) => w.date),
+    today,
+  );
+
+/** Home «Заміри» row: the measurements reminder against the measurement dates. */
+export const measureCheck = (data: AppData, today: ISODate): WeeklyCheck =>
+  weeklyCheck(
+    data.settings.rem.measure,
+    data.measures.map((m) => m.date),
+    today,
+  );
+
+/**
+ * Reminders scheduled for today whose action is not done yet, in order (weigh-in, measurements, workout).
+ * Workout counts as done once the day has a yes/no mark.
  */
 export function dueReminders(data: AppData, today: ISODate): ReminderKind[] {
   const { rem } = data.settings;

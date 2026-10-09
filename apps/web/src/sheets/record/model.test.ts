@@ -1,6 +1,7 @@
 import { applyOps, emptyData, type AppData, type FoodUse } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import type { FoodAdd } from '@/features/food';
+import type { SheetMode } from '@/store/ui';
 import { FIELD_ERRORS } from '../validation';
 import {
   addCustomType,
@@ -9,7 +10,11 @@ import {
   foodUseOps,
   hasRecordErrors,
   initRecordDraft,
+  isCaptureMode,
   isRecordDirty,
+  isRecordMode,
+  MENU_HEADING,
+  RECORD_HEADINGS,
   recordOps,
   recordSections,
   removePhoto,
@@ -300,9 +305,194 @@ describe('recordOps (prototype save, per changed field)', () => {
   });
 
   it('sections per mode', () => {
-    expect(recordSections('day')).toEqual({ day: true, weight: true, measure: true });
-    expect(recordSections('weight')).toEqual({ day: false, weight: true, measure: false });
-    expect(recordSections('measure')).toEqual({ day: false, weight: false, measure: true });
+    expect(recordSections('day')).toEqual({ workout: true, food: true, notes: true, weight: true, measure: true });
+    expect(recordSections('food')).toEqual({ workout: false, food: true, notes: false, weight: false, measure: false });
+    expect(recordSections('workout')).toEqual({ workout: true, food: false, notes: true, weight: false, measure: false });
+    expect(recordSections('weight')).toEqual({ workout: false, food: false, notes: false, weight: true, measure: false });
+    expect(recordSections('measure')).toEqual({ workout: false, food: false, notes: false, weight: false, measure: true });
+  });
+
+  it('returns a copy of the sections table', () => {
+    const show = recordSections('food');
+    show.weight = true;
+    expect(recordSections('food').weight).toBe(false);
+  });
+});
+
+describe('modes', () => {
+  it('knows the record and capture modes', () => {
+    const record: SheetMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
+    for (const mode of record) {
+      expect(isRecordMode(mode)).toBe(true);
+      expect(isCaptureMode(mode)).toBe(true);
+    }
+    expect(isRecordMode('menu')).toBe(false);
+    expect(isCaptureMode('menu')).toBe(true);
+    for (const mode of ['setup', 'install'] as const) {
+      expect(isRecordMode(mode)).toBe(false);
+      expect(isCaptureMode(mode)).toBe(false);
+    }
+  });
+
+  it('names every sheet', () => {
+    expect(MENU_HEADING).toBe('Що записати?');
+    expect(RECORD_HEADINGS).toEqual({
+      day: 'Запис дня',
+      food: 'Їжа',
+      workout: 'Тренування',
+      weight: 'Контрольне зважування',
+      measure: 'Заміри тіла',
+    });
+  });
+});
+
+describe('short sheets («Їжа», «Тренування»)', () => {
+  const date = '2026-10-09';
+
+  it('validation skips the blocks a short sheet hides', () => {
+    const long = 'а'.repeat(5001);
+    // «Їжа» ignores over-long notes and an over-limit type list, but checks its own text and kcal.
+    const food = validateRecord(blank({ notes: long, trained: true, types: Array.from({ length: 21 }, (_, i) => `${i}`) }), 'food');
+    expect(hasRecordErrors(food)).toBe(false);
+    expect(validateRecord(blank({ food: long }), 'food').food).toBe(FIELD_ERRORS.text);
+    expect(validateRecord(blank({ kcal: '25000' }), 'food').kcal).toBe(FIELD_ERRORS.kcal);
+    // «Тренування» ignores kcal 25 000, an over-long food text, a bad weight and measurements…
+    const workout = validateRecord(blank({ kcal: '25000', food: long, weight: '5', chest: '5' }), 'workout');
+    expect(hasRecordErrors(workout)).toBe(false);
+    // …but checks the notes and the types.
+    expect(validateRecord(blank({ notes: long }), 'workout').notes).toBe(FIELD_ERRORS.text);
+    const types = Array.from({ length: 21 }, (_, i) => `Тип ${i}`);
+    expect(validateRecord(blank({ trained: true, types }), 'workout').types).toBe(FIELD_ERRORS.types);
+  });
+
+  it('food mode writes the food, kcal and photos and keeps the stored workout and notes', () => {
+    const data = fixture();
+    data.days[date] = { food: 'Омлет', kcal: 400, trained: true, types: ['Кардіо'], notes: 'Сон 8 год' };
+    const ops = save(data, date, 'food', (d) => ({
+      ...d,
+      food: 'Омлет\nБорщ',
+      kcal: '820',
+      photos: ['photo_aaaaaaaaaaaaaaaa'],
+    }));
+    expect(ops).toEqual([
+      {
+        kind: 'day.put',
+        date,
+        value: {
+          food: 'Омлет\nБорщ',
+          kcal: 820,
+          trained: true,
+          types: ['Кардіо'],
+          notes: 'Сон 8 год',
+          photos: ['photo_aaaaaaaaaaaaaaaa'],
+        },
+      },
+    ]);
+    expect(ops.some((op) => op.kind.startsWith('weight') || op.kind.startsWith('measure'))).toBe(false);
+  });
+
+  it('food mode never writes a weigh-in or measurements, whatever the draft holds', () => {
+    const ops = save(emptyData(), date, 'food', (d) => ({ ...d, kcal: '500', weight: '64', waist: '70', notes: 'x' }));
+    expect(ops).toEqual([
+      { kind: 'day.put', date, value: { food: '', kcal: 500, trained: null, types: [], notes: '' } },
+    ]);
+  });
+
+  it('workout mode with the push patch and types keeps the food, kcal and photos', () => {
+    const data = fixture();
+    const baseline = initRecordDraft(data, TODAY, 'workout');
+    const draft = { ...initRecordDraft(data, TODAY, 'workout', { trained: true }), types: ['Кардіо', 'Прес'] };
+    expect(recordOps({ baseline, draft, data, date: TODAY, mode: 'workout' })).toEqual([
+      {
+        kind: 'day.put',
+        date: TODAY,
+        value: {
+          food: 'Вівсянка з бананом, кава',
+          kcal: 1650,
+          trained: true,
+          types: ['Кардіо', 'Прес'],
+          notes: 'ок',
+          photos: ['photo_aaaaaaaaaaaaaaaa'],
+        },
+      },
+    ]);
+  });
+
+  it('a stale device: the food logged elsewhere survives a workout save', () => {
+    const stale = emptyData();
+    const fresh = applyOps(stale, [
+      {
+        kind: 'day.put',
+        date,
+        value: { food: 'Омлет', kcal: 1500, trained: null, types: [], notes: '', photos: ['photo_aaaaaaaaaaaaaaaa'] },
+      },
+    ]);
+    const ops = save(stale, date, 'workout', (d) => ({ ...d, trained: true, types: ['Кардіо'], notes: 'Легко' }), fresh);
+    expect(ops).toEqual([
+      {
+        kind: 'day.put',
+        date,
+        value: {
+          food: 'Омлет',
+          kcal: 1500,
+          trained: true,
+          types: ['Кардіо'],
+          notes: 'Легко',
+          photos: ['photo_aaaaaaaaaaaaaaaa'],
+        },
+      },
+    ]);
+  });
+
+  it('a stale device: a workout and notes saved elsewhere survive a food save', () => {
+    const stale = emptyData();
+    const fresh = applyOps(stale, [
+      { kind: 'day.put', date, value: { food: '', kcal: null, trained: true, types: ['Йога'], notes: 'Легко' } },
+    ]);
+    expect(save(stale, date, 'food', (d) => ({ ...d, food: 'Борщ', kcal: '300' }), fresh)).toEqual([
+      { kind: 'day.put', date, value: { food: 'Борщ', kcal: 300, trained: true, types: ['Йога'], notes: 'Легко' } },
+    ]);
+  });
+
+  it('«✕» in workout mode drops the stored types', () => {
+    const data = fixture();
+    const ops = save(data, TODAY, 'workout', (d) => ({ ...d, trained: false, types: [] }));
+    expect(ops).toEqual([
+      {
+        kind: 'day.put',
+        date: TODAY,
+        value: {
+          food: 'Вівсянка з бананом, кава',
+          kcal: 1650,
+          trained: false,
+          types: [],
+          notes: 'ок',
+          photos: ['photo_aaaaaaaaaaaaaaaa'],
+        },
+      },
+    ]);
+  });
+
+  it('unchanged short sheets write nothing', () => {
+    for (const mode of ['food', 'workout'] as const) {
+      expect(save(fixture(), TODAY, mode, (d) => d)).toEqual([]);
+      expect(save(fixture(), '2026-10-03', mode, (d) => d)).toEqual([]);
+      expect(save(emptyData(), date, mode, (d) => d)).toEqual([]);
+    }
+  });
+
+  it('applies the open patch only in sheets that show the workout', () => {
+    const data = fixture();
+    expect(initRecordDraft(data, '2026-10-03', 'workout', { trained: true }).trained).toBe(true);
+    expect(initRecordDraft(data, '2026-10-03', 'day', { trained: true }).trained).toBe(true);
+    for (const mode of ['food', 'weight', 'measure'] as const) {
+      expect(initRecordDraft(data, '2026-10-03', mode, { trained: true }).trained).toBe(false);
+    }
+    // So a patched food sheet is not dirty and saves nothing.
+    const baseline = initRecordDraft(data, '2026-10-03', 'food');
+    const draft = initRecordDraft(data, '2026-10-03', 'food', { trained: true });
+    expect(isRecordDirty(baseline, draft)).toBe(false);
+    expect(recordOps({ baseline, draft, data, date: '2026-10-03', mode: 'food' })).toEqual([]);
   });
 });
 

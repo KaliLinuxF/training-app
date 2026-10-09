@@ -91,6 +91,8 @@ describe('parsePushPayload', () => {
 describe('safeAppPath', () => {
   it('keeps app-relative paths with a query', () => {
     expect(safeAppPath('/?sheet=day&trained=1')).toBe('/?sheet=day&trained=1');
+    expect(safeAppPath('/settings/reminders')).toBe('/settings/reminders');
+    // Test notifications delivered before the move still open (the app redirects them).
     expect(safeAppPath('/reminders')).toBe('/reminders');
   });
 

@@ -1,0 +1,12 @@
+/* «Їжа»: the food text, photos and FoodAssist without a field label, spaced like a <Field>. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* «+ Нотатка до дня»: a left-aligned text button (the kit ghost keeps a 45px tap area). */
+.addNote {
+  align-self: flex-start;
+}

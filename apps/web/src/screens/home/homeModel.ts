@@ -1,7 +1,7 @@
 /**
- * Home «Головна» view model: a pure port of the prototype's `renderVals` home values
- * (todayLabel, greeting, banners, hero, today card, week tiles, measurements, control rows).
- * Everything is formatted here, so the components only lay the strings out.
+ * Home «Головна» view model (redesign A «Чек-лист дня»): header, at most one banner, the compact hero,
+ * the four «Сьогодні» rows (Їжа, Тренування, Вага, Заміри) and the week row.
+ * Every visible string and every accessible name is formatted here, so the components only lay them out.
  */
 import {
   dLong,
@@ -9,36 +9,47 @@ import {
   f0,
   f1,
   fN,
-  MINUS,
-  ok,
   sgn,
+  weekdayOf,
   type AppData,
   type DayEntry,
   type ISODate,
+  type MeasureEntry,
   type MeasureKey,
-  type ReminderKind,
+  type WeeklyReminder,
 } from '@legko/shared';
-import { kcalGoalView, type KcalGoalView } from '@/features/goal';
+import { kcalGoalView } from '@/features/goal';
 import {
-  changeTone,
-  dueReminders,
+  MEASURE_LABELS,
+  MEASURE_PARAMS,
+  measureCheck,
   measureSummary,
-  nextMeasurements,
-  nextWeighIn,
   weekSummary,
+  weighCheck,
   weightSummary,
-  type ChangeTone,
+  type WeeklyCheck,
 } from '@/lib/stats';
 import { greeting } from '@/lib/useToday';
 import type { SheetMode, SheetPatch } from '@/store/ui';
 
-/** Which sheet a button opens for today. */
+/** The four action rows of «Сьогодні». */
+export type HomeRowId = 'food' | 'workout' | 'weight' | 'measure';
+
+/** Which sheet a row or banner opens for today. */
 export interface HomeAction {
   mode: SheetMode;
   patch?: SheetPatch;
 }
 
-export type HomeBannerId = 'setup' | ReminderKind | 'install';
+/** Each «Сьогодні» row opens its short sheet (no patch: the ✓ / ✕ save inline). */
+export const HOME_ROW_ACTIONS: Readonly<Record<HomeRowId, HomeAction>> = {
+  food: { mode: 'food' },
+  workout: { mode: 'workout' },
+  weight: { mode: 'weight' },
+  measure: { mode: 'measure' },
+};
+
+export type HomeBannerId = 'setup' | 'install';
 
 export interface HomeBanner {
   id: HomeBannerId;
@@ -46,85 +57,94 @@ export interface HomeBanner {
   sub: string;
   cta: string;
   action: HomeAction;
-  /** Has a «Сховати» button (the install hint). */
+  /** Has a «Сховати» ✕ (the install hint). */
   dismissible: boolean;
 }
 
 export interface HomeHero {
   /** Latest weigh-in, «65,4» | «—». */
   current: string;
-  /** Solid badge text: signed change since the start, «−3,0 кг» | «— кг». */
-  badge: string;
+  /** Signed change since the start, «−2,9 кг»; `null` without weigh-ins (no badge). */
+  badge: string | null;
+  /** Screen-reader prefix of the badge: «Втрачено від старту» | «Набрано від старту» | «Зміна від старту». */
+  badgeSr: string;
   /** Progress bar width, 0–100. */
   pct: number;
-  /** «45%» */
-  pctLabel: string;
-  /** Start weight, «68,4» | «—». */
-  start: string;
-  /** Goal weight, «60,0». */
-  goal: string;
-  /** «Втрачено» tile, «3,0 кг» | «— кг» (a gain shows as «−0,4 кг»). */
-  lost: string;
-  /** «До цілі» tile, «5,4 кг» | «— кг». */
+  /** «35%»; '' without weigh-ins. */
+  progress: string;
+  /** Still to lose, «5,4 кг». */
   left: string;
+  /** «Ціль 60,0 кг» (shown instead of the progress line before the first weigh-in). */
+  goal: string;
+  /** Weigh-ins exist and the goal weight is reached. */
+  reached: boolean;
 }
 
-export interface HomeToday {
-  /** «Записано» | «Не записано» */
-  food: string;
-  /** «1 650 ккал» | «—» */
-  kcal: string;
-  /** Today's kcal against settings.kcalGoal (bar + «Залишилось …» / «Перевищено …»). */
-  goal: KcalGoalView;
+export type HomeFoodState = 'empty' | 'recorded' | 'ok' | 'reached' | 'over';
+
+export interface HomeFoodRow {
+  state: HomeFoodState;
+  /** «1 650» | «—» | «Записано». */
+  value: string;
+  /** « / 1 700 ккал» (13 muted, after the number); `null` for «Записано». */
+  goal: string | null;
+  /** Decorative bar under the title (mint ≤ goal, lavender over); `null` for «Записано». */
+  meter: { value: number; tone: 'acc' | 'acc2' } | null;
+  /** «Калорії не вказані» (food recorded without kcal), else `null`. */
+  sub: string | null;
+  /** Accessible name, «Їжа: …». */
+  label: string;
+}
+
+export interface HomeTrainingRow {
+  /** Pressed option of the inline ✓ / ✕. */
   trained: boolean | null;
-  /** Types joined, «Було», «Не було» or «ще не відмічено». */
-  training: string;
-}
-
-export interface HomeStat {
-  id: 'trainings' | 'kcal' | 'weight' | 'waist';
+  /** «За планом о 18:00» | «Ще не відмічено» | «Кардіо, Прес» | «Було · додай тип» | «Не було». */
+  sub: string;
+  /** `undefined` = the row's default sub colour. */
+  subTone: 'muted' | 'acc' | undefined;
+  /** A planned workout day that is not marked yet. */
+  due: boolean;
+  /** Accessible name, «Тренування: …». */
   label: string;
-  value: string;
-  /** Muted suffix («з 3», «ккал»); omitted when there is nothing to add. */
-  unit?: string;
-  tone: ChangeTone;
 }
 
-export interface HomeMeasureTile {
-  key: MeasureKey;
+export interface HomeScheduleRow {
+  /** «12 жовтня — 65,4 кг» | «Груди 90 · Талія 70 · Стегна 98» | «Сьогодні — 65,0 кг» | «Ще немає зважувань». */
+  sub: string;
+  /** «✓ » (done today, mint) or «Пропущено · » (missed, lavender) before the sub. */
+  prefix: { text: string; tone: 'acc' | 'acc2' } | null;
+  /** Right side: a «Сьогодні» pill, a date without the time, or «вимкнено». */
+  next: { kind: 'due' | 'date' | 'off'; text: string };
+  /** Accessible name, «Вага: …» / «Заміри: …» (with the reminder time). */
   label: string;
-  /** Latest value, «70,5» | «—». */
-  value: string;
-  /** Change since the first value, «−4 см» | «—». */
-  delta: string;
-  /** `false` when `delta` is the «—» placeholder (shown faint instead of mint). */
-  hasDelta: boolean;
 }
 
-export interface HomeMeasures {
-  /** Date of the latest measurements, «6 жовтня», or «ще немає». */
-  date: string;
-  tiles: HomeMeasureTile[];
-}
-
-export interface HomeControlRow {
+export interface HomeWeek {
+  /** «2 з 3 трен. · сер. 1 795 ккал» */
+  text: string;
+  /** «Тиждень: 2 з 3 тренувань, середня калорійність 1 795 ккал. Відкрити прогрес» */
   label: string;
-  value: string;
+  href: '/progress?period=week';
 }
 
 export interface HomeModel {
-  /** «Субота, 10 жовтня» */
+  /** «Середа, 14 жовтня» */
   todayLabel: string;
   /** «Доброго ранку» */
   greeting: string;
   /** Show the «Офлайн» note under the header. */
   offline: boolean;
-  banners: HomeBanner[];
+  /** At most one: setup (not onboarded) > install hint > none. */
+  banner: HomeBanner | null;
   hero: HomeHero;
-  today: HomeToday;
-  week: HomeStat[];
-  measures: HomeMeasures;
-  control: HomeControlRow[];
+  rows: {
+    food: HomeFoodRow;
+    workout: HomeTrainingRow;
+    weight: HomeScheduleRow;
+    measure: HomeScheduleRow;
+  };
+  week: HomeWeek;
 }
 
 export interface HomeModelOptions {
@@ -135,168 +155,271 @@ export interface HomeModelOptions {
   showInstallHint: boolean;
 }
 
-export interface QuickActionModel {
-  label: string;
-  tone: 'acc' | 'acc2' | 'neutral';
-  action: HomeAction;
-}
-
-/** The four «+ Додати …» buttons. */
-export const QUICK_ACTIONS: readonly QuickActionModel[] = [
-  { label: 'Харчування', tone: 'acc2', action: { mode: 'day' } },
-  { label: 'Тренування', tone: 'acc', action: { mode: 'day', patch: { trained: true } } },
-  { label: 'Вага', tone: 'neutral', action: { mode: 'weight' } },
-  { label: 'Заміри', tone: 'neutral', action: { mode: 'measure' } },
-];
-
-export const NO_TRAINING_TOAST = 'Відмічено: без тренування';
 export const OFFLINE_NOTE = 'Офлайн · зміни збережено на телефоні';
 
 const DASH = '—';
-const EMPTY_DAY: DayEntry = { food: '', kcal: null, trained: null, types: [], notes: '' };
+/** No-break space (U+00A0). */
+const NB = '\u00a0';
+const WEEK_HREF = '/progress?period=week';
 
-/** The day after «✕ Не було»: no workout, everything else (food, kcal, notes, photos) kept. */
-export function markNoTraining(entry: DayEntry | undefined): DayEntry {
-  return { ...EMPTY_DAY, ...entry, trained: false, types: [] };
+const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** «2 тренування», «5 тренувань» (1 / 21 тренування, 2–4 тренування, 0 / 5+ / 11–14 тренувань). */
+function trainingsWord(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  return mod10 >= 1 && mod10 <= 4 && !(mod100 >= 11 && mod100 <= 14) ? 'тренування' : 'тренувань';
 }
 
-/** Like `f`, but a negative value gets the typographic minus (and no «+» for positives). */
-function minusOnly(n: number, f: (x: number) => string): string {
-  const text = f(Math.abs(n));
-  return n < 0 && /[1-9]/.test(text) ? MINUS + text : text;
-}
+/** After «з N» (genitive): «з 1 тренування», «з 3 тренувань». */
+const ofTrainingsWord = (n: number): string => (n % 10 === 1 && n % 100 !== 11 ? 'тренування' : 'тренувань');
 
-function buildBanners(data: AppData, today: ISODate, showInstallHint: boolean): HomeBanner[] {
-  const { rem, onboarded } = data.settings;
-  const banners: HomeBanner[] = [];
-  if (!onboarded) {
-    banners.push({
+function buildBanner(data: AppData, showInstallHint: boolean): HomeBanner | null {
+  if (!data.settings.onboarded) {
+    return {
       id: 'setup',
       title: 'Почнімо',
-      sub: 'Запиши стартову вагу й ціль — прогрес рахуватиметься сам',
+      // Short on purpose: the kit's compact banner clamps the sub to 2 lines, and next to the wide «Налаштувати»
+      // the text column is ~115–185px on the phone (320–390). The longer sentence needed a 3rd line and was cut.
+      sub: 'Запиши стартову вагу й ціль',
       cta: 'Налаштувати',
       action: { mode: 'setup' },
       dismissible: false,
-    });
-  }
-  for (const kind of onboarded ? dueReminders(data, today) : []) {
-    if (kind === 'weigh') {
-      banners.push({
-        id: kind,
-        title: 'Контрольне зважування',
-        sub: `Сьогодні о ${rem.weigh.time}`,
-        cta: 'Записати',
-        action: { mode: 'weight' },
-        dismissible: false,
-      });
-    } else if (kind === 'measure') {
-      banners.push({
-        id: kind,
-        title: 'Заміри тіла',
-        sub: `Сьогодні о ${rem.measure.time}`,
-        cta: 'Записати',
-        action: { mode: 'measure' },
-        dismissible: false,
-      });
-    } else {
-      banners.push({
-        id: kind,
-        title: 'Тренування за планом',
-        sub: `Сьогодні о ${rem.workout.time} — відміть, як пройде`,
-        cta: 'Відмітити',
-        action: { mode: 'day', patch: { trained: true } },
-        dismissible: false,
-      });
-    }
+    };
   }
   if (showInstallHint) {
-    banners.push({
+    return {
       id: 'install',
       title: 'Встанови Легко на iPhone',
       sub: 'Так працюватимуть нагадування',
       cta: 'Як?',
       action: { mode: 'install' },
       dismissible: true,
-    });
+    };
   }
-  return banners;
+  return null;
 }
 
 function buildHero(data: AppData): HomeHero {
   const w = weightSummary(data);
+  const lost = w.lost;
   return {
     current: w.last ? f1(w.last.kg) : DASH,
-    badge: `${w.lost !== null ? sgn(-w.lost, f1) : DASH} кг`,
+    badge: lost !== null ? `${sgn(-lost, f1)} кг` : null,
+    badgeSr:
+      lost !== null && lost > 0.04
+        ? 'Втрачено від старту'
+        : lost !== null && lost < -0.04
+          ? 'Набрано від старту'
+          : 'Зміна від старту',
     pct: w.pct,
-    pctLabel: `${Math.round(w.pct)}%`,
-    start: w.first ? f1(w.first.kg) : DASH,
-    goal: f1(w.goal),
-    lost: `${w.lost !== null ? minusOnly(w.lost, f1) : DASH} кг`,
-    left: `${w.left !== null ? f1(w.left) : DASH} кг`,
+    progress: w.last ? `${Math.round(w.pct)}%` : '',
+    left: `${f1(w.left)} кг`,
+    goal: `Ціль ${f1(w.goal)} кг`,
+    reached: w.last !== null && w.left === 0,
   };
 }
 
-function trainingLabel(entry: DayEntry | undefined): string {
-  if (entry?.trained === true) return entry.types.join(', ') || 'Було';
-  if (entry?.trained === false) return 'Не було';
-  return 'ще не відмічено';
-}
+const hasFood = (e: DayEntry | undefined): boolean =>
+  !!e && (e.food.trim() !== '' || (e.photos?.length ?? 0) > 0);
 
-function buildToday(data: AppData, today: ISODate): HomeToday {
+function buildFood(data: AppData, today: ISODate): HomeFoodRow {
   const entry = data.days[today];
-  const hasFood = !!entry && (entry.food.trim() !== '' || (entry.photos?.length ?? 0) > 0);
+  const kcalGoal = data.settings.kcalGoal;
+  const view = kcalGoalView(entry?.kcal, kcalGoal);
+  const goal = ` / ${f0(kcalGoal)} ккал`;
+  if (view.state === 'empty') {
+    if (hasFood(entry)) {
+      return {
+        state: 'recorded',
+        value: 'Записано',
+        goal: null,
+        meter: null,
+        sub: 'Калорії не вказані',
+        label: `Їжа: записано, калорії не вказані. ${view.label}`,
+      };
+    }
+    return {
+      state: 'empty',
+      value: DASH,
+      goal,
+      meter: { value: 0, tone: 'acc2' },
+      sub: null,
+      label: `Їжа: ще нічого не записано. ${view.label}`,
+    };
+  }
   return {
-    food: hasFood ? 'Записано' : 'Не записано',
-    kcal: entry && ok(entry.kcal) ? `${f0(entry.kcal)} ккал` : DASH,
-    goal: kcalGoalView(entry?.kcal, data.settings.kcalGoal),
-    trained: entry?.trained ?? null,
-    training: trainingLabel(entry),
+    state: view.state,
+    value: f0(entry?.kcal),
+    goal,
+    meter: { value: view.pct, tone: view.state === 'over' ? 'acc' : 'acc2' },
+    sub: null,
+    label: `Їжа: ${view.label}`,
   };
 }
 
-function buildWeek(data: AppData, today: ISODate): HomeStat[] {
-  const wk = weekSummary(data, today);
-  return [
-    {
-      id: 'trainings',
-      label: 'Тренувань',
-      value: String(wk.trainings),
-      unit: wk.plannedPerWeek > 0 ? `з ${wk.plannedPerWeek}` : undefined,
-      tone: 'flat',
-    },
-    { id: 'kcal', label: 'Сер. калорії', value: f0(wk.avgKcal), unit: 'ккал', tone: 'flat' },
-    {
-      id: 'weight',
-      label: 'Зміна ваги',
-      value: sgn(wk.weightChange, f1),
-      unit: 'кг',
-      tone: changeTone(wk.weightChange),
-    },
-    { id: 'waist', label: 'Талія', value: sgn(wk.waistChange), unit: 'см', tone: changeTone(wk.waistChange) },
-  ];
+function buildWorkout(data: AppData, today: ISODate): HomeTrainingRow {
+  const entry = data.days[today];
+  const { onboarded, rem } = data.settings;
+  const trained = entry?.trained ?? null;
+  let sub: string;
+  let subTone: HomeTrainingRow['subTone'];
+  let due = false;
+  let label: string;
+  if (trained === true) {
+    const types = entry?.types.join(', ') ?? '';
+    sub = types || 'Було · додай тип';
+    subTone = types ? undefined : 'acc';
+    label = types ? `Тренування: ${types}` : `Тренування: ${lowerFirst(sub)}`;
+  } else if (trained === false) {
+    sub = 'Не було';
+    subTone = undefined;
+    label = `Тренування: ${lowerFirst(sub)}`;
+  } else if (onboarded && rem.workout.on && rem.workout.days.includes(weekdayOf(today))) {
+    sub = `За планом о ${rem.workout.time}`;
+    subTone = 'acc';
+    due = true;
+    label = `Тренування: ${lowerFirst(sub)}`;
+  } else {
+    sub = 'Ще не відмічено';
+    subTone = 'muted';
+    label = `Тренування: ${lowerFirst(sub)}`;
+  }
+  return { trained, sub, subTone, due, label };
 }
 
-function buildMeasures(data: AppData): HomeMeasures {
-  const m = measureSummary(data);
+/** Wording of the weigh-in / measurement rows. */
+interface ScheduleCopy {
+  title: string;
+  /** «зважування» / «заміри» — what is due today. */
+  action: string;
+  /** «Останнє зважування » / «Останні заміри — » — before the last record (separator included). */
+  last: string;
+  /** «Наступне» / «Наступні» — before the next date. */
+  next: string;
+  /** «Ще немає зважувань» / «Ще немає замірів». */
+  none: string;
+}
+
+const WEIGH_COPY: ScheduleCopy = {
+  title: 'Вага',
+  action: 'зважування',
+  last: 'Останнє зважування ',
+  next: 'Наступне',
+  none: 'Ще немає зважувань',
+};
+
+const MEASURE_COPY: ScheduleCopy = {
+  title: 'Заміри',
+  action: 'заміри',
+  last: 'Останні заміри — ',
+  next: 'Наступні',
+  none: 'Ще немає замірів',
+};
+
+/**
+ * One weekly row. `lastText` is the latest record («12 жовтня — 65,4 кг», `null` = none yet), `todayText`
+ * today's record («65,0 кг»). Until the first-run setup is done, due / overdue are shown as plain upcoming.
+ */
+function buildSchedule(
+  copy: ScheduleCopy,
+  reminder: WeeklyReminder,
+  check: WeeklyCheck,
+  onboarded: boolean,
+  lastText: string | null,
+  todayText: string | null,
+): HomeScheduleRow {
+  const state = !onboarded && (check.state === 'due' || check.state === 'overdue') ? 'upcoming' : check.state;
+  const { next } = check;
+  const nextView: HomeScheduleRow['next'] =
+    state === 'due'
+      ? { kind: 'due', text: 'Сьогодні' }
+      : next.date === null
+        ? { kind: 'off', text: next.label }
+        : { kind: 'date', text: next.label };
+  const nextSentence = next.date === null ? 'Нагадування вимкнено' : `${copy.next}: ${next.text}`;
+  const lastSentence = lastText !== null ? `${copy.last}${lastText}` : copy.none;
+
+  if (state === 'done' && todayText !== null) {
+    return {
+      sub: `Сьогодні — ${todayText}`,
+      prefix: { text: '✓ ', tone: 'acc2' },
+      next: nextView,
+      label: `${copy.title}: сьогодні — ${todayText}. ${nextSentence}`,
+    };
+  }
+  const sub = lastText ?? copy.none;
+  if (state === 'due') {
+    return {
+      sub,
+      prefix: null,
+      next: nextView,
+      label: `${copy.title}: ${copy.action} сьогодні о ${reminder.time}. ${lastSentence}`,
+    };
+  }
+  if (state === 'overdue' && check.missed !== null) {
+    return {
+      sub,
+      prefix: { text: 'Пропущено · ', tone: 'acc' },
+      next: nextView,
+      label: `${copy.title}: пропущено ${copy.action} ${dLong(check.missed)}. ${lastSentence}. ${nextSentence}`,
+    };
+  }
   return {
-    date: m.lastEntry ? dLong(m.lastEntry.date) : 'ще немає',
-    tiles: m.params.map((p) => ({
-      key: p.key,
-      label: p.label,
-      value: fN(p.last),
-      delta: p.delta !== null ? `${sgn(p.delta)} см` : DASH,
-      hasDelta: p.delta !== null,
-    })),
+    sub,
+    prefix: null,
+    next: nextView,
+    label: `${copy.title}: ${lowerFirst(lastSentence)}. ${nextSentence}`,
   };
 }
 
-function buildControl(data: AppData, today: ISODate): HomeControlRow[] {
+function buildWeight(data: AppData, today: ISODate): HomeScheduleRow {
   const last = weightSummary(data).last;
-  return [
-    { label: 'Останнє зважування', value: last ? `${dLong(last.date)} — ${f1(last.kg)} кг` : DASH },
-    { label: 'Наступне зважування', value: nextWeighIn(data, today).text },
-    { label: 'Наступні заміри', value: nextMeasurements(data, today).text },
-  ];
+  const todays = data.weights.find((w) => w.date === today);
+  return buildSchedule(
+    WEIGH_COPY,
+    data.settings.rem.weigh,
+    weighCheck(data, today),
+    data.settings.onboarded,
+    last ? `${dLong(last.date)} — ${f1(last.kg)} кг` : null,
+    todays ? `${f1(todays.kg)} кг` : null,
+  );
+}
+
+/** «Груди 90 · Талія 70 · Стегна 98» — only the parameters that have a value; `null` when none. */
+function measureValues(values: readonly { key: MeasureKey; value: number | null }[]): string | null {
+  const parts = values.filter((p) => p.value !== null).map((p) => `${MEASURE_LABELS[p.key]} ${fN(p.value)}`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function buildMeasure(data: AppData, today: ISODate): HomeScheduleRow {
+  const latest = measureValues(measureSummary(data).params.map((p) => ({ key: p.key, value: p.last })));
+  const todays: MeasureEntry | undefined = data.measures.find((m) => m.date === today);
+  const todayValues = todays
+    ? measureValues(MEASURE_PARAMS.map(({ key }) => ({ key, value: todays[key] })))
+    : null;
+  return buildSchedule(
+    MEASURE_COPY,
+    data.settings.rem.measure,
+    measureCheck(data, today),
+    data.settings.onboarded,
+    latest,
+    todayValues,
+  );
+}
+
+function buildWeek(data: AppData, today: ISODate): HomeWeek {
+  const wk = weekSummary(data, today);
+  const t = wk.trainings;
+  const p = wk.plannedPerWeek;
+  const kcal = wk.avgKcal !== null ? f0(wk.avgKcal) : null;
+  // Each half is glued with U+00A0, so a value too wide for the row breaks only after « · » («2 з 3 трен. ·» /
+  // «сер. 1 795 ккал») and never leaves «ккал» or «трен.» alone on a line.
+  const trainingsPart = p > 0 ? `${t}${NB}з${NB}${p}${NB}трен.` : `${t}${NB}трен.`;
+  const text = `${trainingsPart}${kcal !== null ? ` · сер.${NB}${kcal}${NB}ккал` : ''}`;
+  const trainings = p > 0 ? `${t} з ${p} ${ofTrainingsWord(p)}` : `${t} ${trainingsWord(t)}`;
+  const label = `Тиждень: ${trainings}${kcal !== null ? `, середня калорійність ${kcal} ккал` : ''}. Відкрити прогрес`;
+  return { text, label, href: WEEK_HREF };
 }
 
 export function buildHomeModel(data: AppData, today: ISODate, opts: HomeModelOptions): HomeModel {
@@ -304,11 +427,14 @@ export function buildHomeModel(data: AppData, today: ISODate, opts: HomeModelOpt
     todayLabel: dWeekdayLong(today),
     greeting: greeting(opts.now),
     offline: !opts.online,
-    banners: buildBanners(data, today, opts.showInstallHint),
+    banner: buildBanner(data, opts.showInstallHint),
     hero: buildHero(data),
-    today: buildToday(data, today),
+    rows: {
+      food: buildFood(data, today),
+      workout: buildWorkout(data, today),
+      weight: buildWeight(data, today),
+      measure: buildMeasure(data, today),
+    },
     week: buildWeek(data, today),
-    measures: buildMeasures(data),
-    control: buildControl(data, today),
   };
 }

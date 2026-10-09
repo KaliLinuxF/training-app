@@ -106,3 +106,6 @@ export const DEEP_LINKS = {
   weigh: '/?sheet=weight',
   measure: '/?sheet=measure',
 } as const;
+
+/** «Налаштування → Нагадування» (the test notification opens it; the old `/reminders` redirects here). */
+export const SETTINGS_REMINDERS_PATH = '/settings/reminders';

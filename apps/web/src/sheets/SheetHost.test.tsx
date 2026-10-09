@@ -9,7 +9,7 @@ import { useDataStore } from '@/store/data';
 import { initialSyncState } from '@/store/state';
 import { fakeIdb } from '@/store/test-utils';
 import { ui, useUiStore } from '@/store/ui';
-import { ConfirmHost } from '@/ui';
+import { ConfirmHost, SHEET_EXIT_MS } from '@/ui';
 import { installMatchMedia, stubScrollTo } from '@/ui/internal/testing';
 import { SAVE_FAILED } from './fields/fields';
 import { DISCARD_CONFIRM, DISCARD_ON_NAVIGATE_CONFIRM } from './helpers';
@@ -163,13 +163,49 @@ describe('deep links', () => {
     expect(memory.history.at(-1)).toBe('/');
   });
 
-  it('reacts when the query changes while mounted (notification tap)', () => {
+  it('reacts when the query changes while mounted (notification tap): the workout push opens «Тренування» with ✓', () => {
     const memory = renderHost('/');
     expect(screen.queryByRole('dialog')).toBeNull();
     act(() => memory.navigate('/?sheet=day&trained=1'));
-    expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('true');
+    // ✓ is pre-selected, so the types are offered right away.
+    expect(screen.getByRole('button', { name: 'Кардіо' })).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Що я їла' })).toBeNull();
     expect(memory.history.at(-1)).toBe('/');
+  });
+
+  it('/?sheet=day opens the full day, /?sheet=food and /?sheet=workout the short sheets', () => {
+    const memory = renderHost('/?sheet=day');
+    expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('false');
+    expect(textbox('Що я їла')).toBeTruthy();
+    expect(memory.history.at(-1)).toBe('/');
+
+    act(() => memory.navigate('/?sheet=food'));
+    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
+    act(() => memory.navigate('/?sheet=workout'));
+    expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('false');
+    act(() => memory.navigate('/?sheet=menu'));
+    expect(memory.history.at(-1)).toBe('/');
+    expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
+  });
+
+  it('a notification tap over a short «Їжа» sheet with unsaved changes asks first', async () => {
+    const memory = renderHost('/');
+    act(() => ui.openSheet(TODAY, 'food'));
+    fireEvent.change(textbox('Що я їла'), { target: { value: 'Борщ' } });
+    act(() => memory.navigate('/?sheet=day&trained=1'));
+    expect(discardDialog()).toBeTruthy();
+    await answer('Залишитись');
+    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
+    expect(textbox('Що я їла').value).toBe('Борщ');
+
+    act(() => memory.navigate('/?sheet=day&trained=1'));
+    await answer('Закрити');
+    expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
+    expect(data().days[TODAY]).toBeUndefined();
   });
 
   it('a notification tap over a sheet with unsaved changes asks first', async () => {
@@ -203,9 +239,381 @@ describe('deep links', () => {
     setData(emptyData());
     renderHost('/?sheet=weight');
     expect(screen.getByRole('dialog', { name: 'Контрольне зважування' })).toBeTruthy();
-    expect(screen.queryByRole('dialog', { name: 'Налаштування' })).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Перші кроки' })).toBeNull();
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    expect(screen.getByRole('dialog', { name: 'Налаштування' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Перші кроки' })).toBeTruthy();
+  });
+});
+
+/** The «Що записати?» row whose name starts with `title` («Їжа Опис або фото 1 500 ккал»). */
+const menuRow = (title: string) => within(dialog()).getByRole('button', { name: new RegExp(`^${title}`) });
+
+/** Taps a row like a finger or Enter would: the row has focus, and it is gone after the swap. */
+function pick(title: string) {
+  const row = menuRow(title);
+  act(() => row.focus());
+  fireEvent.click(row);
+}
+
+describe('«Що записати?» menu', () => {
+  it('lists the four actions and «Повний запис дня» — no date navigator, no «Зберегти»', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = screen.getByRole('dialog', { name: 'Що записати?' });
+    for (const title of ['Їжа', 'Тренування', 'Вага', 'Заміри']) expect(menuRow(title)).toBeTruthy();
+    expect(within(menu).getByRole('button', { name: 'Повний запис дня' }).textContent).toBe('Повний запис дня →');
+    expect(within(menu).getByRole('button', { name: /^Їжа/ }).textContent).toContain('Опис або фото');
+    expect(within(menu).queryByRole('button', { name: 'Зберегти' })).toBeNull();
+    expect(within(menu).queryByRole('button', { name: 'Попередній день' })).toBeNull();
+    expect(within(menu).queryByRole('textbox')).toBeNull();
+    // Tab order: ✕, the four rows, «Повний запис дня».
+    expect(within(menu).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.split(' ')[0])).toEqual([
+      'Закрити',
+      'Їжа',
+      'Тренування',
+      'Вага',
+      'Заміри',
+      'Повний запис дня',
+    ]);
+    // Today: no date line.
+    expect(within(menu).queryByText(/жовтня ·/)).toBeNull();
+  });
+
+  it('shows what the day already has, and a «За планом» pill on a planned workout day', () => {
+    const seeded = seed();
+    seeded.settings.rem.workout = { on: true, days: [6], time: '18:00' };
+    seeded.days[TODAY] = { food: 'Салат', kcal: 1240, trained: null, types: [], notes: '' };
+    seeded.weights.push({ date: TODAY, kg: 65.4 });
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    expect(menuRow('Їжа').textContent?.replace(/\s/g, ' ')).toContain('1 240 ккал');
+    expect(menuRow('Тренування').textContent).toContain('За планом');
+    expect(menuRow('Вага').textContent).toContain('65,4 кг');
+    expect(menuRow('Заміри').textContent).not.toContain('Сьогодні');
+  });
+
+  it('a meal without kcal reads «Записано» on the Їжа row, like Home', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: 'Вівсянка з бананом, кава', kcal: null, trained: null, types: [], notes: '' };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    expect(menuRow('Їжа').textContent).toContain('Записано');
+    expect(menuRow('Їжа').textContent).not.toContain('ккал');
+  });
+
+  it('a menu for a past day shows its date and passes that date on', () => {
+    renderHost();
+    act(() => ui.openSheet('2026-10-09', 'menu'));
+    expect(within(dialog()).getByText('9 жовтня · пʼятниця')).toBeTruthy();
+    expect(menuRow('Їжа').textContent?.replace(/\s/g, ' ')).toContain('1 500 ккал');
+    expect(menuRow('Тренування').textContent).toContain('✕ Не було');
+
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Повний запис дня' }));
+    expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
+    expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
+    expect(textbox('Що я їла').value).toBe('Омлет');
+    expect(useUiStore.getState().sheet).toMatchObject({ date: '2026-10-09', mode: 'day' });
+  });
+
+  it('«Повний запис дня» swaps to every block of «Запис дня» for today', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = dialog();
+    fireEvent.click(within(menu).getByRole('button', { name: 'Повний запис дня' }));
+    expect(dialog()).toBe(menu);
+    expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
+    expect(screen.getByText('10 жовтня 2026')).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Тренування' })).toBeTruthy();
+    for (const name of ['Що я їла', 'Калорії за день', 'Вага (за бажанням)', 'Нотатки']) expect(textbox(name)).toBeTruthy();
+    expect(textbox(/^Талія/)).toBeTruthy();
+  });
+
+  it('closes on «Закрити» and on Escape without asking (nothing to lose)', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
+    expect(discardDialog()).toBeNull();
+    expect(useUiStore.getState().sheet).toBeNull();
+
+    act(() => ui.openSheet(TODAY, 'menu'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(discardDialog()).toBeNull();
+    expect(useUiStore.getState().sheet).toBeNull();
+  });
+
+  it('a notification tap over the open menu just opens the linked sheet', () => {
+    const memory = renderHost('/');
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = dialog();
+    act(() => memory.navigate('/?sheet=weight'));
+    expect(discardDialog()).toBeNull();
+    expect(screen.getByRole('dialog', { name: 'Контрольне зважування' })).toBe(menu);
+  });
+});
+
+describe('short «Їжа» sheet', () => {
+  it('swaps in place: the same dialog, now «Їжа», only food and kcal, focus on the dialog, scrolled to the top', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = screen.getByRole('dialog', { name: 'Що записати?' });
+    Object.defineProperty(menu, 'scrollTop', { value: 120, writable: true, configurable: true });
+
+    pick('Їжа');
+
+    expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBe(menu);
+    expect(menu.scrollTop).toBe(0);
+    // The tapped row is gone: focus went to the dialog, not to <body>.
+    expect(document.activeElement).toBe(menu);
+    expect(screen.getByText('10 жовтня 2026')).toBeTruthy();
+    expect(textbox('Що я їла').value).toBe('');
+    expect(textbox('Калорії за день')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Зберегти' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Тренування' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Нотатки' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Нотатка до дня' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /Вага/ })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /^Талія/ })).toBeNull();
+    // No visible «Що я їла» label: the heading says it.
+    expect(screen.queryByText('Що я їла')).toBeNull();
+  });
+
+  it('leaves focus alone when it did not fall to <body>', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    try {
+      outside.focus();
+      fireEvent.click(menuRow('Вага'));
+      expect(document.activeElement).toBe(outside);
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('a chip + «Зберегти» saves the food and kcal, keeps the stored workout and notes, and records the dish', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: 'Салат', kcal: 300, trained: true, types: ['Йога'], notes: 'Сон 8 год' };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    pick('Їжа');
+    expect(textbox('Що я їла').value).toBe('Салат');
+    fireEvent.click(screen.getByRole('button', { name: 'test-add-food' }));
+    expect(textbox('Калорії за день').value).toBe('720');
+    fireEvent.click(saveButton());
+
+    expect(mocks.commits).toEqual([
+      [
+        {
+          kind: 'day.put',
+          date: TODAY,
+          value: {
+            food: 'Салат\nБорщ (300 г) — 420 ккал',
+            kcal: 720,
+            trained: true,
+            types: ['Йога'],
+            notes: 'Сон 8 год',
+            photos: ['photo_bbbbbbbbbbbbbbbb'],
+          },
+        },
+        { kind: 'food.use', date: TODAY, value: BORSCHT },
+      ],
+    ]);
+    expect(useUiStore.getState().sheet).toBeNull();
+    expect(useUiStore.getState().toast?.text).toBe('Збережено');
+  });
+
+  it('a stale device: a workout recorded elsewhere survives the food save', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'food'));
+    fireEvent.change(textbox('Що я їла'), { target: { value: 'Борщ' } });
+    refresh([{ kind: 'day.put', date: TODAY, value: { food: '', kcal: null, trained: true, types: ['Кардіо'], notes: 'Легко' } }]);
+    fireEvent.click(saveButton());
+    expect(data().days[TODAY]).toEqual({ food: 'Борщ', kcal: null, trained: true, types: ['Кардіо'], notes: 'Легко' });
+  });
+
+  it('with unsaved changes it asks before closing', async () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    pick('Їжа');
+    fireEvent.change(textbox('Що я їла'), { target: { value: 'Вівсянка' } });
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
+    expect(discardDialog()).toBeTruthy();
+    expect(screen.getByText(DISCARD_CONFIRM.body ?? '')).toBeTruthy();
+    await answer('Залишитись');
+    expect(textbox('Що я їла').value).toBe('Вівсянка');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await answer('Закрити');
+    expect(useUiStore.getState().sheet).toBeNull();
+    expect(mocks.commits).toEqual([]);
+  });
+
+  it('an estimate waiting in FoodAssist counts as unsaved work', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'food'));
+    fireEvent.click(screen.getByRole('button', { name: 'test-estimate-pending' }));
+    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
+    expect(discardDialog()).toBeTruthy();
+  });
+
+  it('only validates its own blocks', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: '', kcal: null, trained: null, types: [], notes: 'а'.repeat(5040) };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'food'));
+    fireEvent.change(textbox('Калорії за день'), { target: { value: '25000' } });
+    expect(screen.getByText(FIELD_ERRORS.kcal)).toBeTruthy();
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(textbox('Калорії за день'), { target: { value: '1200' } });
+    // The over-long notes are not this sheet's business.
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('‹ › keep the short sheet', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'food'));
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
+    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
+    expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
+    expect(textbox('Що я їла').value).toBe('Омлет');
+    expect(useUiStore.getState().sheet).toMatchObject({ date: '2026-10-09', mode: 'food' });
+  });
+});
+
+describe('short «Тренування» sheet', () => {
+  it('«Було» shows the types, «+ Нотатка до дня» opens and focuses the notes, the save keeps the food', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: 'Омлет', kcal: 400, trained: null, types: [], notes: '', photos: ['photo_aaaaaaaaaaaaaaaa'] };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = dialog();
+    pick('Тренування');
+    expect(screen.getByRole('dialog', { name: 'Тренування' })).toBe(menu);
+    expect(screen.getByRole('group', { name: 'Тренування' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Кардіо' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Що я їла' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Калорії за день' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: /Вага/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Було' }));
+    expect(screen.getByText('Тип')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Кардіо' }));
+    expect(screen.getByRole('button', { name: 'Кардіо' }).getAttribute('aria-pressed')).toBe('true');
+
+    expect(screen.queryByRole('textbox', { name: 'Нотатки' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '+ Нотатка до дня' }));
+    const notes = textbox('Нотатки');
+    expect(document.activeElement).toBe(notes);
+    expect(notes.placeholder).toBe('Самопочуття, вода, сон…');
+    expect(notes.getAttribute('rows')).toBe('2');
+    expect(screen.queryByRole('button', { name: '+ Нотатка до дня' })).toBeNull();
+    fireEvent.change(notes, { target: { value: 'Легко' } });
+    // Clearing the text keeps the field open while she is in it.
+    fireEvent.change(notes, { target: { value: '' } });
+    expect(textbox('Нотатки')).toBe(notes);
+    fireEvent.change(notes, { target: { value: 'Легко' } });
+    fireEvent.click(saveButton());
+
+    expect(mocks.commits).toEqual([
+      [
+        {
+          kind: 'day.put',
+          date: TODAY,
+          value: {
+            food: 'Омлет',
+            kcal: 400,
+            trained: true,
+            types: ['Кардіо'],
+            notes: 'Легко',
+            photos: ['photo_aaaaaaaaaaaaaaaa'],
+          },
+        },
+      ],
+    ]);
+  });
+
+  it('a day with notes shows them open; an opened fold folds again on another day', () => {
+    const seeded = seed();
+    seeded.days['2026-10-08'] = { food: '', kcal: null, trained: true, types: [], notes: 'Болять ноги' };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet('2026-10-08', 'workout'));
+    expect(textbox('Нотатки').value).toBe('Болять ноги');
+    // Cleared, it stays open.
+    fireEvent.change(textbox('Нотатки'), { target: { value: '' } });
+    expect(textbox('Нотатки').value).toBe('');
+
+    act(() => ui.openSheet(TODAY, 'workout'));
+    expect(screen.queryByRole('textbox', { name: 'Нотатки' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '+ Нотатка до дня' }));
+    expect(textbox('Нотатки')).toBeTruthy();
+    // Untouched, ‹ moves without asking, and 9 Oct has no notes: folded again.
+    fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
+    expect(discardDialog()).toBeNull();
+    expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Не було' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.queryByRole('textbox', { name: 'Нотатки' })).toBeNull();
+    expect(screen.getByRole('button', { name: '+ Нотатка до дня' })).toBeTruthy();
+  });
+
+  it('«✕» drops the stored types and keeps the food', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: 'Омлет', kcal: 400, trained: true, types: ['Кардіо', 'Прес'], notes: '' };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'workout'));
+    expect(screen.getByRole('button', { name: 'Прес' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Не було' }));
+    expect(screen.queryByRole('button', { name: 'Прес' })).toBeNull();
+    fireEvent.click(saveButton());
+    expect(data().days[TODAY]).toEqual({ food: 'Омлет', kcal: 400, trained: false, types: [], notes: '' });
+  });
+
+  it('only validates its own blocks', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = { food: 'а'.repeat(5040), kcal: null, trained: null, types: [], notes: '' };
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'workout'));
+    fireEvent.click(screen.getByRole('button', { name: 'Було' }));
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: '+ Нотатка до дня' }));
+    fireEvent.change(textbox('Нотатки'), { target: { value: 'а'.repeat(5040) } });
+    expect(screen.getByText(FIELD_ERRORS.text)).toBeTruthy();
+    expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('the pre-set ✓ of the workout push is a change: closing asks', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'workout', { trained: true }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(discardDialog()).toBeTruthy();
+  });
+
+  it('gives focus back to the opener after the swap and the close', async () => {
+    const plus = document.createElement('button');
+    plus.textContent = '+';
+    document.body.append(plus);
+    try {
+      renderHost();
+      plus.focus();
+      act(() => ui.openSheet(TODAY, 'menu'));
+      pick('Тренування');
+      fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, SHEET_EXIT_MS + 60));
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(document.activeElement).toBe(plus);
+    } finally {
+      plus.remove();
+    }
   });
 });
 
@@ -503,8 +911,11 @@ describe('setup sheet', () => {
   it('opens once for a new account and «Почати» saves the goals and today’s weight', () => {
     setData(emptyData());
     renderHost();
-    expect(screen.getByRole('dialog', { name: 'Налаштування' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Перші кроки' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: 'Налаштування' })).toBeNull();
     expect(screen.getByText(/Ці дані потрібні, щоб рахувати прогрес/)).toBeTruthy();
+    expect(screen.getByText(/Ціль і калорії можна змінити будь-коли в «Налаштуваннях» → «Цілі»/)).toBeTruthy();
+    expect(screen.getByText(/вагу й заміри — на головній або в календарі/)).toBeTruthy();
 
     fireEvent.change(textbox('Поточна вага'), { target: { value: '72,4' } });
     fireEvent.click(screen.getByRole('button', { name: 'Мінус 0,5 кг' }));
@@ -565,7 +976,7 @@ describe('install sheet', () => {
     expect(steps[1]?.textContent).toContain('«•••»');
     expect(steps[2]?.textContent).toContain('«Відкривати як вебпрограму»');
     expect(steps[3]?.textContent).toContain('увійди');
-    expect(steps[4]?.textContent).toContain('«Нагадуваннях»');
+    expect(steps[4]?.textContent).toContain('в «Налаштуваннях» → «Нагадування»');
     fireEvent.click(screen.getByRole('button', { name: 'Зрозуміло' }));
     expect(useUiStore.getState().sheet).toBeNull();
   });

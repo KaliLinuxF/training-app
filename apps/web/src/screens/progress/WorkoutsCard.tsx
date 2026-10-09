@@ -1,29 +1,26 @@
 import { useId } from 'react';
-import { BarRow, Card, CardHeader, Tile } from '@/ui';
-import type { TypeBarModel, ValueCell } from './model';
-import g from './grids.module.css';
+import { BarRow, Card, CardHeader, StatStrip, type StatItem } from '@/ui';
+import type { TypeBarModel } from './model';
 import s from './WorkoutsCard.module.css';
 
 export interface WorkoutsCardProps {
-  tiles: readonly ValueCell[];
+  /** Всього · Цього тижня · Цього місяця · В сер. / тиж. */
+  stats: readonly StatItem[];
   /** «Найчастіше · цього тижня» */
   typesHeading: string;
+  /** Top types of the period (at most `TYPES_SHOWN`). */
   types: readonly TypeBarModel[];
 }
 
 export const NO_WORKOUTS = 'За цей період тренувань ще немає';
 
-/** «Тренування»: counters and the most frequent workout types of the period. */
-export function WorkoutsCard({ tiles, typesHeading, types }: WorkoutsCardProps) {
+/** «Тренування»: four counters in a strip and the most frequent workout types of the period. */
+export function WorkoutsCard({ stats, typesHeading, types }: WorkoutsCardProps) {
   const titleId = useId();
   return (
     <Card as="section" aria-labelledby={titleId}>
       <CardHeader title="Тренування" titleId={titleId} />
-      <div className={g.tiles2}>
-        {tiles.map((t) => (
-          <Tile key={t.label} variant="count" label={t.label} value={t.value} />
-        ))}
-      </div>
+      <StatStrip items={stats} columns={4} />
       <div className={s.types}>
         <h3 className={s.heading}>{typesHeading}</h3>
         {types.length > 0 ? (

@@ -1,0 +1,7 @@
+/*
+ * «Сьогодні» (40px, sm) next to the 33px title: the header keeps its height whether the shortcut shows or not, so a
+ * cell tap never shifts the grid under her finger. The button reaches up into the header's 8px top padding.
+ */
+.today {
+  margin-top: -7px;
+}

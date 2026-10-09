@@ -1,16 +1,36 @@
-.header {
-  padding-bottom: 6px;
+/*
+ * The ContentGrid item (a real block box, so scrollIntoView has something to measure). After a cell tap the card
+ * scrolls to the nearest edge. The phone shell's html scroll-padding (AppShell.module.css) already keeps
+ * scrollIntoView clear of the safe area and of the floating tab bar (scroll-margin adds to it), so only the 12px
+ * top breathing room remains here.
+ */
+.root {
+  min-width: 0;
+  scroll-margin-top: 12px;
+  scroll-margin-bottom: 0;
 }
 
+/* «Додати» on an empty Їжа / Вага / Заміри row, instead of «—». */
 .action {
-  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accD);
 }
 
-.foodText,
-.photos {
-  display: block;
+/* A newly selected day's rows fade in (killed by the global reduced-motion rule). */
+.fade {
+  animation: day-in 160ms var(--ease-out);
 }
 
-.foodText + .photos {
-  margin-top: 8px;
+@keyframes day-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Desktop shell: no tab bar under the content. */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .root {
+    scroll-margin: 24px;
+  }
 }

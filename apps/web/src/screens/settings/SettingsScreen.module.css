@@ -1,0 +1,17 @@
+/* Desktop: list (240–300px) | section detail. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+/* The list stays in view while a long section (the reminders) scrolls. */
+.side {
+  position: sticky;
+  top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}

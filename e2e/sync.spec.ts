@@ -12,7 +12,7 @@ test.describe('sync between devices', () => {
     server,
   }) => {
     await app.goto('/');
-    await expect(app.region('Сьогодні')).toContainText('Тренування · ще не відмічено');
+    await expect(app.homeRow('Тренування')).toContainText('За планом о 18:00');
 
     // Second device.
     const other = await browser.newContext({ baseURL: 'http://127.0.0.1:3399', serviceWorkers: 'block' });
@@ -22,7 +22,7 @@ test.describe('sync between devices', () => {
       const otherPage = await other.newPage();
       const otherApp = new App(otherPage);
       await otherApp.goto('/');
-      await otherApp.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
+      await otherApp.trainingToggle('Не було').click();
       await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(false);
     } finally {
       await other.close();
@@ -30,7 +30,7 @@ test.describe('sync between devices', () => {
 
     // Nothing pending here: returning to the app re-reads the server.
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+    await expect(app.homeRow('Тренування')).toContainText('Не було');
   });
 
   test('a server hiccup (500) is retried with backoff until the change lands', async ({
@@ -48,7 +48,7 @@ test.describe('sync between devices', () => {
       }
     });
     await app.goto('/');
-    await app.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
+    await app.trainingToggle('Не було').click();
     // Backoff 2 s, then 4 s.
     await expect
       .poll(async () => (await server.getData()).days[TODAY]?.trained, { timeout: 15_000 })
@@ -74,9 +74,9 @@ test.describe('sync between devices', () => {
       });
     });
     await app.goto('/');
-    await app.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
+    await app.trainingToggle('Не було').click();
     await expect(app.toast('Сервер відхилив одну зміну — її не збережено')).toBeVisible();
-    await expect(app.region('Сьогодні')).toContainText('Тренування · ще не відмічено');
+    await expect(app.homeRow('Тренування')).toContainText('За планом о 18:00');
     expect((await server.getData()).days[TODAY]?.trained).toBeNull();
   });
 
@@ -92,7 +92,7 @@ test.describe('sync between devices', () => {
       const { ops } = r.postDataJSON() as { ops: { kind: string }[] };
       settingsWrites.push(...ops.filter((op) => op.kind === 'settings.put'));
     });
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     expect(settingsWrites).toEqual([]);
     expect((await server.getData()).settings.timezone).toBe('Europe/Kyiv');
@@ -117,7 +117,7 @@ test.describe('sync between devices', () => {
         settingsWrites.push(...ops.filter((op) => op.kind === 'settings.put'));
       });
       const laptopApp = new App(laptopPage);
-      await laptopApp.goto('/reminders');
+      await laptopApp.gotoSettings('Дані і копія');
       await expect(laptopApp.region('Дані')).toContainText('Усе синхронізовано');
       // A later foreground refresh does not write either.
       await laptopPage.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
@@ -135,7 +135,7 @@ test.describe('sync between devices', () => {
     server,
   }) => {
     await app.goto('/');
-    await expect(app.region('Сьогодні')).toContainText('Тренування · ще не відмічено');
+    await expect(app.homeRow('Тренування')).toContainText('За планом о 18:00');
 
     // The phone marks the day while this tab stays visible the whole time.
     const data = await server.getData();
@@ -144,7 +144,7 @@ test.describe('sync between devices', () => {
     // The window gets focus back (a focus right after the start-up load is skipped).
     await page.clock.runFor(5_000);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+    await expect(app.homeRow('Тренування')).toContainText('Не було');
 
     // The phone records a weigh-in; no event at all here, the minute poll brings it in.
     const next = await server.getData();
@@ -162,7 +162,7 @@ test.describe('sync between devices', () => {
   }) => {
     await app.goto('/');
     await context.setOffline(true);
-    await app.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
+    await app.trainingToggle('Не було').click();
 
     // Meanwhile another device changes something else on the server.
     const data = await server.getData();
@@ -172,9 +172,11 @@ test.describe('sync between devices', () => {
     await context.setOffline(false);
     await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
     await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(false);
-    await expect(app.region('Сьогодні')).toContainText('Тренування · Не було');
+    await expect(app.homeRow('Тренування')).toContainText('Не було');
     // The other device's change arrived too.
     await app.reload();
-    await expect(app.region('Поточна вага')).toContainText('Ціль 58,0');
+    await expect(app.region('Поточна вага')).toContainText('до цілі 7,4 кг');
+    await app.go('Прогрес');
+    await expect(app.region('Вага')).toContainText('Ціль 58,0');
   });
 });

@@ -36,3 +36,79 @@
   font-size: 13px;
   color: var(--ink2);
 }
+
+/* Compact: a one-glance hint (Home setup / install) that leaves room for the «Сьогодні» list. */
+.compact {
+  min-height: 56px;
+  gap: 10px;
+  border-radius: var(--r16);
+  padding: 8px 8px 8px 14px;
+}
+
+.compact .dot {
+  width: 8px;
+  height: 8px;
+}
+
+.compact .title {
+  font-size: 14px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+/*
+ * Up to three lines, never an ellipsis mid-sentence: at 390px the text column beside «Налаштувати» is ~185px and the
+ * setup sub «Запиши стартову вагу й ціль — прогрес рахуватиметься сам» needs 3 lines (banner ≈ 90px tall).
+ */
+.compact .sub {
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+/* 320px (Display Zoom): the column is ~120px and the setup sub needs 4–5 lines, so it is shown whole. */
+@media (max-width: 359px) {
+  .compact .sub {
+    display: block;
+    -webkit-line-clamp: none;
+    line-clamp: none;
+    overflow: visible;
+  }
+}
+
+/* 32px glyph button; the tap area is grown to 44px without changing the layout. */
+.close {
+  position: relative;
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink2);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.close::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.close:active {
+  transform: scale(0.94);
+}

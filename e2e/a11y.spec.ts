@@ -45,24 +45,79 @@ const below44 = (sizes: Record<string, string>) =>
       .some((n) => n < 44),
   );
 
+/** The element's box once it is scrolled into view. */
+async function box(
+  locator: Locator,
+  what: string,
+): Promise<{ x: number; y: number; width: number; height: number }> {
+  await locator.scrollIntoViewIfNeeded();
+  const b = await locator.boundingBox();
+  if (!b) throw new Error(`${what} is not rendered`);
+  return b;
+}
+
+/** A control nested in another control (a button inside a row button, a link inside a button…). */
+const NESTED_CONTROL =
+  'button :is(button, a[href], input, textarea, select, [role="button"]), a[href] :is(button, a[href], input, textarea, select, [role="button"])';
+
+test.describe('structure (both projects)', () => {
+  test('rows never nest a control inside another; the calendar food row keeps the food text as its description', async ({
+    app,
+  }) => {
+    await app.goto('/');
+    const today = app.region('Сьогодні');
+    await expect(today.getByRole('button')).not.toHaveCount(0);
+    await expect(today.locator(NESTED_CONTROL)).toHaveCount(0);
+
+    await app.go('Календар');
+    const day = app.region('14 жовтня 2026');
+    await expect(day.getByRole('button', { name: 'Було', exact: true })).toBeVisible();
+    await expect(day.locator(NESTED_CONTROL)).toHaveCount(0);
+    // A short name («Їжа: калорії не вказані») must not hide the food text from a screen reader.
+    await expect(day.getByRole('button', { name: /^Їжа/ })).toHaveAccessibleDescription(
+      'Вівсянка з бананом, кава',
+    );
+  });
+});
+
 test.describe('iPhone ergonomics', () => {
   test.skip(({ isMobile }) => !isMobile, 'phone-only checks');
 
   test('every text input is at least 16px (no zoom on focus)', async ({ app, page }) => {
     await mockFood(page);
     await app.goto('/');
-    await app.recordButton().click();
-    const sheet = app.sheet('Запис дня');
-    await sheet.getByRole('button', { name: 'Було', exact: true }).click();
-    await sheet.getByRole('button', { name: '+ Свій тип' }).click();
-    await sheet.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
-    await sheet.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ');
-    await sheet.getByRole('button', { name: 'Порахувати', exact: true }).click();
-    await expect(sheet.getByRole('region', { name: 'Оцінка калорій' })).toBeVisible();
-    expect(await inputsBelow16px(page)).toEqual([]);
 
-    for (const path of ['/reminders', '/?sheet=weight', '/?sheet=measure']) {
+    // «Їжа»: the food text, the composer, the estimate card and the kcal field.
+    const food = await app.record('Їжа');
+    await food.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
+    await food.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ');
+    expect(await inputsBelow16px(page), '«Їжа» composer').toEqual([]);
+    await food.getByRole('button', { name: 'Порахувати', exact: true }).click();
+    await expect(food.getByRole('region', { name: 'Оцінка калорій' })).toBeVisible();
+    expect(await inputsBelow16px(page), '«Їжа» estimate').toEqual([]);
+
+    // «Тренування»: an own type, then the unfolded notes.
+    await app.goto('/');
+    const workout = await app.record('Тренування');
+    await workout.getByRole('button', { name: 'Було', exact: true }).click();
+    await workout.getByRole('button', { name: '+ Свій тип' }).click();
+    await expect(workout.getByRole('textbox', { name: 'Новий тип тренування' })).toBeVisible();
+    expect(await inputsBelow16px(page), '«Тренування» own type').toEqual([]);
+    await workout.getByRole('button', { name: '+ Нотатка до дня' }).click();
+    await expect(workout.getByRole('textbox', { name: 'Нотатки' })).toBeFocused();
+    expect(await inputsBelow16px(page), '«Тренування» notes').toEqual([]);
+
+    for (const [path, field] of [
+      ['/settings/reminders', page.getByLabel('Час').first()],
+      ['/settings/workouts', page.getByRole('textbox', { name: 'Свій тип тренування' })],
+      [
+        '/?sheet=weight',
+        app.sheet('Контрольне зважування').getByRole('textbox', { name: 'Вага', exact: true }),
+      ],
+      ['/?sheet=measure', app.sheet('Заміри тіла').locator('input[name="chest"]')],
+    ] as const) {
       await app.goto(path);
+      await expect(field, path).toBeVisible();
       expect(await inputsBelow16px(page), path).toEqual([]);
     }
   });
@@ -76,42 +131,126 @@ test.describe('iPhone ergonomics', () => {
     });
   });
 
+  // Text-sized controls (the kit ghost button is 35px tall, its ::after reaches 45px; the banner ✕ is 32px
+  // with a 44px ::after; the back link has min-height 44).
   test('small text buttons extend their tap area to 44px', async ({ app, page }) => {
     await mockFood(page);
     await app.goto('/');
     const sizes: Record<string, string> = {
       'install hint «Сховати» ✕': await hitArea(page.getByRole('button', { name: 'Сховати' })),
+      'install hint CTA «Як?»': await hitArea(page.getByRole('button', { name: 'Як?' })),
       '«Відкрити день →»': await hitArea(page.getByRole('button', { name: 'Відкрити день' })),
     };
     await page.getByRole('button', { name: 'Відкрити день' }).click();
     const sheet = app.sheet('Запис дня');
     sizes['«Часті страви» «Змінити»'] = await hitArea(sheet.getByRole('button', { name: 'Змінити' }));
-    await app.goto('/reminders');
+
+    await app.goto('/');
+    await app.recordButton().click();
+    sizes['«Повний запис дня →»'] = await hitArea(
+      app.sheet('Що записати?').getByRole('button', { name: 'Повний запис дня' }),
+    );
+    await app.goto('/');
+    const workout = await app.record('Тренування');
+    sizes['«+ Нотатка до дня»'] = await hitArea(workout.getByRole('button', { name: '+ Нотатка до дня' }));
+
+    await app.gotoSettings('Цілі');
+    sizes['«‹ Налаштування» back link'] = await hitArea(app.settingsBack());
+    await app.gotoSettings('Нагадування');
     sizes['reminder switch'] = await hitArea(page.getByRole('switch').first());
+    expect(below44(sizes)).toEqual([]);
+  });
+
+  test('Home «Сьогодні»: the rows span the card, the inline ✓ / ✕ are 44×44 beside the Тренування row', async ({
+    app,
+  }) => {
+    await app.goto('/');
+    const card = await box(app.region('Сьогодні'), '«Сьогодні»');
+    const cardRight = card.x + card.width;
+    const sizes: Record<string, string> = {};
+
+    for (const name of ['Їжа', 'Вага', 'Заміри'] as const) {
+      const row = await box(app.homeRow(name), name);
+      expect(row.height, `${name}: height`).toBeGreaterThanOrEqual(56);
+      expect(Math.abs(row.x - card.x), `${name}: starts at the card edge`).toBeLessThanOrEqual(2);
+      expect(Math.abs(row.x + row.width - cardRight), `${name}: ends at the card edge`).toBeLessThanOrEqual(
+        2,
+      );
+      sizes[name] = await hitArea(app.homeRow(name));
+    }
+
+    // Тренування: the row button and the toggle are siblings that share the line.
+    const training = app.homeRow('Тренування');
+    const button = await box(training, 'Тренування');
+    const item = await box(training.locator('xpath=ancestor::li[1]'), 'Тренування row');
+    const yes = await box(app.trainingToggle('Було'), '«Було»');
+    const no = await box(app.trainingToggle('Не було'), '«Не було»');
+    expect(Math.abs(button.x - card.x), 'Тренування: starts at the card edge').toBeLessThanOrEqual(2);
+    expect(item.height, 'Тренування: row height').toBeGreaterThanOrEqual(56);
+    expect(button.x + button.width, 'the row button stops before «Було»').toBeLessThanOrEqual(yes.x + 0.5);
+    expect(
+      Math.abs(no.x + no.width + 16 - cardRight),
+      '«Не було» ends 16px inside the card',
+    ).toBeLessThanOrEqual(2);
+    for (const [name, b] of [
+      ['Було', yes],
+      ['Не було', no],
+    ] as const) {
+      expect(Math.round(b.width), `«${name}» width`).toBe(44);
+      expect(Math.round(b.height), `«${name}» height`).toBe(44);
+    }
+    sizes['Тренування row'] = await hitArea(training);
+    sizes['«Було»'] = await hitArea(app.trainingToggle('Було'));
+    sizes['«Не було»'] = await hitArea(app.trainingToggle('Не було'));
+    sizes['week row'] = await hitArea(app.weekLink());
     expect(below44(sizes)).toEqual([]);
   });
 
   // 40px controls (small buttons, segments, the sheet ✕) grow their hit area invisibly with ::after,
   // weekday buttons reach into the gaps of their 7-column row; «Історія калорій» rows are 44px tall.
   test('every control meets the 44px tap target', async ({ app, page }) => {
-    await mockFood(page);
     await app.goto('/');
-    const sizes: Record<string, string> = {
-      'banner CTA «Відмітити»': await hitArea(page.getByRole('button', { name: 'Відмітити' })),
-      'banner CTA «Як?»': await hitArea(page.getByRole('button', { name: 'Як?' })),
-    };
-    await page.getByRole('button', { name: 'Відкрити день' }).click();
-    sizes['sheet «Закрити» ✕'] = await hitArea(
-      app.sheet('Запис дня').getByRole('button', { name: 'Закрити' }),
-    );
+    await app.recordButton().click();
+    const menu = app.sheet('Що записати?');
+    const sizes: Record<string, string> = {};
+    for (const name of ['Їжа', 'Тренування', 'Вага', 'Заміри']) {
+      const row = menu.getByRole('button', { name: new RegExp(`^${name}`) });
+      expect((await box(row, name)).height, `menu «${name}» height`).toBeGreaterThanOrEqual(64);
+      sizes[`menu «${name}»`] = await hitArea(row);
+    }
+    sizes['sheet «Закрити» ✕'] = await hitArea(menu.getByRole('button', { name: 'Закрити' }));
+
+    await app.goto('/settings');
+    for (const title of ['Нагадування', 'Цілі', 'Типи тренувань', 'Вигляд', 'Дані і копія'] as const) {
+      sizes[`settings «${title}»`] = await hitArea(app.settingsRow(title));
+    }
+    sizes['settings «Вийти»'] = await hitArea(page.getByRole('button', { name: 'Вийти', exact: true }));
+    await app.gotoSettings('Вигляд');
+    sizes['theme segment «Авто»'] = await hitArea(page.getByRole('radio', { name: 'Авто' }));
+    await app.gotoSettings('Нагадування');
+    sizes['reminder switch'] = await hitArea(page.getByRole('switch').first());
+    sizes['workout weekday «Пн»'] = await hitArea(page.getByRole('button', { name: 'Понеділок' }).first());
+
     await app.goto('/progress');
     sizes['period segment «Тиждень»'] = await hitArea(page.getByRole('radio', { name: 'Тиждень' }));
     sizes['«Історія калорій» row'] = await hitArea(
       page.getByRole('button', { name: /Відкрити в календарі$/ }).first(),
     );
-    await app.goto('/reminders');
-    sizes['theme segment «Авто»'] = await hitArea(page.getByRole('radio', { name: 'Авто' }));
-    sizes['workout weekday «Пн»'] = await hitArea(page.getByRole('button', { name: 'Понеділок' }).first());
+    sizes['«Показати ще»'] = await hitArea(page.getByRole('button', { name: 'Показати ще' }));
+
+    await app.goto('/calendar?date=2026-10-05');
+    const oct5 = app.region('5 жовтня 2026');
+    sizes['day cell'] = await hitArea(
+      page
+        .getByRole('group', { name: /^\S+ 2026$/ })
+        .getByRole('button')
+        .first(),
+    );
+    sizes['«Попередній місяць»'] = await hitArea(page.getByRole('button', { name: 'Попередній місяць' }));
+    sizes['«Сьогодні» shortcut'] = await hitArea(page.getByRole('button', { name: 'Сьогодні', exact: true }));
+    sizes['day row «Вага»'] = await hitArea(oct5.getByRole('button', { name: 'Вага: 65,7 кг', exact: true }));
+    sizes['day card «Було»'] = await hitArea(oct5.getByRole('button', { name: 'Було', exact: true }));
+    sizes['day card «Не було»'] = await hitArea(oct5.getByRole('button', { name: 'Не було', exact: true }));
     expect(below44(sizes)).toEqual([]);
   });
 
@@ -199,13 +338,13 @@ test.describe('iPhone ergonomics', () => {
       await expect(page.getByRole('button', { name: '+ Записати день', exact: true })).toHaveCount(0);
 
       await app.recordButton().click();
-      const sheet = app.sheet('Запис дня');
+      const sheet = app.sheet('Що записати?');
       await expect(sheet).toBeVisible();
       // Bottom sheet (≤ 440px wide, docked to the bottom), not the centred 560px desktop modal.
       await expect
         .poll(async () => {
-          const box = await sheet.boundingBox();
-          return box && { narrow: box.width <= 440, bottom: Math.round(box.y + box.height) };
+          const b = await sheet.boundingBox();
+          return b && { narrow: b.width <= 440, bottom: Math.round(b.y + b.height) };
         })
         .toEqual({ narrow: true, bottom: 430 });
     });

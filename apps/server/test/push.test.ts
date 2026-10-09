@@ -113,7 +113,7 @@ describe('push routes', () => {
     expect(s.transport.sent[0]?.payload).toEqual({
       title: 'Легко',
       body: 'Сповіщення працюють ✨',
-      url: '/reminders',
+      url: '/settings/reminders',
       tag: 'test',
     });
 

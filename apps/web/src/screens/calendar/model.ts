@@ -10,27 +10,21 @@ import {
   f1,
   fN,
   isValidISODate,
-  MONTHS_SHORT,
   ok,
   parse,
   type AppData,
-  type DayEntry,
   type ISODate,
+  type MeasureValues,
 } from '@legko/shared';
 import {
   calendarMonth,
   dayStatus,
-  recentDays,
   shiftMonth,
   type CalendarCell,
   type CalendarMonth,
   type DayStatus,
 } from '@/lib/stats';
-
-/** How many «Останні записи» rows are shown at first and added by «Показати ще». */
-export const HISTORY_PAGE = 8;
-
-const EMPTY = '—';
+import type { SheetMode } from '@/store/ui';
 
 // ---------------------------------------------------------------------------
 // Selection (URL `?date=`)
@@ -54,6 +48,14 @@ const monthKeyOf = (year: number, month0: number): MonthKey =>
 
 /** The month that contains `date`. */
 export const monthOf = (date: ISODate): MonthKey => date.slice(0, 7);
+
+/**
+ * The header «Сьогодні» shortcut is shown once she has left today: another day is selected, or ‹ › / a swipe moved
+ * the grid away from today's month.
+ */
+export function showTodayShortcut(selected: ISODate, shown: MonthKey, today: ISODate): boolean {
+  return selected !== today || shown !== monthOf(today);
+}
 
 function parseMonthKey(key: MonthKey): { year: number; month0: number } {
   return { year: Number(key.slice(0, 4)), month0: Number(key.slice(5, 7)) - 1 };
@@ -79,7 +81,7 @@ export type CellFill = 'selected' | 'trained' | 'food' | 'none';
 
 export interface MonthCell extends CalendarCell {
   fill: CellFill;
-  /** Screen-reader name: «9 жовтня, сьогодні, тренування, харчування». */
+  /** Screen-reader name: «9 жовтня, сьогодні, тренування, їжа». */
   label: string;
 }
 
@@ -100,7 +102,7 @@ function cellLabel(c: CalendarCell): string {
   const parts = [dLong(c.date)];
   if (c.isToday) parts.push('сьогодні');
   if (c.trained) parts.push('тренування');
-  if (c.food) parts.push('харчування');
+  if (c.food) parts.push('їжа');
   if (c.weighOrMeasure) parts.push('вага або заміри');
   return parts.join(', ');
 }
@@ -120,7 +122,7 @@ export function buildMonth(data: AppData, shown: MonthKey, selected: ISODate, to
 }
 
 // ---------------------------------------------------------------------------
-// Selected day card
+// Selected day card: a check-list of rows that open the focused sheets
 // ---------------------------------------------------------------------------
 
 export type StatusTone = 'acc2' | 'acc' | 'neutral';
@@ -131,11 +133,40 @@ const STATUS_TONE: Readonly<Record<DayStatus, StatusTone>> = {
   empty: 'neutral',
 };
 
-export interface DetailRowModel {
-  key: 'food' | 'kcal' | 'training' | 'weight' | 'measures' | 'notes';
+export type DayRowKey = 'food' | 'training' | 'weight' | 'measures' | 'notes';
+
+/** The sheet each row opens for the selected date (the notes row opens the full «Запис дня»). */
+export const ROW_SHEET: Readonly<Record<DayRowKey, SheetMode>> = {
+  food: 'food',
+  training: 'workout',
+  weight: 'weight',
+  measures: 'measure',
+  notes: 'day',
+};
+
+/** One row of the day check-list. */
+export interface DayRowModel {
+  key: DayRowKey;
+  /** «Їжа», «Тренування», «Вага», «Заміри», «Нотатки». */
+  title: string;
+  /** Something is recorded for the row (Тренування: marked either way). */
+  filled: boolean;
+  /** Right-hand value: «1 880 ккал», «65,4 кг». */
+  value?: string;
+  /** `acc` when the day's kcal is over the goal. */
+  valueTone: 'ink' | 'acc';
+  /** Second line, shown in full: food text, workout types / «Не було» / «Ще не відмічено», measurements, notes. */
+  text?: string;
+  /** Shown instead of a value on an empty Їжа / Вага / Заміри row (never «—»). */
+  action?: 'Додати';
+  /** Тренування only: the day's mark for the inline ✓ / ✕ (`null` = not marked). */
+  trained?: boolean | null;
+  /** The sheet the row opens (`ROW_SHEET`). */
+  mode: SheetMode;
+  /** Short accessible name of the row button: «Їжа: 1 880 ккал», «Вага: додати». */
   label: string;
-  /** Formatted value, «—» when there is nothing. */
-  value: string;
+  /** The text is long (food, notes): it becomes the row button's accessible description. */
+  describe: boolean;
 }
 
 export interface DayDetail {
@@ -147,35 +178,136 @@ export interface DayDetail {
   status: DayStatus;
   statusLabel: string;
   statusTone: StatusTone;
-  rows: DetailRowModel[];
-  /** Food photo ids of the day (thumbnails under «Харчування»). */
+  /** Їжа, Тренування, Вага, Заміри — plus Нотатки when the day has notes. */
+  rows: DayRowModel[];
+  /** Food photo ids of the day (thumbnails under the Їжа row). */
   photos: string[];
   /** «Редагувати день» when the day has a record, else «Заповнити день». */
   actionLabel: string;
 }
 
+const ADD = 'Додати';
+
+const MEASURE_NAMES: readonly (readonly [keyof MeasureValues, string])[] = [
+  ['chest', 'Груди'],
+  ['waist', 'Талія'],
+  ['hips', 'Стегна'],
+];
+
+function foodRow(food: string, kcal: number | null, photos: number, goal: number): DayRowModel {
+  const text = food || undefined;
+  const filled = text !== undefined || kcal !== null || photos > 0;
+  const over = kcal !== null && kcal > goal;
+  const value = kcal !== null ? `${f0(kcal)} ккал` : undefined;
+  let label = 'Їжа: додати';
+  if (value) label = `Їжа: ${value}${over ? ', більше цілі' : ''}`;
+  else if (filled) label = 'Їжа: калорії не вказані';
+  return {
+    key: 'food',
+    title: 'Їжа',
+    filled,
+    value,
+    valueTone: over ? 'acc' : 'ink',
+    text,
+    action: filled ? undefined : ADD,
+    mode: ROW_SHEET.food,
+    label,
+    describe: text !== undefined,
+  };
+}
+
+function trainingRow(trained: boolean | null, types: readonly string[]): DayRowModel {
+  let text = 'Ще не відмічено';
+  let label = 'Тренування: не відмічено';
+  if (trained === true) {
+    text = types.length ? types.join(', ') : 'Було';
+    label = types.length ? `Тренування: було, ${types.join(', ')}` : 'Тренування: було';
+  } else if (trained === false) {
+    text = 'Не було';
+    label = 'Тренування: не було';
+  }
+  // No action word: the inline ✓ / ✕ next to the row marks the day.
+  return {
+    key: 'training',
+    title: 'Тренування',
+    filled: trained !== null,
+    valueTone: 'ink',
+    text,
+    trained,
+    mode: ROW_SHEET.training,
+    label,
+    describe: false,
+  };
+}
+
+function weightRow(kg: number | null): DayRowModel {
+  const value = kg !== null ? `${f1(kg)} кг` : undefined;
+  return {
+    key: 'weight',
+    title: 'Вага',
+    filled: value !== undefined,
+    value,
+    valueTone: 'ink',
+    action: value ? undefined : ADD,
+    mode: ROW_SHEET.weight,
+    label: value ? `Вага: ${value}` : 'Вага: додати',
+    describe: false,
+  };
+}
+
+function measuresRow(m: MeasureValues | undefined): DayRowModel {
+  const parts = MEASURE_NAMES.flatMap(([key, name]) => {
+    const v = m?.[key];
+    return ok(v) ? [{ name, value: fN(v) }] : [];
+  });
+  const filled = parts.length > 0;
+  return {
+    key: 'measures',
+    title: 'Заміри',
+    filled,
+    valueTone: 'ink',
+    text: filled ? parts.map((p) => `${p.name} ${p.value}`).join(' · ') : undefined,
+    action: filled ? undefined : ADD,
+    mode: ROW_SHEET.measures,
+    label: filled
+      ? `Заміри: ${parts.map((p) => `${p.name.toLowerCase()} ${p.value}`).join(', ')}`
+      : 'Заміри: додати',
+    describe: false,
+  };
+}
+
+function notesRow(notes: string): DayRowModel {
+  return {
+    key: 'notes',
+    title: 'Нотатки',
+    filled: true,
+    valueTone: 'ink',
+    text: notes,
+    mode: ROW_SHEET.notes,
+    label: 'Нотатки',
+    describe: true,
+  };
+}
+
+/**
+ * The selected day as a check-list: Їжа (text, kcal against `settings.kcalGoal`, photos), Тренування (the mark and
+ * its types), Вага, Заміри, and Нотатки only when there are notes. Empty Їжа / Вага / Заміри rows offer «Додати».
+ */
 export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): DayDetail {
   const e = data.days[date];
   const w = data.weights.find((x) => x.date === date);
   const m = data.measures.find((x) => x.date === date);
   const { status, label } = dayStatus(data, date);
+  const photos = e?.photos ?? [];
+  const notes = e?.notes.trim() ?? '';
 
-  let training = EMPTY;
-  if (e?.trained === true) training = `✓ ${e.types.join(', ') || 'Було'}`;
-  else if (e?.trained === false) training = 'Не було';
-
-  const rows: DetailRowModel[] = [
-    { key: 'food', label: 'Харчування', value: e?.food.trim() || EMPTY },
-    { key: 'kcal', label: 'Калорії', value: e && ok(e.kcal) ? `${f0(e.kcal)} ккал` : EMPTY },
-    { key: 'training', label: 'Тренування', value: training },
-    { key: 'weight', label: 'Вага', value: w && ok(w.kg) ? `${f1(w.kg)} кг` : EMPTY },
-    {
-      key: 'measures',
-      label: 'Заміри',
-      value: m ? `Груди ${fN(m.chest)} · Талія ${fN(m.waist)} · Стегна ${fN(m.hips)}` : EMPTY,
-    },
-    { key: 'notes', label: 'Нотатки', value: e?.notes.trim() || EMPTY },
+  const rows: DayRowModel[] = [
+    foodRow(e?.food.trim() ?? '', e && ok(e.kcal) ? e.kcal : null, photos.length, data.settings.kcalGoal),
+    trainingRow(e?.trained ?? null, e?.trained === true ? e.types : []),
+    weightRow(w && ok(w.kg) ? w.kg : null),
+    measuresRow(m),
   ];
+  if (notes) rows.push(notesRow(notes));
 
   return {
     date,
@@ -185,67 +317,7 @@ export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): Da
     statusLabel: label,
     statusTone: STATUS_TONE[status],
     rows,
-    photos: e?.photos ?? [],
+    photos,
     actionLabel: e ? 'Редагувати день' : 'Заповнити день',
   };
-}
-
-// ---------------------------------------------------------------------------
-// «Останні записи»
-// ---------------------------------------------------------------------------
-
-export interface HistoryRow {
-  date: ISODate;
-  /** Day of month for the badge. */
-  day: number;
-  /** Short month for the badge: «жов». */
-  month: string;
-  /** «1 650 ккал» or «Калорії не вказані». */
-  kcal: string;
-  /** Food text or «Харчування не записане». */
-  food: string;
-  /** Workout pill: the first type / «Тренування», «Відпочинок», or «—». */
-  training: string;
-  trainingTone: 'acc' | 'neutral';
-  /** Screen-reader name of the row button (see `historyLabel`). */
-  label: string;
-}
-
-export interface HistoryModel {
-  rows: HistoryRow[];
-  /** More day records exist than are shown («Показати ще»). */
-  hasMore: boolean;
-}
-
-/**
- * Screen-reader name of a «Останні записи» row: one sentence with lower-case app wording, e.g.
- * «9 жовтня, калорії не вказані, Вівсянка з бананом, тренування: Верх тіла, Прес». What she typed
- * (food, workout type names) is read as written.
- */
-function historyLabel(date: ISODate, e: DayEntry): string {
-  const kcal = ok(e.kcal) ? `${f0(e.kcal)} ккал` : 'калорії не вказані';
-  const food = e.food.trim() || 'харчування не записане';
-  let training = 'тренування не відмічене';
-  if (e.trained === true) training = e.types.length ? `тренування: ${e.types.join(', ')}` : 'тренування';
-  else if (e.trained === false) training = 'відпочинок';
-  return [dLong(date), kcal, food, training].join(', ');
-}
-
-export function buildHistory(data: AppData, limit: number): HistoryModel {
-  const rows = recentDays(data, limit).map(({ date, entry: e }): HistoryRow => {
-    const d = parse(date);
-    const training =
-      e.trained === true ? e.types[0] || 'Тренування' : e.trained === false ? 'Відпочинок' : EMPTY;
-    return {
-      date,
-      day: d.getDate(),
-      month: MONTHS_SHORT[d.getMonth()] ?? '',
-      kcal: ok(e.kcal) ? `${f0(e.kcal)} ккал` : 'Калорії не вказані',
-      food: e.food.trim() || 'Харчування не записане',
-      training,
-      trainingTone: e.trained === true ? 'acc' : 'neutral',
-      label: historyLabel(date, e),
-    };
-  });
-  return { rows, hasMore: Object.keys(data.days).length > rows.length };
 }

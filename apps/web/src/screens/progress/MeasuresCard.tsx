@@ -1,7 +1,7 @@
 import type { MeasureKey } from '@legko/shared';
 import { useId } from 'react';
 import { Card, CardHeader, cx, LineChart } from '@/ui';
-import { ChartPlaceholder } from './ChartPlaceholder';
+import { ChartPlaceholder, RECORD_MEASURE } from './ChartPlaceholder';
 import type { LineChartModel, MeasureRowModel } from './model';
 import s from './MeasuresCard.module.css';
 import t from './tones.module.css';
@@ -12,10 +12,12 @@ export interface MeasuresCardProps {
   /** «Талія, см» */
   chartLabel: string;
   onSelect: (key: MeasureKey) => void;
+  /** «+ Записати заміри» in the chart placeholder (opens «Заміри тіла»). */
+  onRecord?: () => void;
 }
 
 /** «Заміри тіла»: first → latest value per parameter; the selected row drives the chart. */
-export function MeasuresCard({ rows, chart, chartLabel, onSelect }: MeasuresCardProps) {
+export function MeasuresCard({ rows, chart, chartLabel, onSelect, onRecord }: MeasuresCardProps) {
   const titleId = useId();
   return (
     <Card as="section" gap={12} aria-labelledby={titleId}>
@@ -30,9 +32,10 @@ export function MeasuresCard({ rows, chart, chartLabel, onSelect }: MeasuresCard
             aria-label={row.ariaLabel}
             onClick={() => onSelect(row.key)}
           >
-            <span className={s.label}>{row.label}</span>
+            {/* Spaces between the flex items are not drawn; they keep the text «Талія 74 → 70 см −4 см». */}
+            <span className={s.label}>{row.label}</span>{' '}
             <span className={s.values}>
-              <span className={s.range}>{row.range}</span>
+              <span className={s.range}>{row.range}</span>{' '}
               <span className={cx(s.delta, t[row.deltaTone])}>{row.delta}</span>
             </span>
           </button>
@@ -48,7 +51,10 @@ export function MeasuresCard({ rows, chart, chartLabel, onSelect }: MeasuresCard
           aria-label={chart.ariaLabel}
         />
       ) : (
-        <ChartPlaceholder height={120} hint={chart.emptyHint} />
+        <ChartPlaceholder
+          hint={chart.emptyHint}
+          action={onRecord ? { label: RECORD_MEASURE, onClick: onRecord } : undefined}
+        />
       )}
     </Card>
   );

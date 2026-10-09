@@ -1,12 +1,13 @@
 /**
  * Visual review pass (not pixel assertions): every screen and sheet mode, light and dark, saved to
- * e2e/__screenshots__/<project>/<scheme>/ for a human to look through.
+ * e2e/__screenshots__/<project>/<scheme>/ for a human to look through (redesign A «Чек-лист дня»).
  */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import type { FoodEstimateResponse } from '../packages/shared/src/index';
+import { TODAY } from './support/env';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
 import { expect, test } from './support/test';
 
@@ -28,6 +29,7 @@ const EDITOR_ESTIMATE: FoodEstimateResponse = {
  * Saves a screenshot. `fullPage` on desktop captures the whole page at once; on the phone the
  * floating tab bar is `position: fixed`, which a stitched full-page capture would paint in the
  * middle of the page, so long screens are saved as viewport-sized pages instead (`name-1`, `name-2`…).
+ * A phone screen that fits the viewport (Home) is saved as one `name.png`.
  */
 async function shot(page: Page, info: TestInfo, name: string, fullPage = false): Promise<void> {
   const dir = join(OUT, info.project.name, scheme(info));
@@ -40,14 +42,14 @@ async function shot(page: Page, info: TestInfo, name: string, fullPage = false):
       ),
     );
   });
-  if (!fullPage || info.project.name !== 'iphone') {
-    await page.screenshot({ path: join(dir, `${name}.png`), fullPage, animations: 'disabled' });
-    return;
-  }
   const { total, view } = await page.evaluate(() => ({
     total: document.documentElement.scrollHeight,
     view: window.innerHeight,
   }));
+  if (!fullPage || info.project.name !== 'iphone' || total <= view + 1) {
+    await page.screenshot({ path: join(dir, `${name}.png`), fullPage, animations: 'disabled' });
+    return;
+  }
   const step = view - 160; // overlap so nothing hides behind the tab bar between pages
   for (let i = 0, y = 0; y < total - 160 && i < 8; i++, y += step) {
     await page.evaluate((top) => window.scrollTo(0, top), y);
@@ -62,6 +64,12 @@ const scheme = (info: TestInfo): string => (info.titlePath.includes('dark') ? 'd
 
 async function scrollTop(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0));
+}
+
+/** Scrolls the page so `locator` sits near the top of the viewport (below the sticky bar / notch). */
+async function scrollToTop(page: Page, locator: Locator, offset = 80): Promise<void> {
+  const top = await locator.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
+  await page.evaluate((y) => window.scrollTo(0, y), Math.max(0, top - offset));
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
@@ -87,11 +95,19 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
     test('screens', async ({ app, page }, info) => {
       await app.goto('/');
+      await expect(app.homeRow('Їжа')).toContainText('Записано');
       await shot(page, info, '10-home', true);
+
       await app.go('Календар');
       await shot(page, info, '20-calendar', true);
-      await app.goto('/calendar?date=2026-10-07');
+      // A tapped day scrolls its card into view above the tab bar.
+      await page
+        .getByRole('group', { name: /^\S+ 2026$/ })
+        .getByRole('button', { name: /^7 жовтня/ })
+        .click();
+      await expect(app.region('7 жовтня 2026')).toBeVisible();
       await shot(page, info, '21-calendar-day');
+
       await app.go('Прогрес');
       await shot(page, info, '30-progress-week', true);
       await page.getByRole('radio', { name: 'Весь час' }).click();
@@ -99,72 +115,143 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, info, '31-progress-all', true);
       await page.evaluate(() => window.scrollTo(0, 900));
       await shot(page, info, '32-progress-scrolled-sticky');
-      await app.go('Нагадування');
-      await shot(page, info, '40-reminders', true);
+      const history = page.getByRole('group', { name: 'Історія калорій' });
+      await history.getByRole('button', { name: 'Показати ще' }).click();
+      await expect(history.getByRole('button', { name: /Відкрити в календарі$/ })).toHaveCount(10);
+      await scrollToTop(page, history.getByRole('heading', { name: 'Історія калорій' }), 120);
+      await shot(page, info, '33-progress-history-more');
+
+      await app.go('Налаштування');
+      await shot(page, info, '40-settings', true);
+      await app.gotoSettings('Нагадування');
+      await shot(page, info, '42-settings-reminders', true);
+      await app.gotoSettings('Цілі');
+      await shot(page, info, '43-settings-goals', true);
+      await app.gotoSettings('Типи тренувань');
+      await shot(page, info, '44-settings-workouts', true);
+      await app.gotoSettings('Вигляд');
+      await shot(page, info, '45-settings-appearance', true);
+      await app.gotoSettings('Дані і копія');
+      await shot(page, info, '46-settings-data', true);
+    });
+
+    test('home states', async ({ app, page, server }, info) => {
+      // Weigh-in and measurement day = today (Wednesday), a planned workout, today's kcal over the goal.
+      const due = await server.getData();
+      due.settings.rem.weigh.day = 3;
+      due.settings.rem.measure.day = 3;
+      due.days[TODAY] = { food: '', trained: null, types: [], notes: '', ...due.days[TODAY], kcal: 1820 };
+      await server.importData(due);
+      await app.goto('/');
+      await expect(app.homeRow('Вага')).toContainText('Сьогодні');
+      await expect(app.homeRow('Тренування')).toContainText('За планом о 18:00');
+      await expect(app.homeRow('Їжа')).toContainText('1 820 / 1 700 ккал');
+      await shot(page, info, '12-home-due', true);
+
+      // The latest weigh-in is the goal weight.
+      const reached = await server.getData();
+      const latest = [...reached.weights].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+      if (!latest) throw new Error('the demo data has weigh-ins');
+      reached.settings.goal = latest.kg;
+      await server.importData(reached);
+      await app.reload();
+      const hero = app.region('Поточна вага');
+      await expect(hero).toContainText('✓ Ціль досягнута');
+      // Readable on the hero in both themes (light text on the dark hero, dark text on the light-grey dark hero).
+      const contrast = await hero.getByText('✓ Ціль досягнута').evaluate((el) => {
+        const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+        const lum = (c: string) => {
+          const [r = 0, g = 0, b = 0] = rgb(c).map((v) => {
+            const s = v / 255;
+            return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        let bg = 'rgba(0, 0, 0, 0)';
+        for (let n: Element | null = el; n && /rgba\(.*, 0\)|transparent/.test(bg); n = n.parentElement)
+          bg = getComputedStyle(n).backgroundColor;
+        const [a, b] = [lum(getComputedStyle(el).color), lum(bg)].sort((x, y) => y - x) as [number, number];
+        return (a + 0.05) / (b + 0.05);
+      });
+      expect(contrast, '«✓ Ціль досягнута» contrast on the hero').toBeGreaterThanOrEqual(4.5);
+      await shot(page, info, '13-home-goal-reached');
     });
 
     test('offline home', async ({ app, page, context }, info) => {
       await app.goto('/');
       await context.setOffline(true);
       await expect(page.getByText('Офлайн · зміни збережено на телефоні')).toBeVisible();
-      await app.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
+      await app.trainingToggle('Не було').click();
+      await expect(app.toast('Відмічено: без тренування')).toBeVisible();
       await shot(page, info, '11-home-offline');
-      await app.go('Нагадування');
-      await page.getByRole('heading', { name: 'Дані' }).scrollIntoViewIfNeeded();
-      await shot(page, info, '41-reminders-offline-data');
+      // In-app navigation: a page load needs the network (the e2e run blocks the service worker).
+      await app.openSettings('Дані і копія');
+      await expect(app.region('Дані')).toContainText('Офлайн');
+      // The toast would cover the back link.
+      await expect(app.toast('Відмічено: без тренування')).toBeHidden({ timeout: 10_000 });
+      await shot(page, info, '41-settings-offline-data');
     });
 
     test('sheets', async ({ app, page }, info) => {
       const food = await mockFood(page);
       await app.goto('/');
 
-      await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
-      const day = app.sheet('Запис дня');
-      await shot(page, info, '50-sheet-day');
-      await day.getByRole('button', { name: 'Було', exact: true }).click();
-      await day.getByRole('button', { name: 'Кардіо', exact: true }).click();
-      await day.getByRole('button', { name: '+ Свій тип' }).click();
-      await shot(page, info, '51-sheet-day-trained');
-      await day.getByRole('textbox', { name: 'Новий тип тренування' }).press('Escape');
+      await app.recordButton().click();
+      await expect(app.sheet('Що записати?')).toBeVisible();
+      await shot(page, info, '50-sheet-menu');
+      await app.sheet('Що записати?').getByRole('button', { name: /^Їжа/ }).click();
+      const sheet = app.sheet('Їжа');
+      await expect(sheet).toBeVisible();
+      await shot(page, info, '51-sheet-food');
 
-      await day.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
-      await day.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ 300 г і 2 скибки хліба');
-      await shot(page, info, '52-sheet-day-composer');
-      await day.getByRole('button', { name: 'Порахувати', exact: true }).click();
-      await day.getByRole('region', { name: 'Оцінка калорій' }).scrollIntoViewIfNeeded();
-      await shot(page, info, '53-sheet-day-estimate');
-      await day.getByRole('button', { name: /^Додати \d+ ккал$/ }).click();
+      await sheet.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
+      await sheet.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ 300 г і 2 скибки хліба');
+      await shot(page, info, '52-sheet-food-composer');
+      await sheet.getByRole('button', { name: 'Порахувати', exact: true }).click();
+      await sheet.getByRole('region', { name: 'Оцінка калорій' }).scrollIntoViewIfNeeded();
+      await shot(page, info, '53-sheet-food-estimate');
+      await sheet.getByRole('button', { name: /^Додати \d+ ккал$/ }).click();
 
       // Photo estimate → thumbnail strip.
       await page.unroute('**/api/food/estimate');
       await page.route('**/api/food/estimate', (r) => r.fulfill({ json: PHOTO_ESTIMATE }));
-      await day.locator('input[type="file"][accept="image/*"]').setInputFiles({
+      await sheet.locator('input[type="file"][accept="image/*"]').setInputFiles({
         name: 'plate.jpg',
         mimeType: 'image/jpeg',
         buffer: FOOD_JPEG,
       });
-      await day.getByRole('region', { name: 'Оцінка калорій' }).scrollIntoViewIfNeeded();
-      await shot(page, info, '54-sheet-day-photo-estimate');
-      await day.getByRole('button', { name: 'Додати 420 ккал' }).click();
-      await expect(day.locator(`img[src="/api/photos/${PHOTO_ID}/thumb"]`)).toBeVisible();
-      await day.getByRole('textbox', { name: 'Що я їла' }).scrollIntoViewIfNeeded();
-      await shot(page, info, '55-sheet-day-photos');
-      await day.getByRole('button', { name: 'Фото їжі' }).click();
+      await sheet.getByRole('region', { name: 'Оцінка калорій' }).scrollIntoViewIfNeeded();
+      await shot(page, info, '54-sheet-food-photo-estimate');
+      await sheet.getByRole('button', { name: 'Додати 420 ккал' }).click();
+      await expect(sheet.locator(`img[src="/api/photos/${PHOTO_ID}/thumb"]`)).toBeVisible();
+      await sheet.getByRole('textbox', { name: 'Що я їла' }).scrollIntoViewIfNeeded();
+      await shot(page, info, '55-sheet-food-photos');
+      await sheet.getByRole('button', { name: 'Фото їжі' }).click();
       await expect(page.getByRole('dialog', { name: 'Фото їжі' })).toBeVisible();
       await shot(page, info, '56-photo-viewer');
       await page.keyboard.press('Escape');
-      await day.getByRole('button', { name: 'Змінити' }).scrollIntoViewIfNeeded();
-      await day.getByRole('button', { name: 'Змінити' }).click();
-      await shot(page, info, '57-sheet-day-frequent-edit');
-      await day.getByRole('button', { name: 'Готово' }).click();
-      await day.getByRole('textbox', { name: 'Калорії за день' }).fill('25000');
-      await shot(page, info, '58-sheet-day-kcal-error');
-      await day.getByRole('textbox', { name: 'Калорії за день' }).fill('1650');
-      await app.save(day);
+      await sheet.getByRole('button', { name: 'Змінити' }).scrollIntoViewIfNeeded();
+      await sheet.getByRole('button', { name: 'Змінити' }).click();
+      await shot(page, info, '57-sheet-food-frequent-edit');
+      await sheet.getByRole('button', { name: 'Готово' }).click();
+      await sheet.getByRole('textbox', { name: 'Калорії за день' }).fill('25000');
+      await shot(page, info, '58-sheet-food-kcal-error');
+      await sheet.getByRole('textbox', { name: 'Калорії за день' }).fill('1650');
+      await app.save(sheet);
       await shot(page, info, '59-home-after-save-toast');
       expect(food.estimates).toHaveLength(1); // the photo estimate went to the replacement route
 
       await app.goto('/calendar');
+      // Tapping today's cell brings its tall day card (food lines + the photo) into view.
+      await page
+        .getByRole('group', { name: /^\S+ 2026$/ })
+        .getByRole('button', { name: /^14 жовтня/ })
+        .click();
+      if (info.project.name === 'iphone')
+        await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+      await expect(
+        app.region('14 жовтня 2026').getByRole('heading', { name: '14 жовтня 2026' }),
+      ).toBeInViewport();
       await shot(page, info, '22-calendar-day-with-photos');
 
       await app.goto('/?sheet=weight');
@@ -178,6 +265,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, info, '70-sheet-measure');
       await measure.locator('input[name="chest"]').fill('5');
       await shot(page, info, '71-sheet-measure-error');
+
+      await app.goto('/');
+      const workout = await app.record('Тренування');
+      await shot(page, info, '75-sheet-workout');
+      await workout.getByRole('button', { name: 'Було', exact: true }).click();
+      await workout.getByRole('button', { name: 'Кардіо', exact: true }).click();
+      await workout.getByRole('button', { name: '+ Нотатка до дня' }).click();
+      await expect(workout.getByRole('textbox', { name: 'Нотатки' })).toBeFocused();
+      await workout.getByRole('button', { name: '+ Свій тип' }).click();
+      await expect(workout.getByRole('textbox', { name: 'Новий тип тренування' })).toBeFocused();
+      await shot(page, info, '76-sheet-workout-trained');
+
+      await app.goto('/calendar?date=2026-10-13');
+      await app.region('13 жовтня 2026').getByRole('button', { name: 'Редагувати день' }).click();
+      await expect(app.sheet('Запис дня')).toContainText('13 жовтня 2026');
+      await shot(page, info, '77-sheet-day-full');
 
       if (info.project.name === 'iphone') {
         await app.goto('/');
@@ -256,7 +359,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
       test('setup and empty states', async ({ app, page }, info) => {
         await app.goto('/');
-        const setup = app.sheet('Налаштування');
+        const setup = app.sheet('Перші кроки');
         await expect(setup).toBeVisible();
         await shot(page, info, '90-sheet-setup');
         await setup.getByRole('textbox', { name: 'Цільова вага' }).fill('');

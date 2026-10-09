@@ -55,9 +55,12 @@ test.describe('backup', () => {
     app,
     page,
   }) => {
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
+    // In-app navigation from here on (no reload): the change may still be on its way to the server.
+    await app.openSettings('Цілі');
     await app.region('Мої цілі').getByRole('button', { name: 'Збільшити цільову вагу' }).click();
+    await app.openSettings('Дані і копія');
 
     const download = page.waitForEvent('download');
     await page.getByRole('link', { name: 'Завантажити резервну копію' }).click();
@@ -93,16 +96,17 @@ test.describe('backup', () => {
     page.on('download', () => {
       downloads += 1;
     });
-    const sharedFiles = () =>
-      page.evaluate(() => (window as unknown as { __shared: SharedFile[] }).__shared);
+    const sharedFiles = () => page.evaluate(() => (window as unknown as { __shared: SharedFile[] }).__shared);
 
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     const dataCard = app.region('Дані');
     await expect(dataCard).toContainText('Усе синхронізовано');
     await expect(dataCard.getByRole('link')).toHaveCount(0);
 
-    // A change made just before is in the copy.
+    // A change made just before is in the copy (in-app navigation, no reload in between).
+    await app.openSettings('Цілі');
     await app.region('Мої цілі').getByRole('button', { name: 'Збільшити цільову вагу' }).click();
+    await app.openSettings('Дані і копія');
     await dataCard.getByRole('button', { name: 'Завантажити резервну копію' }).click();
     await expect.poll(async () => (await sharedFiles()).length).toBe(1);
 
@@ -127,7 +131,7 @@ test.describe('backup', () => {
     page,
     server,
   }) => {
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     const native = watchNativeDialogs(page);
     const ask = page.getByRole('alertdialog', { name: 'Відновити з резервної копії?' });
 
@@ -154,14 +158,27 @@ test.describe('backup', () => {
     expect(stored.foods).toEqual([]);
     expect(stored.settings.goal).toBe(70);
 
+    // The list sums up the restored goal at once.
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Цілі')).toContainText('70 кг');
+
     await app.go('Головна');
     const hero = app.region('Поточна вага');
     await expect(hero).toContainText('80,0');
-    await expect(hero).toContainText('Ціль 70,0');
-    await expect(app.region('Сьогодні')).toContainText('Не записано');
+    await expect(hero).toContainText('до цілі 10,0 кг');
+    // Nothing recorded today in the backup.
+    await expect(app.homeRow('Їжа')).toContainText('—');
+    await app.go('Прогрес');
+    await expect(app.region('Вага')).toContainText('Ціль 70,0');
 
     await app.goto('/calendar?date=2026-10-01');
-    await expect(app.region('1 жовтня 2026')).toContainText('✓ Розтяжка');
+    const day = app.region('1 жовтня 2026');
+    await expect(day).toContainText('Імпортований день');
+    await expect(day).toContainText('Розтяжка');
+    await expect(day.getByRole('button', { name: 'Було', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     expect(native).toEqual([]);
   });
 
@@ -170,7 +187,7 @@ test.describe('backup', () => {
     page,
     server,
   }) => {
-    await app.goto('/reminders');
+    await app.gotoSettings('Дані і копія');
     const native = watchNativeDialogs(page);
     await backupInput(page).setInputFiles(file('{"days": "nope"}', 'random.json'));
     await expect(app.toast('Файл не схожий на резервну копію «Легко»')).toBeVisible();
@@ -183,11 +200,11 @@ test.describe('backup', () => {
 });
 
 test.describe('account', () => {
-  /** The footer button (only touched while no dialog is open: the dialog has its own «Вийти»). */
+  /** The «Вийти» row of the settings list (only touched while no dialog is open: the dialog has its own «Вийти»). */
   const logoutButton = (page: Page) => page.getByRole('button', { name: 'Вийти', exact: true });
 
   test('«Вийти» asks, then returns to the login screen and wipes this device', async ({ app, page }) => {
-    await app.goto('/reminders');
+    await app.goto('/settings');
     const native = watchNativeDialogs(page);
     expect((await app.deviceCache()).data).toBeTruthy();
     const ask = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
@@ -221,9 +238,13 @@ test.describe('account', () => {
   }) => {
     await app.goto('/');
     await context.setOffline(true);
-    await app.region('Сьогодні').getByRole('button', { name: 'Не було', exact: true }).click();
-    await app.go('Нагадування');
+    await app.trainingToggle('Не було').click();
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Дані і копія')).toContainText('Офлайн · 1 зміна');
+    // Offline, so in-app navigation only (a page load would fail).
+    await app.settingsRow('Дані і копія').click();
     await expect(app.region('Дані')).toContainText('Офлайн — 1 зміна чекає на інтернет');
+    await app.go('Налаштування');
     const native = watchNativeDialogs(page);
     const ask = page.getByRole('alertdialog', { name: 'Деякі зміни ще не синхронізовано' });
 

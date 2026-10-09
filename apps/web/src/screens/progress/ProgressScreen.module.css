@@ -1,0 +1,18 @@
+/* Above the sticky PeriodBar (z-index 5), whose paper band reaches up into the safe area before it sticks. */
+.header {
+  position: relative;
+  z-index: 6;
+}
+
+/*
+ * WCAG 2.4.11: a card control focused by Tab / Shift+Tab never ends up under the stuck PeriodBar. On focus the
+ * browser scrolls only an element that is not fully in view, and then to the nearest edge (y 0 when tabbing
+ * back). scroll-margin makes the 64px band (8 + 48 + 8) + the 6px fade + the 4px focus ring (2px outline, 2px
+ * offset) + 2px of air count as out of view. Card controls only: the bar's own radios are sticky and must not
+ * move the page (the bar is a <div>, every card a <section>). The phone shell's `scroll-padding-top: safe-top`
+ * adds to this (a row lands one safe-area lower than needed): too low is harmless, too high would be covered.
+ */
+.screen section button,
+.screen section a[href] {
+  scroll-margin-top: calc(var(--safe-top) + 76px);
+}

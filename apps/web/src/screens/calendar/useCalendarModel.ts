@@ -3,43 +3,48 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'wouter';
 import { useToday } from '@/lib/useToday';
 import { useAppData } from '@/store/data';
+import { setTrainedMark } from '@/store/dayMarks';
+import { ui, type SheetMode } from '@/store/ui';
 import {
   buildDayDetail,
-  buildHistory,
   buildMonth,
-  HISTORY_PAGE,
   monthOf,
   resolveSelected,
+  showTodayShortcut,
   stepMonth,
   type DayDetail,
-  type HistoryModel,
   type MonthKey,
   type MonthModel,
 } from './model';
 
 export interface CalendarModel {
-  /** Selected day (`?date=`, today by default): drives the day card. */
+  /** Selected day (`?date=`, today by default): drives the day card. Never a future day. */
   selected: ISODate;
   /** The shown month: starts at the selected day's month, ‹ › move it without touching the selection. */
   month: MonthModel;
   detail: DayDetail;
-  history: HistoryModel;
+  /** The header «Сьогодні» shortcut: another day is selected or another month is shown. */
+  showToday: boolean;
+  /**
+   * Bumped by every day-cell tap (only then): the day card scrolls itself into view. Not on load with `?date=`,
+   * not on ‹ › / a swipe, not on «Сьогодні».
+   */
+  revealTick: number;
+  /** A day cell was tapped: select that day (replaced URL) and reveal its card. */
   select: (date: ISODate) => void;
   /** Shows the previous / next month (no-op past the current month); the selection stays. */
   step: (delta: -1 | 1) => void;
-  /** «Останні записи» row: select that day, show its month and bring the calendar back into view. */
-  openFromHistory: (date: ISODate) => void;
-  showMore: () => void;
-}
-
-function scrollToTop(): void {
-  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  window.scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' });
+  /** «Сьогодні»: drops `?date=` (replaced URL) and shows today's month. */
+  goToday: () => void;
+  /** A day row: opens its sheet for the selected day. */
+  open: (mode: SheetMode) => void;
+  /** The inline ✓ / ✕ of the Тренування row: saves the mark for the selected day (toast, no sheet). */
+  setTrained: (trained: boolean) => void;
 }
 
 /**
  * The month on screen (prototype `calY` / `calM`). It jumps to the selected day's month whenever the
- * selection changes — a day tap, a history row, a `?date=` link, today rolling over at midnight —
+ * selection changes — a day tap, «Сьогодні», a `?date=` link, today rolling over at midnight —
  * and otherwise only moves with ‹ ›.
  */
 function useShownMonth(selected: ISODate): [MonthKey, (month: MonthKey) => void] {
@@ -59,18 +64,18 @@ export function useCalendarModel(): CalendarModel {
   const [params, setParams] = useSearchParams();
   const selected = resolveSelected(params.get('date'), today);
   const [shown, setShown] = useShownMonth(selected);
-  const [limit, setLimit] = useState(HISTORY_PAGE);
+  const [revealTick, setRevealTick] = useState(0);
 
   const month = useMemo(() => buildMonth(data, shown, selected, today), [data, shown, selected, today]);
   const detail = useMemo(() => buildDayDetail(data, selected, today), [data, selected, today]);
-  const history = useMemo(() => buildHistory(data, limit), [data, limit]);
 
   // `replace`: picking days must not flood the back stack.
-  const select = (date: ISODate) =>
+  const setDateParam = (date: ISODate | null) =>
     setParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.set('date', date);
+        if (date) next.set('date', date);
+        else next.delete('date');
         return next;
       },
       { replace: true },
@@ -80,18 +85,25 @@ export function useCalendarModel(): CalendarModel {
     selected,
     month,
     detail,
-    history,
-    select,
+    showToday: showTodayShortcut(selected, shown, today),
+    revealTick,
+    select: (date) => {
+      setDateParam(date);
+      setRevealTick((n) => n + 1);
+    },
     step: (delta) => {
       const next = stepMonth(shown, delta, today);
       if (next) setShown(next);
     },
-    openFromHistory: (date) => {
-      select(date);
-      // Also when `date` is already selected but she has browsed to another month.
-      setShown(monthOf(date));
-      scrollToTop();
+    goToday: () => {
+      setDateParam(null);
+      // Also when today is already selected but she has browsed to another month.
+      setShown(monthOf(today));
     },
-    showMore: () => setLimit((n) => n + HISTORY_PAGE),
+    open: (mode) => ui.openSheet(selected, mode),
+    // `resolveSelected` never yields a future day, so this marks today or a past day.
+    setTrained: (trained) => {
+      setTrainedMark(selected, trained);
+    },
   };
 }

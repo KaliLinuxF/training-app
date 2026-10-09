@@ -1,0 +1,21 @@
+.dot {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: background-color 200ms ease;
+}
+
+.ok {
+  background: var(--acc2);
+}
+
+.busy,
+.pending {
+  background: var(--acc);
+}
+
+.offline {
+  background: var(--faint);
+}

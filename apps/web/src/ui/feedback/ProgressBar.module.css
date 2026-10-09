@@ -1,4 +1,6 @@
+/* Spans (phrasing content, valid inside a <button>) laid out as blocks. */
 .track {
+  display: block;
   border-radius: 99px;
   overflow: hidden;
   min-width: 0;
@@ -25,6 +27,7 @@
 }
 
 .fill {
+  display: block;
   height: 100%;
   border-radius: 99px;
 }
