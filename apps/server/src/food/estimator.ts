@@ -1,4 +1,11 @@
-import { foodEstimateResultSchema, LIMITS, type FoodEstimateItem, type FoodRecalcItem } from '@legko/shared';
+import {
+  foodEstimateResultSchema,
+  LIMITS,
+  roundMacro,
+  type FoodEstimateItem,
+  type FoodRecalcItem,
+  type MacroGrams,
+} from '@legko/shared';
 
 /** What the estimate is made from: a description, a photo, or both. */
 export interface FoodEstimateInput {
@@ -21,9 +28,10 @@ export interface FoodRecalcInput {
   imageBase64: string | null;
 }
 
-/** New energy for the sent items: `kcal[i]` belongs to `items[i]`. */
+/** New energy and macros for the sent items: `kcal[i]` and `macros[i]` belong to `items[i]`. */
 export interface FoodRecalculation {
   kcal: number[];
+  macros: MacroGrams[];
   comment: string;
 }
 
@@ -33,7 +41,7 @@ export interface FoodEstimator {
   estimate(input: FoodEstimateInput): Promise<FoodEstimate>;
   /**
    * Prices exactly the given items without renaming, merging, splitting or reordering them:
-   * one kcal value per item, same order. Throws `FoodAiError` on every failure.
+   * one kcal value and one set of macros per item, same order. Throws `FoodAiError` on every failure.
    */
   recalculate(input: FoodRecalcInput): Promise<FoodRecalculation>;
 }
@@ -54,7 +62,7 @@ export class FoodAiError extends Error {
 
 /** Raw model output, before clean-up (shape of the structured-output schema). */
 export interface RawEstimate {
-  items: { name: string; portion: string; kcal: number }[];
+  items: { name: string; portion: string; kcal: number; protein: number; fat: number; carbs: number }[];
   comment: string;
 }
 
@@ -76,9 +84,22 @@ export function clampKcal(kcal: number): number {
   return Math.min(LIMITS.kcal.max, Math.max(LIMITS.kcal.min, Math.round(kcal)));
 }
 
+/** Grams of one macronutrient: 0.5 g steps within 0–1 000 g; anything that is not a finite number → null. */
+export function clampMacro(grams: unknown): number | null {
+  return typeof grams === 'number' && Number.isFinite(grams) ? roundMacro(grams, LIMITS.macro.max) : null;
+}
+
+/** The three macros of one model item (a missing or non-finite value → null). */
+const macrosOf = (item: { protein?: unknown; fat?: unknown; carbs?: unknown }): MacroGrams => ({
+  protein: clampMacro(item.protein),
+  fat: clampMacro(item.fat),
+  carbs: clampMacro(item.carbs),
+});
+
 /**
- * Makes model output fit the API contract (lengths, whole non-negative kcal, item count),
+ * Makes model output fit the API contract (lengths, whole non-negative kcal, 0.5 g macros, item count),
  * then validates it with `foodEstimateResultSchema`. Throws `ai_failed` if it still does not fit.
+ * No kcal ↔ macro consistency rewriting (alcohol has energy without macros); the prompt asks for it.
  */
 export function sanitizeEstimate(raw: RawEstimate): FoodEstimate {
   const items = raw.items
@@ -86,6 +107,7 @@ export function sanitizeEstimate(raw: RawEstimate): FoodEstimate {
       name: clip(item.name, LIMITS.foodName),
       portion: clip(item.portion, LIMITS.portion),
       kcal: clampKcal(item.kcal),
+      ...macrosOf(item),
     }))
     .filter((item) => item.name !== '')
     .slice(0, MAX_ITEMS);
@@ -95,8 +117,8 @@ export function sanitizeEstimate(raw: RawEstimate): FoodEstimate {
 }
 
 /**
- * Model output for a recalculation → one whole kcal per sent item, taken by index (the model's
- * own names and portions are ignored). Throws `ai_failed` unless there is exactly one item each.
+ * Model output for a recalculation → one whole kcal and one set of macros per sent item, taken by index
+ * (the model's own names and portions are ignored). Throws `ai_failed` unless there is exactly one item each.
  */
 export function sanitizeRecalculation(raw: RawEstimate, expected: number): FoodRecalculation {
   if (raw.items.length !== expected) {
@@ -104,13 +126,15 @@ export function sanitizeRecalculation(raw: RawEstimate, expected: number): FoodR
   }
   return {
     kcal: raw.items.map((item) => clampKcal(item.kcal)),
+    macros: raw.items.map(macrosOf),
     comment: clip(raw.comment, MAX_COMMENT),
   };
 }
 
 /**
- * Her items with the new energy: names and portions exactly as sent (trimmed), same order,
- * `kcal[i]` clamped to the API limits. Throws `ai_failed` when the counts differ.
+ * Her items with the new energy and macros: names and portions exactly as sent (trimmed), same order,
+ * `kcal[i]` / `macros[i]` clamped to the API limits (missing macros → null). Throws `ai_failed` when the
+ * kcal count differs.
  */
 export function applyRecalculation(
   items: readonly FoodRecalcItem[],
@@ -120,10 +144,11 @@ export function applyRecalculation(
     throw new FoodAiError('ai_failed', `got ${recalc.kcal.length} kcal values for ${items.length} items`);
   }
   return {
-    items: items.map((item, i) => ({
+    items: items.map((item, i): FoodEstimateItem => ({
       name: item.name.trim(),
       portion: item.portion.trim(),
       kcal: clampKcal(recalc.kcal[i] ?? Number.NaN),
+      ...macrosOf(recalc.macros[i] ?? {}),
     })),
     comment: clip(recalc.comment, MAX_COMMENT),
   };

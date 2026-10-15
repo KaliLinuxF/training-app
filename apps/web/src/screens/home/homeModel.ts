@@ -9,6 +9,7 @@ import {
   f0,
   f1,
   fN,
+  hasMeals,
   sgn,
   weekdayOf,
   type AppData,
@@ -19,6 +20,7 @@ import {
   type WeeklyReminder,
 } from '@legko/shared';
 import { kcalGoalView } from '@/features/goal';
+import { dayNutrition, macroParts, macroSpeech, mealCountText, NBSP, type MacroPart } from '@/lib/nutrition';
 import {
   MEASURE_LABELS,
   MEASURE_PARAMS,
@@ -41,7 +43,11 @@ export interface HomeAction {
   patch?: SheetPatch;
 }
 
-/** Each «Сьогодні» row opens its short sheet (no patch: the ✓ / ✕ save inline). */
+/**
+ * Each «Сьогодні» row opens its short sheet (no patch: the ✓ / ✕ save inline). The «Їжа» row's action depends on
+ * the day (`HomeFoodRow.action`: the new-meal editor while nothing is logged today); `food` here is its action on
+ * a day with food — the day's meal list «Їжа».
+ */
 export const HOME_ROW_ACTIONS: Readonly<Record<HomeRowId, HomeAction>> = {
   food: { mode: 'food' },
   workout: { mode: 'workout' },
@@ -82,6 +88,23 @@ export interface HomeHero {
 
 export type HomeFoodState = 'empty' | 'recorded' | 'ok' | 'reached' | 'over';
 
+/** One part of the macro line, «Б 68/90»; `unit`: «г» follows it (the last known part, as in `macroLine`). */
+export interface HomeMacroPart extends MacroPart {
+  unit: boolean;
+}
+
+/**
+ * Second line of the «Їжа» row:
+ * - `note` — «Калорії не вказані» (food recorded without kcal; the only lavender sub, `foodSubTone`);
+ * - `macros` — «Б 68 · Ж 41 · В 132 г · 3 прийоми» without macro goals, «Б 68/90 · Ж 41/60 · В 132 г» with any
+ *   goal; `count` is `null` with a goal and on a legacy day;
+ * - `count` — «3 прийоми»: a meal day with kcal but no known macronutrient.
+ */
+export type HomeFoodSub =
+  | { kind: 'note'; text: string }
+  | { kind: 'macros'; parts: HomeMacroPart[]; count: string | null }
+  | { kind: 'count'; text: string };
+
 export interface HomeFoodRow {
   state: HomeFoodState;
   /** «1 650» | «—» | «Записано». */
@@ -90,8 +113,10 @@ export interface HomeFoodRow {
   goal: string | null;
   /** Decorative bar under the title (mint ≤ goal, lavender over); `null` for «Записано». */
   meter: { value: number; tone: 'acc' | 'acc2' } | null;
-  /** «Калорії не вказані» (food recorded without kcal), else `null`. */
-  sub: string | null;
+  /** The macro / meal-count line, the «Калорії не вказані» note, or `null` (nothing logged, or a legacy day). */
+  sub: HomeFoodSub | null;
+  /** Nothing logged today → the new-meal editor «Прийом їжі» (`meal`); otherwise the day's list «Їжа» (`food`). */
+  action: HomeAction;
   /** Accessible name, «Їжа: …». */
   label: string;
 }
@@ -163,6 +188,7 @@ const NB = '\u00a0';
 const WEEK_HREF = '/progress?period=week';
 
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+const upperFirst = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
 
 /** «2 тренування», «5 тренувань» (1 / 21 тренування, 2–4 тренування, 0 / 5+ / 11–14 тренувань). */
 function trainingsWord(n: number): string {
@@ -223,9 +249,33 @@ function buildHero(data: AppData): HomeHero {
 const hasFood = (e: DayEntry | undefined): boolean =>
   !!e && (e.food.trim() !== '' || (e.photos?.length ?? 0) > 0);
 
+/** Nothing logged today: the row opens the new-meal editor (type preselected, «Що я їла» focused, D8). */
+const NEW_MEAL: HomeAction = { mode: 'meal' };
+/** A day with food: the day's meal list «Їжа» (totals + meal rows). */
+const FOOD_LIST: HomeAction = { mode: 'food' };
+
+/** After the macro sentence when a meal with energy lacks a macronutrient (D22: the sums are lower bounds). */
+export const PARTIAL_MACROS_NOTE = ' (не для всіх прийомів)';
+
+/** Only the «Калорії не вказані» note is lavender; the macro and count lines keep the row's default --ink2. */
+export const foodSubTone = (sub: HomeFoodSub | null): 'acc' | undefined =>
+  sub?.kind === 'note' ? 'acc' : undefined;
+
+/** «3 прийоми їжі» for the accessible name (ordinary spaces). */
+const mealsSpoken = (n: number): string => `${mealCountText(n).replace(NBSP, ' ')} їжі`;
+
+/** The three parts with «г» after the last known one. */
+function homeMacroParts(parts: readonly MacroPart[]): HomeMacroPart[] {
+  let last = -1;
+  parts.forEach((p, i) => {
+    if (p.known) last = i;
+  });
+  return parts.map((p, i) => ({ ...p, unit: i === last }));
+}
+
 function buildFood(data: AppData, today: ISODate): HomeFoodRow {
   const entry = data.days[today];
-  const kcalGoal = data.settings.kcalGoal;
+  const { kcalGoal, macroGoals } = data.settings;
   const view = kcalGoalView(entry?.kcal, kcalGoal);
   const goal = ` / ${f0(kcalGoal)} ккал`;
   if (view.state === 'empty') {
@@ -235,7 +285,8 @@ function buildFood(data: AppData, today: ISODate): HomeFoodRow {
         value: 'Записано',
         goal: null,
         meter: null,
-        sub: 'Калорії не вказані',
+        sub: { kind: 'note', text: 'Калорії не вказані' },
+        action: FOOD_LIST,
         label: `Їжа: записано, калорії не вказані. ${view.label}`,
       };
     }
@@ -245,16 +296,41 @@ function buildFood(data: AppData, today: ISODate): HomeFoodRow {
       goal,
       meter: { value: 0, tone: 'acc2' },
       sub: null,
+      action: NEW_MEAL,
       label: `Їжа: ще нічого не записано. ${view.label}`,
     };
   }
+
+  const nutrition = dayNutrition(entry);
+  // A legacy day is one block «Їжа за день», not a count of meals.
+  const mealDay = hasMeals(entry);
+  const count = mealDay ? mealCountText(nutrition.count) : null;
+  const parts = macroParts(nutrition.macros, macroGoals, nutrition.complete);
+  const anyGoal = parts.some((p) => p.goal !== null);
+
+  let sub: HomeFoodSub | null = null;
+  if (nutrition.hasMacros) {
+    // With a goal the parts are «68/90»: no room for the count at 390px.
+    sub = { kind: 'macros', parts: homeMacroParts(parts), count: anyGoal ? null : count };
+  } else if (count !== null) {
+    sub = { kind: 'count', text: count };
+  }
+
+  const sentences = [`Їжа: ${view.label}`];
+  const speech = nutrition.hasMacros ? macroSpeech(nutrition.macros, macroGoals) : null;
+  if (speech !== null) {
+    sentences.push(`${upperFirst(speech)}${parts.some((p) => p.partial) ? PARTIAL_MACROS_NOTE : ''}`);
+  }
+  if (mealDay) sentences.push(mealsSpoken(nutrition.count));
+
   return {
     state: view.state,
     value: f0(entry?.kcal),
     goal,
     meter: { value: view.pct, tone: view.state === 'over' ? 'acc' : 'acc2' },
-    sub: null,
-    label: `Їжа: ${view.label}`,
+    sub,
+    action: FOOD_LIST,
+    label: sentences.join('. '),
   };
 }
 

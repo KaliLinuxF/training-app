@@ -13,7 +13,10 @@ import type { AppEnv } from './types';
 export const BODY_LIMITS = {
   /** `{ password }` (≤ 200 characters). */
   login: 4 * 1024,
-  /** A full import of years of data, or 500 ops at the schema's text limits (≈ 10.5 MB). */
+  /**
+   * A full import of years of data, or 500 ops at the schema's limits: ≈ 10.5 MB for `day.put` (which never
+   * carries meals: its schema strips them) and ≈ 10–11 MB for `meal.put` (5 000-character text + 30 positions).
+   */
   bulk: 16 * 1024 * 1024,
   /** Full photo (≤ 2.8 M base64 chars) + thumbnail (≤ 0.4 M) + text, as JSON: ≈ 3.3 MB at most. */
   foodEstimate: 4 * 1024 * 1024,

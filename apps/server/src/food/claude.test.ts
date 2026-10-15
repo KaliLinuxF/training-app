@@ -51,11 +51,21 @@ const recalcPhotoInput: FoodRecalcInput = { items: CORRECTED, imageBase64: IMAGE
 
 const output: RawEstimate = {
   items: [
-    { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320 },
-    { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60 },
+    { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, protein: 9, fat: 6, carbs: 58 },
+    { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60, protein: 3, fat: 3, carbs: 5 },
   ],
   comment: '',
 };
+
+/** A model item with macros that do not matter for the test. */
+const item = (name: string, portion: string, kcal: number): RawEstimate['items'][number] => ({
+  name,
+  portion,
+  kcal,
+  protein: 1,
+  fat: 1,
+  carbs: 1,
+});
 
 const message = (patch: Partial<EstimateMessage> = {}): EstimateMessage => ({
   stop_reason: 'end_turn',
@@ -124,13 +134,40 @@ describe('buildEstimateRequest', () => {
           items: {
             type: 'object',
             additionalProperties: false,
-            required: ['name', 'portion', 'kcal'],
-            properties: { name: { type: 'string' }, portion: { type: 'string' }, kcal: { type: 'number' } },
+            required: ['name', 'portion', 'kcal', 'protein', 'fat', 'carbs'],
+            properties: {
+              name: { type: 'string' },
+              portion: { type: 'string' },
+              kcal: { type: 'number' },
+              protein: { type: 'number', description: 'Protein in this portion, grams' },
+              fat: { type: 'number', description: 'Fat in this portion, grams' },
+              carbs: { type: 'number', description: 'Carbohydrate in this portion, grams' },
+            },
           },
         },
         comment: { type: 'string' },
       },
     });
+  });
+
+  it('puts no numeric bounds into the schema (structured outputs do not support them)', () => {
+    const schema = JSON.stringify(buildEstimateRequest(textInput, MODEL).output_config.format.schema);
+    for (const keyword of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf']) {
+      expect(schema, keyword).not.toContain(`"${keyword}"`);
+    }
+  });
+
+  it('asks for protein, fat and carbs in 0.5 g steps, consistent with kcal', () => {
+    expect(SYSTEM_PROMPT).toContain(
+      '- protein, fat, carbs: grams of protein, fat and carbohydrate in that portion, to the nearest 0.5 g.',
+    );
+    expect(SYSTEM_PROMPT).toContain('about 4 kcal per gram of protein or carbohydrate and 9 per gram of fat');
+    expect(SYSTEM_PROMPT).toContain('alcohol adds energy without macronutrients');
+    expect(SYSTEM_PROMPT).toContain(
+      'Water, black coffee, plain tea and other drinks without energy: 0, 0, 0.',
+    );
+    // The macro rule follows the kcal rule.
+    expect(SYSTEM_PROMPT.indexOf('- protein, fat, carbs:')).toBeGreaterThan(SYSTEM_PROMPT.indexOf('- kcal:'));
   });
 
   it('sends text only as one text block', () => {
@@ -213,22 +250,36 @@ describe('readEstimateResponse', () => {
   it('clamps kcal and fits names, portions, item count and comment to the API limits', () => {
     const raw: RawEstimate = {
       items: [
-        { name: '  Борщ  ', portion: ' 300 г ', kcal: 182.6 },
-        { name: 'Олія', portion: '', kcal: -5 },
-        { name: 'Торт', portion: 'весь', kcal: 99999 },
-        { name: '   ', portion: '1 шт.', kcal: 10 },
-        { name: 'Я'.repeat(LIMITS.foodName + 20), portion: 'п'.repeat(LIMITS.portion + 5), kcal: Number.NaN },
-        ...Array.from({ length: 40 }, (_, i) => ({ name: `Страва ${i}`, portion: '', kcal: 1 })),
+        { name: '  Борщ  ', portion: ' 300 г ', kcal: 182.6, protein: 6.1, fat: 9.4, carbs: 19.8 },
+        { name: 'Олія', portion: '', kcal: -5, protein: -1, fat: 5, carbs: 0 },
+        { name: 'Торт', portion: 'весь', kcal: 99999, protein: 5000, fat: 4000, carbs: 12000 },
+        item('   ', '1 шт.', 10),
+        {
+          name: 'Я'.repeat(LIMITS.foodName + 20),
+          portion: 'п'.repeat(LIMITS.portion + 5),
+          kcal: Number.NaN,
+          protein: Number.NaN,
+          fat: Number.POSITIVE_INFINITY,
+          carbs: 2,
+        },
+        ...Array.from({ length: 40 }, (_, i) => item(`Страва ${i}`, '', 1)),
       ],
       comment: `  ${'Порція приблизна. '.repeat(30)}`,
     };
     const result = readEstimateResponse(message({ parsed_output: raw }));
     expect(result.items).toHaveLength(30);
     expect(result.items.slice(0, 4)).toEqual([
-      { name: 'Борщ', portion: '300 г', kcal: 183 },
-      { name: 'Олія', portion: '', kcal: 0 },
-      { name: 'Торт', portion: 'весь', kcal: LIMITS.kcal.max },
-      { name: 'Я'.repeat(LIMITS.foodName), portion: 'п'.repeat(LIMITS.portion), kcal: 0 },
+      { name: 'Борщ', portion: '300 г', kcal: 183, protein: 6, fat: 9.5, carbs: 20 },
+      { name: 'Олія', portion: '', kcal: 0, protein: 0, fat: 5, carbs: 0 },
+      { name: 'Торт', portion: 'весь', kcal: LIMITS.kcal.max, protein: 1000, fat: 1000, carbs: 1000 },
+      {
+        name: 'Я'.repeat(LIMITS.foodName),
+        portion: 'п'.repeat(LIMITS.portion),
+        kcal: 0,
+        protein: null,
+        fat: null,
+        carbs: 2,
+      },
     ]);
     expect(result.comment.length).toBeLessThanOrEqual(300);
     expect(result.comment.startsWith('Порція приблизна.')).toBe(true);
@@ -236,7 +287,7 @@ describe('readEstimateResponse', () => {
 
   it('never cuts an emoji in half', () => {
     const raw: RawEstimate = {
-      items: [{ name: `${'a'.repeat(LIMITS.foodName - 1)}🍌`, portion: '', kcal: 1 }],
+      items: [item(`${'a'.repeat(LIMITS.foodName - 1)}🍌`, '', 1)],
       comment: '',
     };
     expect(readEstimateResponse(message({ parsed_output: raw })).items[0]?.name).toBe(
@@ -303,6 +354,7 @@ describe('buildRecalcRequest', () => {
       'name and portion copied unchanged',
       'Never rename, merge, split, reorder, drop or add items',
       'exactly that food in exactly that portion',
+      '- kcal, protein, fat, carbs: the energy and the macronutrients of exactly that food in exactly that portion.',
       'use it only to understand how the food was prepared: oil, butter, sauces, dressing, cooking method',
     ]) {
       expect(RECALC_SYSTEM_PROMPT).toContain(phrase);
@@ -313,8 +365,15 @@ describe('buildRecalcRequest', () => {
 });
 
 describe('readRecalcResponse', () => {
-  it('returns one kcal per sent item, by index', () => {
-    expect(readRecalcResponse(message(), 2)).toEqual({ kcal: [320, 60], comment: '' });
+  it('returns one kcal and one set of macros per sent item, by index', () => {
+    expect(readRecalcResponse(message(), 2)).toEqual({
+      kcal: [320, 60],
+      macros: [
+        { protein: 9, fat: 6, carbs: 58 },
+        { protein: 3, fat: 3, carbs: 5 },
+      ],
+      comment: '',
+    });
   });
 
   it('fails with ai_failed when the model returns a different number of items', () => {
@@ -434,11 +493,19 @@ describe('createClaudeEstimator (fake client)', () => {
     await expect(estimator.recalculate(recalcInput)).rejects.toMatchObject({ code: 'ai_failed' });
   });
 
-  it('recalculates with the recalculation request and returns one kcal per sent item', async () => {
+  it('recalculates with the recalculation request and returns one kcal and macros per sent item', async () => {
     const { client, calls } = fakeClient(() => message());
     const estimator = createClaudeEstimator({ apiKey: API_KEY, model: 'claude-test-model', client });
-    expect(await estimator.recalculate(recalcPhotoInput)).toEqual({ kcal: [320, 60], comment: '' });
-    expect(await estimator.recalculate(recalcInput)).toEqual({ kcal: [320, 60], comment: '' });
+    const expected = {
+      kcal: [320, 60],
+      macros: [
+        { protein: 9, fat: 6, carbs: 58 },
+        { protein: 3, fat: 3, carbs: 5 },
+      ],
+      comment: '',
+    };
+    expect(await estimator.recalculate(recalcPhotoInput)).toEqual(expected);
+    expect(await estimator.recalculate(recalcInput)).toEqual(expected);
     expect(calls).toEqual([
       buildRecalcRequest(recalcPhotoInput, 'claude-test-model'),
       buildRecalcRequest(recalcInput, 'claude-test-model'),
@@ -539,11 +606,11 @@ describe('with the real SDK client and a fake fetch (no network)', () => {
     expect(first?.content.map((b) => b.type)).toEqual(['image', 'text']);
   });
 
-  it('serialises a recalculation with the photo and her numbered list, and reads kcal by index', async () => {
+  it('serialises a recalculation with the photo and her numbered list, and reads kcal and macros by index', async () => {
     const reply = {
       items: [
-        { name: 'Вівсянка з бананом', portion: '300 г', kcal: 395.4 },
-        { name: 'Кава', portion: '1 чашка', kcal: 45 },
+        { name: 'Вівсянка з бананом', portion: '300 г', kcal: 395.4, protein: 14.2, fat: 9, carbs: 61.7 },
+        { name: 'Кава', portion: '1 чашка', kcal: 45, protein: 2, fat: 2.5, carbs: 3 },
       ],
       comment: 'Молоко у вівсянці враховано',
     };
@@ -551,6 +618,10 @@ describe('with the real SDK client and a fake fetch (no network)', () => {
     const estimator = createClaudeEstimator({ apiKey: API_KEY, model: MODEL, client });
     expect(await estimator.recalculate(recalcPhotoInput)).toEqual({
       kcal: [395, 45],
+      macros: [
+        { protein: 14, fat: 9, carbs: 61.5 },
+        { protein: 2, fat: 2.5, carbs: 3 },
+      ],
       comment: 'Молоко у вівсянці враховано',
     });
 

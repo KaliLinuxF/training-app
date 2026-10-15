@@ -1,4 +1,4 @@
-import { emptyData, f0, type AppData } from '@legko/shared';
+import { emptyData, f0, normalizeDay, type AppData, type Meal } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import {
   captureMenuDateLine,
@@ -28,12 +28,12 @@ describe('captureMenuRows', () => {
     expect(
       rows.map(({ mode, title, sub, icon, iconTone }) => ({ mode, title, sub, icon, iconTone })),
     ).toEqual([
-      { mode: 'food', title: 'Їжа', sub: 'Опис або фото', icon: 'food', iconTone: 'acc2' },
+      { mode: 'meal', title: 'Їжа', sub: 'Новий прийом їжі', icon: 'food', iconTone: 'acc2' },
       { mode: 'workout', title: 'Тренування', sub: 'Було чи ні, тип', icon: 'workout', iconTone: 'acc' },
       { mode: 'weight', title: 'Вага', sub: 'Контрольне зважування', icon: 'weight', iconTone: 'neutral' },
       { mode: 'measure', title: 'Заміри', sub: 'Груди, талія, стегна', icon: 'measure', iconTone: 'neutral' },
     ]);
-    expect(MENU_ROW_COPY.food.title).toBe('Їжа');
+    expect(MENU_ROW_COPY.meal.title).toBe('Їжа');
     expect(FULL_DAY_LABEL).toBe('Повний запис дня');
   });
 
@@ -52,37 +52,63 @@ describe('captureMenuRows', () => {
   it('Їжа: the day’s kcal, in the «over» tone above the goal; «Записано» for a meal without kcal', () => {
     const data = onboarded();
     data.days[WEDNESDAY] = { food: 'Омлет', kcal: 1240, trained: null, types: [], notes: '' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual({
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual({
       kind: 'value',
       text: `${f0(1240)} ккал`,
     });
     expect(`${f0(1240)} ккал`.replace(/\s/g, ' ')).toBe('1 240 ккал');
 
     data.days[WEDNESDAY] = { food: 'Омлет', kcal: 1820, trained: null, types: [], notes: '' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual({
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual({
       kind: 'over',
       text: `${f0(1820)} ккал`,
     });
     // Exactly the goal is not over.
     data.days[WEDNESDAY] = { food: '', kcal: 1700, trained: null, types: [], notes: '' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')?.kind).toBe('value');
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')?.kind).toBe('value');
     // Food text or a photo without a kcal number (or with 0): soft «Записано», like Home's row.
     const recorded = { kind: 'value', text: 'Записано' };
     expect(MENU_STATUS.foodRecorded).toBe('Записано');
     data.days[WEDNESDAY] = { food: 'Омлет', kcal: null, trained: null, types: [], notes: '' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual(recorded);
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual(recorded);
     data.days[WEDNESDAY] = { food: 'Омлет', kcal: 0, trained: null, types: [], notes: '' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual(recorded);
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual(recorded);
     data.days[WEDNESDAY] = { food: '', kcal: null, trained: null, types: [], notes: '', photos: ['p1'] };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual(recorded);
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual(recorded);
     // Blank text, no photo, no kcal: nothing recorded.
     data.days[WEDNESDAY] = { food: '   ', kcal: null, trained: null, types: [], notes: 'Сон 8 годин' };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toBeNull();
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toBeNull();
     // A kcal number still wins over «Записано».
     data.days[WEDNESDAY] = { food: 'Омлет', kcal: 1240, trained: null, types: [], notes: '', photos: ['p1'] };
-    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'food')).toEqual({
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual({
       kind: 'value',
       text: `${f0(1240)} ккал`,
+    });
+  });
+
+  it('Їжа on a day with meals reads the derived day kcal (the sum of the meals), «Записано» without kcal', () => {
+    const data = onboarded();
+    const meal = (id: string, type: string, kcal: number | null): Meal => ({
+      id,
+      type,
+      time: null,
+      text: type,
+      kcal,
+      protein: null,
+      fat: null,
+      carbs: null,
+    });
+    const day = (meals: Meal[]) =>
+      normalizeDay({ food: '', kcal: null, trained: null, types: [], notes: '', meals });
+    data.days[WEDNESDAY] = day([meal('a', 'Сніданок', 420), meal('b', 'Обід', 1400)]);
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual({
+      kind: 'over',
+      text: `${f0(1820)} ккал`,
+    });
+    data.days[WEDNESDAY] = day([meal('a', 'Сніданок', null)]);
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'meal')).toEqual({
+      kind: 'value',
+      text: 'Записано',
     });
   });
 

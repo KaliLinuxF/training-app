@@ -98,6 +98,18 @@
   font-weight: 500;
 }
 
+/* The meal is full (30 positions): locked, but focusable (aria-disabled). */
+.chip[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chip[aria-disabled='true']:active {
+  transform: none;
+  background: var(--card);
+  border-color: var(--line);
+}
+
 .removing {
   border-style: dashed;
   border-color: var(--line3);

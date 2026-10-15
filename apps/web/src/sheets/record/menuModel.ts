@@ -8,8 +8,8 @@ import { kcalGoalView } from '@/features/goal';
 import { dueReminders, measuredOn } from '@/lib/stats';
 import type { IconName, ListIconTone } from '@/ui';
 
-/** The short sheet each row opens. */
-export type CaptureMenuMode = 'food' | 'workout' | 'weight' | 'measure';
+/** The sheet each row opens: «Їжа» opens a new meal right away (docs/meals-macros.md D8), the others a short sheet. */
+export type CaptureMenuMode = 'meal' | 'workout' | 'weight' | 'measure';
 
 /**
  * Right-hand status of a row:
@@ -36,7 +36,7 @@ export interface CaptureMenuRow {
 
 /** Title and second line of each row. */
 export const MENU_ROW_COPY: Readonly<Record<CaptureMenuMode, { title: string; sub: string }>> = {
-  food: { title: 'Їжа', sub: 'Опис або фото' },
+  meal: { title: 'Їжа', sub: 'Новий прийом їжі' },
   workout: { title: 'Тренування', sub: 'Було чи ні, тип' },
   weight: { title: 'Вага', sub: 'Контрольне зважування' },
   measure: { title: 'Заміри', sub: 'Груди, талія, стегна' },
@@ -107,7 +107,7 @@ export function captureMenuRows(data: AppData, date: ISODate, today: ISODate): C
       : null;
 
   return [
-    { mode: 'food', ...MENU_ROW_COPY.food, icon: 'food', iconTone: 'acc2', status: food },
+    { mode: 'meal', ...MENU_ROW_COPY.meal, icon: 'food', iconTone: 'acc2', status: food },
     { mode: 'workout', ...MENU_ROW_COPY.workout, icon: 'workout', iconTone: 'acc', status: workout },
     { mode: 'weight', ...MENU_ROW_COPY.weight, icon: 'weight', iconTone: 'neutral', status: weight },
     { mode: 'measure', ...MENU_ROW_COPY.measure, icon: 'measure', iconTone: 'neutral', status: measure },

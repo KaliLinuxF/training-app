@@ -1,8 +1,11 @@
 import {
   emptyData,
   f0,
+  normalizeDay,
   type AppData,
   type DayEntry,
+  type MacroGoals,
+  type Meal,
   type MeasureEntry,
   type Weekday,
   type WeeklyReminder,
@@ -10,8 +13,12 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   buildHomeModel,
+  foodSubTone,
   HOME_ROW_ACTIONS,
   OFFLINE_NOTE,
+  PARTIAL_MACROS_NOTE,
+  type HomeFoodSub,
+  type HomeMacroPart,
   type HomeModel,
   type HomeModelOptions,
 } from './homeModel';
@@ -36,6 +43,58 @@ const day = (patch: Partial<DayEntry> = {}): DayEntry => ({
   ...patch,
 });
 
+const meal = (id: string, patch: Partial<Meal> = {}): Meal => ({
+  id,
+  type: 'Сніданок',
+  time: null,
+  text: 'Страва',
+  kcal: null,
+  protein: null,
+  fat: null,
+  carbs: null,
+  ...patch,
+});
+
+/** A day logged as meals, normalised like the shared reducer stores it (derived food / kcal). */
+const mealDay = (...meals: Meal[]): DayEntry => normalizeDay({ ...day(), meals });
+
+/** 1 240 ккал, Б 68 · Ж 41 · В 132 — every meal complete. */
+const threeMeals = (): DayEntry =>
+  mealDay(
+    meal('m1', { time: '08:30', text: 'Тост з тунцем', kcal: 400, protein: 20, fat: 15, carbs: 50 }),
+    meal('m2', { type: 'Обід', time: '13:00', text: 'Борщ', kcal: 600, protein: 40, fat: 20, carbs: 60 }),
+    meal('m3', { type: 'Вечеря', time: '19:00', text: 'Салат', kcal: 240, protein: 8, fat: 6, carbs: 22 }),
+  );
+
+/** Like the e2e 'meals' seed: breakfast with two positions (380 ккал) + an apple with kcal only → partial. */
+const seedLikeDay = (): DayEntry =>
+  mealDay(
+    meal('e2eBreakfast', {
+      time: '08:15',
+      text: 'Вівсянка з бананом, кава з молоком',
+      items: [
+        { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, protein: 9, fat: 6, carbs: 58 },
+        { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, protein: 3, fat: 3, carbs: 5 },
+      ],
+    }),
+    meal('e2eSnack0001', { type: 'Перекус', time: '09:40', text: 'Яблуко', kcal: 80 }),
+  );
+
+const GOALS: MacroGoals = { protein: 90, fat: 60, carbs: null };
+
+/** The macro parts of a `macros` sub ([] otherwise). */
+const partsOf = (sub: HomeFoodSub | null): HomeMacroPart[] => (sub?.kind === 'macros' ? sub.parts : []);
+
+/** The sub as it reads on screen (spaces normalised), laid out like TodayCard does. */
+function subText(sub: HomeFoodSub | null): string | null {
+  if (sub === null) return null;
+  if (sub.kind !== 'macros') return nb(sub.text) ?? null;
+  const parts = sub.parts.map(
+    (p) => `${p.abbr} ${p.value}${p.known && p.goal !== null ? `/${p.goal}` : ''}${p.unit ? ' г' : ''}`,
+  );
+  return nb([...parts, ...(sub.count !== null ? [sub.count] : [])].join(' · ')) ?? null;
+}
+
 const measure = (
   date: string,
   chest: number | null,
@@ -59,6 +118,12 @@ function stringsOf(value: unknown): string[] {
 function onboarded(patch: Partial<AppData> = {}): AppData {
   const base = emptyData();
   return { ...base, settings: { ...base.settings, onboarded: true }, ...patch };
+}
+
+/** Onboarded, with these macro goals. */
+function withGoals(macroGoals: MacroGoals): AppData {
+  const data = onboarded();
+  return { ...data, settings: { ...data.settings, macroGoals } };
 }
 
 /** `data` with the weigh-in / measurement reminders replaced. */
@@ -230,26 +295,42 @@ describe('«Їжа» row', () => {
   const food = (entry?: DayEntry, data: AppData = onboarded()) =>
     model({ ...data, days: entry ? { [MONDAY]: entry } : {} }).rows.food;
 
-  it('empty: a dash, the goal and an empty mint meter', () => {
+  it('empty: a dash, the goal and an empty mint meter; opens the new-meal editor', () => {
     const row = food();
-    expect(row).toMatchObject({ state: 'empty', value: '—', meter: { value: 0, tone: 'acc2' }, sub: null });
+    expect(row).toMatchObject({
+      state: 'empty',
+      value: '—',
+      meter: { value: 0, tone: 'acc2' },
+      sub: null,
+      action: { mode: 'meal' },
+    });
     expect(nb(row.goal)).toBe(' / 1 700 ккал');
     expect(nb(row.label)).toBe('Їжа: ще нічого не записано. Ціль 1 700 ккал на день');
     // Zero kcal without food counts as nothing recorded.
-    expect(food(day({ kcal: 0 })).state).toBe('empty');
+    expect(food(day({ kcal: 0 }))).toMatchObject({ state: 'empty', action: { mode: 'meal' } });
+    // A day with only a workout mark or notes has no food either.
+    expect(food(day({ trained: true, notes: 'Ок' }))).toMatchObject({
+      state: 'empty',
+      action: { mode: 'meal' },
+    });
   });
 
   it.each([
     ['food text', day({ food: 'Вівсянка з бананом, кава' })],
     ['a photo only', day({ photos: ['photo0000000000001'] })],
-  ])('recorded (%s, no kcal): «Записано», no goal, no meter', (_, entry) => {
+    [
+      'meals without kcal',
+      mealDay(meal('m1', { text: 'Тост з тунцем' }), meal('m2', { type: 'Обід', text: 'Борщ' })),
+    ],
+  ])('recorded (%s, no kcal): «Записано», no goal, no meter, opens the day’s list', (_, entry) => {
     const row = food(entry);
     expect(row).toEqual({
       state: 'recorded',
       value: 'Записано',
       goal: null,
       meter: null,
-      sub: 'Калорії не вказані',
+      sub: { kind: 'note', text: 'Калорії не вказані' },
+      action: { mode: 'food' },
       label: expect.any(String),
     });
     expect(nb(row.label)).toBe('Їжа: записано, калорії не вказані. Ціль 1 700 ккал на день');
@@ -261,7 +342,7 @@ describe('«Їжа» row', () => {
 
   it('ok: the number against the goal and a mint meter', () => {
     const row = food(day({ food: 'Борщ', kcal: 1650 }));
-    expect(row).toMatchObject({ state: 'ok', sub: null, meter: { tone: 'acc2' } });
+    expect(row).toMatchObject({ state: 'ok', sub: null, meter: { tone: 'acc2' }, action: { mode: 'food' } });
     expect(row.meter?.value).toBeCloseTo((1650 / 1700) * 100, 6);
     expect(nb(row.value)).toBe('1 650');
     expect(nb(row.goal)).toBe(' / 1 700 ккал');
@@ -287,6 +368,121 @@ describe('«Їжа» row', () => {
     const data = onboarded();
     const custom = { ...data, settings: { ...data.settings, kcalGoal: 2000 } };
     expect(nb(food(day({ kcal: 1500 }), custom).goal)).toBe(' / 2 000 ккал');
+  });
+
+  describe('Б · Ж · В and meals', () => {
+    it('no goals: «Б 68 · Ж 41 · В 132 г · 3 прийоми» in the default colour', () => {
+      const row = food(threeMeals());
+      expect(row).toMatchObject({ state: 'ok', action: { mode: 'food' }, meter: { tone: 'acc2' } });
+      expect(nb(row.value)).toBe('1 240');
+      expect(subText(row.sub)).toBe('Б 68 · Ж 41 · В 132 г · 3 прийоми');
+      expect(row.sub).toMatchObject({ kind: 'macros', count: `3${NB}прийоми` });
+      expect(foodSubTone(row.sub)).toBeUndefined();
+      expect(nb(row.label)).toBe(
+        'Їжа: 1 240 з 1 700 ккал, залишилось 460. Білки 68 г, жири 41 г, вуглеводи 132 г. 3 прийоми їжі',
+      );
+    });
+
+    it('with goals: «Б 68/90 · Ж 41/60 · В 132 г» — no count; a part without a goal shows only its value', () => {
+      const row = food(threeMeals(), withGoals(GOALS));
+      expect(subText(row.sub)).toBe('Б 68/90 · Ж 41/60 · В 132 г');
+      expect(row.sub).toMatchObject({ kind: 'macros', count: null });
+      expect(nb(row.label)).toBe(
+        'Їжа: 1 240 з 1 700 ккал, залишилось 460. Білки 68 з 90 г, жири 41 з 60 г, вуглеводи 132 г. 3 прийоми їжі',
+      );
+      // One goal is enough to drop the count.
+      const one = food(threeMeals(), withGoals({ protein: null, fat: null, carbs: 150 }));
+      expect(subText(one.sub)).toBe('Б 68 · Ж 41 · В 132/150 г');
+    });
+
+    it('over a goal: only that part is flagged, and the name says «більше цілі»', () => {
+      const row = food(threeMeals(), withGoals({ protein: 60, fat: 60, carbs: null }));
+      expect(subText(row.sub)).toBe('Б 68/60 · Ж 41/60 · В 132 г');
+      expect(partsOf(row.sub).map((p) => p.over)).toEqual([true, false, false]);
+      expect(foodSubTone(row.sub)).toBeUndefined();
+      expect(nb(row.label)).toBe(
+        'Їжа: 1 240 з 1 700 ккал, залишилось 460. Білки 68 з 60 г (більше цілі), жири 41 з 60 г, вуглеводи 132 г. 3 прийоми їжі',
+      );
+      // A rounded value equal to the goal is not over.
+      expect(
+        partsOf(food(threeMeals(), withGoals({ protein: 68, fat: null, carbs: null })).sub)[0]?.over,
+      ).toBe(false);
+    });
+
+    it('over the kcal goal with macros: the excess first, then the macros', () => {
+      const big = mealDay(meal('m1', { kcal: 1900, protein: 80, fat: 70, carbs: 200 }));
+      const row = food(big);
+      expect(row).toMatchObject({ state: 'over', meter: { value: 100, tone: 'acc' } });
+      expect(subText(row.sub)).toBe('Б 80 · Ж 70 · В 200 г · 1 прийом');
+      expect(nb(row.label)).toBe(
+        'Їжа: Перевищено ціль на 200 ккал: 1 900 з 1 700 ккал. Білки 80 г, жири 70 г, вуглеводи 200 г. 1 прийом їжі',
+      );
+    });
+
+    it('an unknown part is «Ж —», «г» follows the last known part, the name leaves it out', () => {
+      const noFat = mealDay(
+        meal('m1', { kcal: 400, protein: 20, carbs: 50 }),
+        meal('m2', { type: 'Обід', kcal: 600, protein: 40, carbs: 60 }),
+      );
+      const row = food(noFat, withGoals(GOALS));
+      expect(subText(row.sub)).toBe('Б 60/90 · Ж — · В 110 г');
+      expect(partsOf(row.sub).map((p) => [p.known, p.unit, p.partial])).toEqual([
+        [true, false, false],
+        [false, false, false],
+        [true, true, false],
+      ]);
+      expect(nb(row.label)).toBe(
+        'Їжа: 1 000 з 1 700 ккал, залишилось 700. Білки 60 з 90 г, вуглеводи 110 г. 2 прийоми їжі',
+      );
+
+      const noCarbs = mealDay(meal('m1', { kcal: 400, protein: 20, fat: 15 }));
+      expect(subText(food(noCarbs).sub)).toBe('Б 20 · Ж 15 г · В — · 1 прийом');
+    });
+
+    it('partial macros (a meal with kcal but none): the sums, and « (не для всіх прийомів)» in the name', () => {
+      // The e2e 'meals' seed: breakfast with two positions, an apple with kcal only.
+      const row = food(seedLikeDay(), withGoals(GOALS));
+      expect(nb(row.value)).toBe('460');
+      expect(subText(row.sub)).toBe('Б 12/90 · Ж 9/60 · В 63 г');
+      expect(partsOf(row.sub).every((p) => p.partial)).toBe(true);
+      expect(nb(row.label)).toBe(
+        'Їжа: 460 з 1 700 ккал, залишилось 1 240. Білки 12 з 90 г, жири 9 з 60 г, вуглеводи 63 г' +
+          `${PARTIAL_MACROS_NOTE}. 2 прийоми їжі`,
+      );
+      expect(PARTIAL_MACROS_NOTE).toBe(' (не для всіх прийомів)');
+      // Without goals the count comes back.
+      expect(subText(food(seedLikeDay()).sub)).toBe('Б 12 · Ж 9 · В 63 г · 2 прийоми');
+    });
+
+    it('a meal day with kcal but no macros: just the count', () => {
+      const row = food(
+        mealDay(
+          meal('m1', { kcal: 300, text: 'Каша' }),
+          meal('m2', { type: 'Обід', kcal: 400, text: 'Суп' }),
+        ),
+        withGoals(GOALS),
+      );
+      expect(row.sub).toEqual({ kind: 'count', text: `2${NB}прийоми` });
+      expect(foodSubTone(row.sub)).toBeUndefined();
+      expect(nb(row.label)).toBe('Їжа: 700 з 1 700 ккал, залишилось 1 000. 2 прийоми їжі');
+      const five = mealDay(...['a', 'b', 'c', 'd', 'e'].map((id) => meal(id, { kcal: 100, text: 'Страва' })));
+      expect(food(five).sub).toEqual({ kind: 'count', text: `5${NB}прийомів` });
+      expect(nb(food(five).label)).toBe('Їжа: 500 з 1 700 ккал, залишилось 1 200. 5 прийомів їжі');
+    });
+
+    it('a legacy day with kcal: no macros, no count (one block «Їжа за день»)', () => {
+      const row = food(day({ food: 'Борщ, хліб', kcal: 900 }), withGoals(GOALS));
+      expect(row.sub).toBeNull();
+      expect(nb(row.label)).toBe('Їжа: 900 з 1 700 ккал, залишилось 800');
+    });
+
+    it('only the «Калорії не вказані» note is lavender', () => {
+      expect(foodSubTone({ kind: 'note', text: 'Калорії не вказані' })).toBe('acc');
+      expect(foodSubTone({ kind: 'count', text: `2${NB}прийоми` })).toBeUndefined();
+      expect(foodSubTone(food(threeMeals()).sub)).toBeUndefined();
+      expect(foodSubTone(null)).toBeUndefined();
+      expect(foodSubTone(food(day({ food: 'Борщ' })).sub)).toBe('acc');
+    });
   });
 });
 
@@ -604,6 +800,8 @@ describe('never shows NaN, undefined, null or Infinity', () => {
     ['a missed weigh-in', withRem(sample(), { weigh: weekly(2), measure: weekly(2) }), WEDNESDAY],
     ['reminders off', withRem(sample(), { weigh: weekly(1, false), measure: weekly(1, false) }), WEDNESDAY],
     ['over the kcal goal', onboarded({ days: { [MONDAY]: day({ kcal: 1820, trained: false }) } }), MONDAY],
+    ['meals with macros and goals', { ...withGoals(GOALS), days: { [MONDAY]: seedLikeDay() } }, MONDAY],
+    ['meals without macros', onboarded({ days: { [MONDAY]: mealDay(meal('m1', { kcal: 300 })) } }), MONDAY],
   ];
 
   it.each(cases)('%s', (_, data, today) => {

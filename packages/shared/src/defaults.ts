@@ -1,4 +1,4 @@
-import type { AppData, Reminders, Settings } from './types';
+import type { AppData, MacroGoals, Reminders, Settings } from './types';
 
 /** Built-in workout types, in the order the chips are shown. */
 export const WORKOUT_TYPES = [
@@ -10,6 +10,12 @@ export const WORKOUT_TYPES = [
   'Розтяжка',
   'Прогулянка',
 ] as const;
+
+/** Default meal types of a new account (and of data saved before meal types existed), in chip order. */
+export const DEFAULT_MEAL_TYPES = ['Сніданок', 'Обід', 'Вечеря', 'Перекус'] as const;
+
+/** No macro goals set. */
+export const emptyMacroGoals = (): MacroGoals => ({ protein: null, fat: null, carbs: null });
 
 export const DEFAULT_TIMEZONE = 'Europe/Kyiv';
 
@@ -35,7 +41,20 @@ export function defaultSettings(): Settings {
     timezone: DEFAULT_TIMEZONE,
     customTypes: [],
     onboarded: false,
+    mealTypes: [...DEFAULT_MEAL_TYPES],
+    macroGoals: emptyMacroGoals(),
   };
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+const goalOrNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** The three goal keys of a stored object (anything else, or a non-object, is dropped). */
+function macroGoalsOf(v: unknown): MacroGoals {
+  if (!isRecord(v)) return emptyMacroGoals();
+  return { protein: goalOrNull(v.protein), fat: goalOrNull(v.fat), carbs: goalOrNull(v.carbs) };
 }
 
 export function emptyData(): AppData {
@@ -56,6 +75,11 @@ export function normalizeSettings(input: Partial<Settings> | null | undefined): 
       measure: { ...d.rem.measure, ...rem.measure },
     },
     customTypes: normalizeTypeNames(s.customTypes ?? d.customTypes),
+    // Missing (data saved before meal types existed) → the defaults; an explicit [] stays [].
+    mealTypes: Array.isArray(s.mealTypes)
+      ? normalizeTypeNames(s.mealTypes.filter((t): t is string => typeof t === 'string'))
+      : d.mealTypes,
+    macroGoals: macroGoalsOf(s.macroGoals),
   };
 }
 

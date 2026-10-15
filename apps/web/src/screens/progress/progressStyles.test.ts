@@ -112,6 +112,17 @@ describe('tap targets', () => {
     expect(px(cssValue(css(file), selector, 'min-height'))).toBeGreaterThanOrEqual(44);
   });
 
+  it('«Б · Ж · В»: a 13/600 --ink2 caption above the strip, a 13px --muted line when empty', () => {
+    const n = css('NutritionCard.module.css');
+    expect(cssValue(n, '.macros', 'display')).toBe('flex');
+    expect(cssValue(n, '.macros', 'flex-direction')).toBe('column');
+    expect(cssValue(n, '.macrosCaption', 'font-size')).toBe('13px');
+    expect(cssValue(n, '.macrosCaption', 'font-weight')).toBe('600');
+    expect(cssValue(n, '.macrosCaption', 'color')).toBe('var(--ink2)');
+    expect(cssValue(n, '.macrosEmpty', 'font-size')).toBe('13px');
+    expect(cssValue(n, '.macrosEmpty', 'color')).toBe('var(--muted)');
+  });
+
   it('history rows: date · kcal · chevron grid with a 12px chevron column', () => {
     const n = css('NutritionCard.module.css');
     expect(cssValue(n, '.row', 'grid-template-columns')).toBe('minmax(0, 1fr) auto 12px');
@@ -177,6 +188,8 @@ describe('text contrast is at least 4.5:1', () => {
       cssValue(weight, '.scale', 'color'),
       cssValue(weight, '.unit', 'color'),
       cssValue(nutrition, '.historyTitle', 'color'),
+      cssValue(nutrition, '.macrosCaption', 'color'),
+      cssValue(nutrition, '.macrosEmpty', 'color'),
       cssValue(nutrition, '.more', 'color'),
       cssValue(workouts, '.heading', 'color'),
     ]) {

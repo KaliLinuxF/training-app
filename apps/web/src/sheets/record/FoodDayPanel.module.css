@@ -1,0 +1,70 @@
+/* «Їжа»: the totals card, then the meal rows (spaced like the sheet body). */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* « · 08:30» after the meal type. */
+.time {
+  font-weight: 500;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* One sub line: what she ate, or its Б · Ж · В — never wraps, cut with «…» (the full text is in the row's name). */
+.line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.empty,
+.emptyField {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.emptyField {
+  padding: 0;
+}
+
+/* «Разом 980 / 1 700 ккал · Б 48 · Ж 30 · В 100 г»: 14 --ink2; wraps only after «·» (no-break spaces elsewhere). */
+.total {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums;
+}
+
+.add {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* At 20 meals: looks disabled, stays focusable (aria-disabled) so the reason under it is read. */
+.add .locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.add .locked:active:not(:disabled) {
+  transform: none;
+}
+
+.capNote {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+}

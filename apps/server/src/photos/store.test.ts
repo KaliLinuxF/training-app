@@ -156,6 +156,80 @@ describe('photo store', () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 
+  it('GC: keeps a photo referenced only by a meal, collects an unreferenced old one', async () => {
+    const repo = createDataRepo(db);
+    const mealOnly = await save();
+    const unused = await save();
+    // 13 photos over two meals: the derived day list holds the first 12 only.
+    const many = await Promise.all(Array.from({ length: 12 }, () => save()));
+    const meal = (id: string, time: string, photos: string[]) => ({
+      kind: 'meal.put' as const,
+      date: '2026-10-09',
+      value: {
+        id,
+        type: 'Обід',
+        time,
+        text: 'Борщ',
+        kcal: 500,
+        protein: null,
+        fat: null,
+        carbs: null,
+        photos,
+      },
+    });
+    repo.apply([meal('m1', '08:00', many), meal('m2', '13:00', [mealOnly])]);
+    expect(repo.read().days['2026-10-09']?.photos).toEqual(many);
+
+    const result = store.collectGarbage(T0 + PHOTO_GC_GRACE_MS + 1);
+    expect(result).toEqual({ photos: [unused], strayFiles: [] });
+    expect(await store.read(mealOnly, 'full')).not.toBeNull();
+  });
+
+  it('GC: skips the whole run while a day has unreadable meal data', async () => {
+    const lines: string[] = [];
+    const logged = createPhotoStore(
+      db,
+      dir,
+      () => clock,
+      createLogger('warn', (line) => lines.push(line)),
+    );
+    const repo = createDataRepo(db);
+    const unused = await save();
+    const stray = `${newPhotoId()}.jpg`;
+    writeFileSync(join(dir, stray), 'x');
+    age(stray, 2 * PHOTO_GC_GRACE_MS);
+    repo.apply([
+      {
+        kind: 'meal.put',
+        date: '2026-10-09',
+        value: {
+          id: 'm1',
+          type: '',
+          time: null,
+          text: 'Борщ',
+          kcal: null,
+          protein: null,
+          fat: null,
+          carbs: null,
+        },
+      },
+    ]);
+    db.prepare('UPDATE days SET meals = ?').run('[{"id": "m1", "photos": ["broken"');
+
+    expect(logged.collectGarbage(T0 + 2 * PHOTO_GC_GRACE_MS)).toEqual({ photos: [], strayFiles: [] });
+    expect(await store.read(unused, 'full')).not.toBeNull();
+    expect(readdirSync(dir)).toContain(stray);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('photo gc: skipped');
+
+    // Once the row is rewritten, collection resumes.
+    repo.apply([{ kind: 'meal.delete', date: '2026-10-09', id: 'legacy' }]);
+    expect(logged.collectGarbage(T0 + 2 * PHOTO_GC_GRACE_MS)).toEqual({
+      photos: [unused],
+      strayFiles: [stray],
+    });
+  });
+
   it('GC: removes old stray files of interrupted saves, nothing else', async () => {
     const kept = await save();
     const strayId = newPhotoId();

@@ -8,8 +8,9 @@ import { useSetupAutoOpen } from './useSetupAutoOpen';
 import { useSheetDeepLinks } from './useSheetDeepLinks';
 
 /**
- * Renders the open sheet (the «+» menu and the record forms / setup / install), rendered once by
- * the shell. Also handles `?sheet=…` deep links and offers the first-run setup to a new account.
+ * Renders the open sheet (the «+» menu, the record forms incl. the day's meals «Їжа» and the new meal «Прийом їжі»
+ * / setup / install), rendered once by the shell. Also handles `?sheet=…` deep links and offers the first-run setup
+ * to a new account.
  */
 export function SheetHost() {
   const sheet = useSheet();

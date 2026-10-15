@@ -6,7 +6,7 @@
  * Anything else («2 ст. л.», «велика тарілка», «пів л», «200-250 г») is free text the model prices.
  * Pure; no React.
  */
-import { LIMITS, num } from '@legko/shared';
+import { LIMITS, num, roundMacro, type MacroGrams } from '@legko/shared';
 import { pluralUk } from './model';
 
 /** Units the device converts between (grams, millilitres). */
@@ -232,12 +232,40 @@ export function portionRatio(from: PortionParts, to: PortionParts): number | nul
  * cannot be compared on the device (free text, grams against millilitres, «шт» against «скибки»).
  */
 export function scaleKcal(base: { portion: string; kcal: number }, portion: string): number | null {
-  const from = readPortion(base.portion);
-  const to = readPortion(portion);
-  const ratio = from && to ? portionRatio(from, to) : null;
+  const ratio = ratioOf(base.portion, portion);
+  return ratio === null ? null : scaledKcal(base.kcal, ratio);
+}
+
+/** Kcal and macronutrients of one position at some amount. */
+export interface ScaledItem extends MacroGrams {
+  kcal: number;
+}
+
+/**
+ * `scaleKcal` for the macronutrients too: the same ratio, kcal rounded and clamped exactly as
+ * `scaleKcal` does, each macronutrient rounded to 0.5 g (`roundMacro`); an unknown one stays null.
+ * Null when the portions cannot be compared on the device.
+ */
+export function scaleItem(base: { portion: string } & ScaledItem, portion: string): ScaledItem | null {
+  const ratio = ratioOf(base.portion, portion);
   if (ratio === null) return null;
-  const kcal = Math.round(base.kcal * ratio);
-  return Math.min(LIMITS.kcal.max, Math.max(LIMITS.kcal.min, kcal));
+  const macro = (v: number | null): number | null => (v === null ? null : roundMacro(v * ratio));
+  return {
+    kcal: scaledKcal(base.kcal, ratio),
+    protein: macro(base.protein),
+    fat: macro(base.fat),
+    carbs: macro(base.carbs),
+  };
+}
+
+function ratioOf(fromPortion: string, toPortion: string): number | null {
+  const from = readPortion(fromPortion);
+  const to = readPortion(toPortion);
+  return from && to ? portionRatio(from, to) : null;
+}
+
+function scaledKcal(kcal: number, ratio: number): number {
+  return Math.min(LIMITS.kcal.max, Math.max(LIMITS.kcal.min, Math.round(kcal * ratio)));
 }
 
 const round = (n: number, decimals: number): number => {

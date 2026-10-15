@@ -1,3 +1,4 @@
+import { MEALS_TODAY } from './fixtures/data';
 import { TODAY } from './support/env';
 import { App } from './support/app';
 import { loginContext } from './support/server';
@@ -33,6 +34,95 @@ test.describe('sync between devices', () => {
     await expect(app.homeRow('Тренування')).toContainText('Не було');
   });
 
+  test('a meal logged on the phone shows up on the laptop after a refresh, next to the old day text', async ({
+    app,
+    page,
+    browser,
+    server,
+  }) => {
+    await app.goto('/');
+    await expect(app.homeRow('Їжа')).toContainText('Записано');
+
+    const other = await browser.newContext({ baseURL: 'http://127.0.0.1:3399', serviceWorkers: 'block' });
+    try {
+      await other.clock.install({ time: new Date('2026-10-14T10:05:00+03:00') });
+      await loginContext(other);
+      const otherApp = new App(await other.newPage());
+      await otherApp.goto('/');
+      const meal = await otherApp.newMeal();
+      await meal.getByRole('textbox', { name: 'Що я їла', exact: true }).fill('Сирники зі сметаною');
+      await meal.getByRole('textbox', { name: 'Калорії', exact: true }).fill('420');
+      await otherApp.saveMeal(meal);
+      await expect.poll(async () => (await server.getData()).days[TODAY]?.kcal).toBe(420);
+    } finally {
+      await other.close();
+    }
+
+    // Nothing pending here: back in the foreground it re-reads the server.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await expect(app.homeRow('Їжа')).toContainText('420 / 1 700 ккал');
+    const list = await app.openFoodDay();
+    await expect(app.mealRow(list, 'Сніданок')).toHaveAccessibleName(
+      /^Сніданок о 10:\d\d: сирники зі сметаною\. 420\sккал$/,
+    );
+    await expect(app.mealRow(list, 'Їжа за день')).toBeVisible();
+    await expect(app.mealList(list).getByRole('button')).toHaveCount(2);
+  });
+
+  test.describe('a day with meals', () => {
+    test.use({ seed: 'meals' });
+
+    test('a ✓ from the laptop keeps the meals and the note written on the phone meanwhile (partial day.meta)', async ({
+      app,
+      page,
+      browser,
+      server,
+    }) => {
+      // The phone opens the full day before the laptop marks it, and starts a note.
+      await app.goto('/');
+      await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
+      const day = app.sheet('Запис дня');
+      await expect(app.mealList(day).getByRole('button')).toHaveCount(2);
+      await day.getByRole('textbox', { name: 'Нотатки', exact: true }).fill('Легкий день');
+
+      const laptop = await browser.newContext({ baseURL: 'http://127.0.0.1:3399', serviceWorkers: 'block' });
+      const sent: { kind: string; value?: unknown }[] = [];
+      try {
+        await laptop.clock.install({ time: new Date('2026-10-14T10:05:00+03:00') });
+        await loginContext(laptop);
+        const laptopPage = await laptop.newPage();
+        laptopPage.on('request', (r) => {
+          if (r.url().endsWith('/api/ops')) sent.push(...(r.postDataJSON() as { ops: typeof sent }).ops);
+        });
+        const laptopApp = new App(laptopPage);
+        await laptopApp.goto('/');
+        await laptopApp.trainingToggle('Було').click();
+        await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(true);
+      } finally {
+        await laptop.close();
+      }
+      // Only the mark went over the wire: no food, no notes, no types.
+      expect(sent.filter((op) => op.kind.startsWith('day.') || op.kind.startsWith('meal.'))).toEqual([
+        { kind: 'day.meta', date: TODAY, value: { trained: true } },
+      ]);
+      const marked = (await server.getData()).days[TODAY];
+      expect(marked?.meals).toEqual(MEALS_TODAY);
+      expect(marked).toMatchObject({ trained: true, kcal: 460, notes: '' });
+
+      // The phone saves its note on top: the laptop's ✓ and the meals stay.
+      await app.save(day);
+      await expect.poll(async () => (await server.getData()).days[TODAY]?.notes).toBe('Легкий день');
+      const stored = (await server.getData()).days[TODAY];
+      expect(stored?.meals).toEqual(MEALS_TODAY);
+      expect(stored).toMatchObject({ trained: true, kcal: 460, notes: 'Легкий день' });
+
+      // Back in the foreground the phone shows both.
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await expect(app.trainingToggle('Було')).toHaveAttribute('aria-pressed', 'true');
+      await expect(app.homeRow('Їжа')).toContainText('460 / 1 700 ккал');
+    });
+  });
+
   test('a server hiccup (500) is retried with backoff until the change lands', async ({
     app,
     page,
@@ -61,11 +151,11 @@ test.describe('sync between devices', () => {
     page,
     server,
   }) => {
-    // Reject the first batch that carries the day mark (any other op passes).
+    // Reject the first batch that carries the day mark (`day.meta`; any other op passes).
     let rejected = false;
     await page.route('**/api/ops', async (route) => {
       const { ops } = route.request().postDataJSON() as { ops: { kind: string }[] };
-      const index = ops.findIndex((op) => op.kind === 'day.put');
+      const index = ops.findIndex((op) => op.kind === 'day.meta');
       if (rejected || index < 0) return route.continue();
       rejected = true;
       return route.fulfill({

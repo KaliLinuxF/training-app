@@ -11,6 +11,7 @@ import {
   portionRatio,
   readPortion,
   sanitizeAmountInput,
+  scaleItem,
   scaleKcal,
   stepAmount,
   unitForm,
@@ -132,6 +133,43 @@ describe('scaleKcal', () => {
     expect(portionRatio({ amount: 0.5, unit: 'кг' }, { amount: 250, unit: 'г' })).toBe(0.5);
     expect(portionRatio({ amount: 1, unit: 'л' }, { amount: 250, unit: 'мл' })).toBe(0.25);
     expect(portionRatio({ amount: 1, unit: 'г' }, { amount: 1, unit: 'мл' })).toBeNull();
+  });
+});
+
+describe('scaleItem', () => {
+  const toast = { portion: '2 шт', kcal: 310, protein: 24, fat: 8, carbs: 31 };
+
+  it('scales kcal exactly like scaleKcal and the macros by the same ratio, to 0.5 g', () => {
+    expect(scaleItem(toast, '3 шт')).toEqual({ kcal: 465, protein: 36, fat: 12, carbs: 46.5 });
+    expect(scaleItem(toast, '1 шт')).toEqual({
+      kcal: scaleKcal(toast, '1 шт'),
+      protein: 12,
+      fat: 4,
+      carbs: 15.5,
+    });
+    const borshch = { portion: '300 г', kcal: 180, protein: 6, fat: 9, carbs: 19 };
+    // 0,4 кг = 4/3: 8 · 12 · 25,33 → 25,5.
+    expect(scaleItem(borshch, '0,4 кг')).toEqual({ kcal: 240, protein: 8, fat: 12, carbs: 25.5 });
+  });
+
+  it('an unknown macro stays unknown; a portion it cannot compare gives null', () => {
+    expect(scaleItem({ ...toast, fat: null }, '4 шт')).toEqual({
+      kcal: 620,
+      protein: 48,
+      fat: null,
+      carbs: 62,
+    });
+    expect(scaleItem(toast, '150 г')).toBeNull();
+    expect(scaleItem(toast, 'велика порція')).toBeNull();
+  });
+
+  it('stays within the limits: kcal 20 000, a macro 1 000 g per position', () => {
+    expect(scaleItem({ portion: '10 г', kcal: 900, protein: 50, fat: 0, carbs: 0 }, '1 кг')).toEqual({
+      kcal: 20000,
+      protein: 1000,
+      fat: 0,
+      carbs: 0,
+    });
   });
 });
 

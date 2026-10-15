@@ -1,11 +1,19 @@
-import type { ReactNode } from 'react';
+import { Fragment, type ReactNode } from 'react';
+import { NBSP, PART_SEPARATOR } from '@/lib/nutrition';
 import { Button, ListGroup, ListRow, Pill, TrainingToggle, type ListRowProps } from '@/ui';
-import type { HomeFoodRow, HomeModel, HomeRowId, HomeScheduleRow } from './homeModel';
+import {
+  foodSubTone,
+  type HomeFoodRow,
+  type HomeFoodSub,
+  type HomeModel,
+  type HomeRowId,
+  type HomeScheduleRow,
+} from './homeModel';
 import s from './TodayCard.module.css';
 
 export interface TodayCardProps {
   rows: HomeModel['rows'];
-  /** A row was tapped: open its short sheet for today. */
+  /** A row was tapped: open its short sheet for today («Їжа»: `rows.food.action` — the list, or a new meal). */
   onOpen: (id: HomeRowId) => void;
   /** «Відкрити день →»: today's full «Запис дня». */
   onOpenDay: () => void;
@@ -22,6 +30,30 @@ function foodValue(food: HomeFoodRow): ReactNode {
     <>
       <span className={s.kcal}>{food.value}</span>
       {food.goal !== null && <span className={s.goal}>{food.goal}</span>}
+    </>
+  );
+}
+
+/**
+ * «Б 68/90 · Ж 41 · В 132 г · 3 прийоми»: a NBSP inside each part, before «г» and before every «·» (a normal space
+ * after it), so the line wraps only after a «·». Only an over-goal number is lavender.
+ */
+function foodSub(sub: HomeFoodSub | null): ReactNode {
+  if (sub === null) return undefined;
+  if (sub.kind !== 'macros') return sub.text;
+  return (
+    <>
+      {sub.parts.map((p, i) => (
+        <Fragment key={p.key}>
+          {i > 0 && PART_SEPARATOR}
+          {p.abbr}
+          {NBSP}
+          <span className={p.over ? s.toneAcc : undefined}>{p.value}</span>
+          {p.known && p.goal !== null && `/${p.goal}`}
+          {p.unit && `${NBSP}г`}
+        </Fragment>
+      ))}
+      {sub.count !== null && `${PART_SEPARATOR}${sub.count}`}
     </>
   );
 }
@@ -74,8 +106,8 @@ export function TodayCard({ rows, onOpen, onOpenDay, onTrained, className }: Tod
         icon="food"
         iconTone="acc2"
         title="Їжа"
-        sub={food.sub ?? undefined}
-        subTone={food.sub !== null ? 'acc' : undefined}
+        sub={foodSub(food.sub)}
+        subTone={foodSubTone(food.sub)}
         meter={food.meter ?? undefined}
         value={foodValue(food)}
         valueVariant={food.state === 'recorded' ? 'soft' : 'strong'}

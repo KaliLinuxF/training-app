@@ -1,0 +1,95 @@
+/* «Підсумок дня»: the kit card (padding 18), spaced by margins (gap 0). */
+.card {
+  min-width: 0;
+}
+
+/* «1 240 / 1 700 ккал»: the number 28/700 tabular, the goal 15/500 --ink2. */
+.kcal {
+  margin: 0;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+.kcalValue {
+  font-family: var(--display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.kcalGoal {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums;
+}
+
+.kcalBar {
+  margin-top: 10px;
+}
+
+.kcalText {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+/* Name | value | bar (only with a goal). Each row is 26px+ tall; the grid keeps the columns aligned. */
+.macros {
+  display: grid;
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 10px;
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line2);
+}
+
+.name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink);
+}
+
+.value {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bar {
+  margin: 0;
+  min-width: 0;
+}
+
+/* Over the goal: lavender like the kcal over state; exactly on it: mint. Never red. */
+.over {
+  color: var(--accD);
+}
+
+.reached {
+  color: var(--acc2D);
+}
+
+.note {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+/* 320px (Display Zoom): a little less air between the columns. */
+@media (max-width: 359px) {
+  .macros {
+    column-gap: 10px;
+  }
+}

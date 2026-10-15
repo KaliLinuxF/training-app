@@ -61,15 +61,22 @@ export interface FoodEstimateItem {
   name: string;
   portion: string;
   kcal: number;
+  /**
+   * Grams of protein / fat / carbohydrate in that portion (0.5 g steps, 0–1 000), or null when the model gave no
+   * usable number. Always set by the server (required, so every place that rebuilds an item keeps them).
+   */
+  protein: number | null;
+  fat: number | null;
+  carbs: number | null;
 }
 
 export interface FoodEstimateResponse {
   /**
    * Id of the stored photo when one was sent (or, when recalculating, the `photoId` that was passed);
-   * reference it from `DayEntry.photos` when adding.
+   * reference it from the meal's `photos` when saving.
    */
   photoId: string | null;
-  /** When recalculating: exactly the sent items, same order, names/portions as sent, new kcal. */
+  /** When recalculating: exactly the sent items, same order, names/portions as sent, new kcal and macros. */
   items: FoodEstimateItem[];
   totalKcal: number;
   /** Short Ukrainian remark from the model (uncertainty, «це не схоже на їжу», …); may be empty. */

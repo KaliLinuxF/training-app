@@ -1,4 +1,17 @@
 import type { Locator, Page } from '@playwright/test';
+import {
+  addDays,
+  dayMacroComplete,
+  dayMacros,
+  f0,
+  MACRO_KEYS,
+  mondayOf,
+  type AppData,
+  type ISODate,
+  type MacroKey,
+} from '../packages/shared/src/index';
+import { demo, meals, MEALS_GOALS } from './fixtures/data';
+import { TODAY } from './support/env';
 import { expect, test } from './support/test';
 
 /**
@@ -19,6 +32,61 @@ const periods = (page: Page) => page.getByRole('radiogroup', { name: 'Періо
 /** textContent with every run of whitespace (incl. the no-break digit-group spaces) as one space. */
 const sentence = async (locator: Locator): Promise<string> =>
   ((await locator.textContent()) ?? '').replace(/\s+/g, ' ').trim();
+
+const MACROS_LABEL = 'Білки, жири, вуглеводи — середнє за день';
+
+/** The «Б · Ж · В» strip of «Харчування». */
+const macroStrip = (nutrition: Locator) => nutrition.locator(`dl[aria-label="${MACROS_LABEL}"]`);
+
+interface ExpectedMacros {
+  /** Mean grams per macronutrient, null when no day counts for it. */
+  averages: Record<MacroKey, number | null>;
+  /** The strip's values as drawn: «99г» (value + unit), or «—». */
+  cells: string[];
+  /** Days counted for at least one macronutrient. */
+  days: number;
+}
+
+/**
+ * The «Б · Ж · В» averages of `data` over [from, TODAY], worked out here from the shared day helpers (D22: per
+ * macronutrient, only the days whose total is known and complete) — not guessed from the seed.
+ */
+function expectedMacros(data: AppData, from: ISODate): ExpectedMacros {
+  const values: Record<MacroKey, number[]> = { protein: [], fat: [], carbs: [] };
+  const counted = new Set<ISODate>();
+  for (let d = from; d <= TODAY; d = addDays(d, 1)) {
+    const entry = data.days[d];
+    if (!entry) continue;
+    const totals = dayMacros(entry);
+    for (const key of MACRO_KEYS) {
+      const v = totals[key];
+      if (v === null || !dayMacroComplete(entry, key)) continue;
+      values[key].push(v);
+      counted.add(d);
+    }
+  }
+  const mean = (list: number[]) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+  const averages = { protein: mean(values.protein), fat: mean(values.fat), carbs: mean(values.carbs) };
+  const cells = MACRO_KEYS.map((key) => {
+    const avg = averages[key];
+    return avg === null ? '—' : `${f0(avg)}г`;
+  });
+  return { averages, cells, days: counted.size };
+}
+
+/** Per strip value: drawn in the lavender «over goal» colour (`--accD`)? */
+const lavender = (strip: Locator): Promise<boolean[]> =>
+  strip.locator('dd').evaluateAll((dds) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--accD)';
+    document.body.append(probe);
+    const acc = getComputedStyle(probe).color;
+    probe.remove();
+    return dds.map((dd) => getComputedStyle(dd).color === acc);
+  });
+
+/** The first day of the demo records (the «Весь час» period starts there or earlier). */
+const firstDay = (data: AppData): ISODate => Object.keys(data.days).sort()[0] ?? TODAY;
 
 /**
  * WCAG 2.4.11: the focused `control` lies below the stuck period bar's paper band and its 6px fade, and nothing
@@ -312,5 +380,71 @@ test.describe('progress', () => {
 
     await measures.getByRole('button', { name: '+ Записати заміри' }).click();
     await expect(app.sheet('Заміри тіла')).toBeVisible();
+  });
+
+  test('Б · Ж · В: the average per day over the complete days of the period; «Весь час» changes the caption', async ({
+    app,
+    page,
+  }) => {
+    const data = demo();
+    // Mon 12 – Wed 14 Oct: two meal days with macros; today is a legacy day (food text only), left out.
+    const week = expectedMacros(data, mondayOf(TODAY));
+    expect(week.days).toBe(2);
+    expect(week.cells).not.toContain('—');
+
+    await app.goto('/progress');
+    const nutrition = app.region('Харчування');
+    await expect(nutrition.getByText(/середнє за день/)).toHaveText(
+      'Б · Ж · В — середнє за день · цього тижня',
+    );
+    const strip = macroStrip(nutrition);
+    await expect(strip.locator('dt')).toHaveText(['Білки', 'Жири', 'Вуглеводи']);
+    await expect(strip.locator('dd')).toHaveText(week.cells);
+    // The kcal averages and the history stay as they were.
+    await expect(nutrition).toContainText('Сер. цього тижня');
+    await expect(nutrition).toContainText('ціль 1 700 ккал');
+
+    await periods(page).getByRole('radio', { name: 'Весь час' }).click();
+    await expect(nutrition.getByText(/середнє за день/)).toHaveText(
+      'Б · Ж · В — середнє за день · за весь час',
+    );
+    await expect(strip.locator('dd')).toHaveText(expectedMacros(data, firstDay(data)).cells);
+    expect(await sentence(app.region('За весь період'))).toContain(`калорійність ${SUMMARY.all.kcal}`);
+  });
+
+  test('Б · Ж · В: an empty account says so instead of the strip', async ({ app, server }) => {
+    const data = await server.getData();
+    await server.importData({ ...data, days: {}, weights: [], measures: [], foods: [] });
+    await app.goto('/progress');
+    const nutrition = app.region('Харчування');
+    await expect(nutrition).toContainText('За цей період білків, жирів і вуглеводів ще не записано');
+    await expect(macroStrip(nutrition)).toHaveCount(0);
+  });
+});
+
+test.describe('progress — macro goals', () => {
+  test.use({ seed: 'meals' });
+
+  test('the goals are named in the labels; today (partial: the apple has no macros) is left out', async ({
+    app,
+  }) => {
+    const data = meals();
+    const today = data.days[TODAY];
+    expect(today && dayMacroComplete(today, 'protein')).toBe(false);
+    const week = expectedMacros(data, mondayOf(TODAY));
+    // Same as without today's meals: the partial day does not drag the average down.
+    expect(week).toEqual(expectedMacros(demo(), mondayOf(TODAY)));
+
+    await app.goto('/progress');
+    const strip = macroStrip(app.region('Харчування'));
+    await expect(strip.locator('dt')).toHaveText(['Білки · ціль 90 г', 'Жири · ціль 60 г', 'Вуглеводи']);
+    await expect(strip.locator('dd')).toHaveText(week.cells);
+    // Above its goal (the rounded average) → lavender like the kcal «over» state; carbs have no goal.
+    const over = MACRO_KEYS.map((key) => {
+      const avg = week.averages[key];
+      const goal = MEALS_GOALS[key];
+      return avg !== null && goal !== null && Math.round(avg) > goal;
+    });
+    expect(await lavender(strip)).toEqual(over);
   });
 });

@@ -87,11 +87,12 @@
   justify-content: center;
 }
 
-/* 44px tap target around the 22px badge. */
+/* 44px tap target around the 22px badge. Placed against its padding box (border-box sizing: 22px minus
+   the 2px border on each side = 18px), so 18 + 2 × 13 = 44. */
 .remove::after {
   content: '';
   position: absolute;
-  inset: -11px;
+  inset: -13px;
 }
 
 @media (hover: hover) {

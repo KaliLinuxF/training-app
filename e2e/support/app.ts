@@ -28,6 +28,9 @@ const SECTION_TITLES: Record<LegacySection, string | RegExp> = {
 export type SheetName =
   | 'Що записати?'
   | 'Їжа'
+  | 'Прийом їжі'
+  | 'Позиція'
+  | 'Нова позиція'
   | 'Тренування'
   | 'Запис дня'
   | 'Контрольне зважування'
@@ -39,9 +42,9 @@ export type SheetName =
 /** Rows of the «Що записати?» menu (opened by «+»), and «Повний запис дня →» under them. */
 export type RecordItem = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри' | 'Повний запис дня';
 
-/** The sheet each «Що записати?» item swaps the menu to. */
+/** The sheet each «Що записати?» item swaps the menu to («Їжа» opens a new meal right away). */
 const RECORD_SHEETS: Record<RecordItem, SheetName> = {
-  Їжа: 'Їжа',
+  Їжа: 'Прийом їжі',
   Тренування: 'Тренування',
   Вага: 'Контрольне зважування',
   Заміри: 'Заміри тіла',
@@ -52,13 +55,15 @@ const RECORD_SHEETS: Record<RecordItem, SheetName> = {
 export type HomeRow = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри';
 
 /** Rows of the «Налаштування» list. */
-export type SettingsSection = 'Нагадування' | 'Цілі' | 'Типи тренувань' | 'Вигляд' | 'Дані і копія';
+export type SettingsSection =
+  'Нагадування' | 'Цілі' | 'Типи тренувань' | 'Прийоми їжі' | 'Вигляд' | 'Дані і копія';
 
 /** `/settings/:section` of each settings row. */
 export const SETTINGS_SLUGS: Record<SettingsSection, string> = {
   Нагадування: 'reminders',
   Цілі: 'goals',
   'Типи тренувань': 'workouts',
+  'Прийоми їжі': 'meals',
   Вигляд: 'appearance',
   'Дані і копія': 'data',
 };
@@ -131,7 +136,8 @@ export class App {
 
   /**
    * «+» (tab bar) / «+ Записати день» (sidebar) → `item` in the «Що записати?» menu. Returns the sheet the menu
-   * swapped to (Їжа, Тренування, Контрольне зважування, Заміри тіла, or Запис дня), once it is visible.
+   * swapped to (Прийом їжі — a new meal —, Тренування, Контрольне зважування, Заміри тіла, or Запис дня), once
+   * it is visible.
    */
   async record(item: RecordItem): Promise<Locator> {
     await this.recordButton().click();
@@ -202,6 +208,54 @@ export class App {
    */
   quickAction(label: 'Харчування' | 'Їжа' | 'Тренування' | 'Вага' | 'Заміри'): Locator {
     return this.homeRow(label === 'Харчування' ? 'Їжа' : label);
+  }
+
+  /**
+   * The list of meals in `sheet`: the region «Прийоми їжі». The same name is used by the «Їжа» day list and by
+   * the food field of «Запис дня», so these helpers work in both.
+   */
+  mealList(sheet: Locator): Locator {
+    return sheet.getByRole('region', { name: 'Прийоми їжі', exact: true });
+  }
+
+  /** A meal row of `mealList(sheet)`: the button whose accessible name starts with `title` («Сніданок о 08:30: …»). */
+  mealRow(sheet: Locator, title: string): Locator {
+    return this.mealList(sheet).getByRole('button', { name: startsWith(title) });
+  }
+
+  /** «+ Прийом їжі» in `sheet` (accessible name «Додати прийом їжі»). */
+  addMealButton(sheet: Locator): Locator {
+    return sheet.getByRole('button', { name: 'Додати прийом їжі', exact: true });
+  }
+
+  /** A type chip of the meal editor in `sheet` (group «Тип прийому їжі»; selected = `aria-pressed="true"`). */
+  mealType(sheet: Locator, label: string): Locator {
+    return sheet
+      .getByRole('group', { name: 'Тип прийому їжі' })
+      .getByRole('button', { name: label, exact: true });
+  }
+
+  /**
+   * Home «Їжа» row → the day's meal list «Їжа», once visible. Needs food logged today: on a day without food the
+   * row opens the new-meal editor «Прийом їжі» instead (use `newMeal()` or `sheet('Прийом їжі')` then).
+   */
+  async openFoodDay(): Promise<Locator> {
+    await this.homeRow('Їжа').click();
+    const sheet = this.sheet('Їжа');
+    await expect(sheet).toBeVisible();
+    return sheet;
+  }
+
+  /** «+» → «Їжа»: the new-meal editor «Прийом їжі» for today (type preselected, «Що я їла» focused). */
+  newMeal(): Promise<Locator> {
+    return this.record('Їжа');
+  }
+
+  /** «Зберегти» of the meal editor `sheet` (a stacked one too): waits for it to close and for «Збережено». */
+  async saveMeal(sheet: Locator): Promise<void> {
+    await sheet.getByRole('button', { name: 'Зберегти', exact: true }).click();
+    await expect(sheet).toBeHidden();
+    await expect(this.toast('Збережено')).toBeVisible();
   }
 
   /** Saves the open sheet («Зберегти» / «Почати») and waits for it to close. */

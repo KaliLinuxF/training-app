@@ -5,22 +5,27 @@
  */
 import {
   appDataSchema,
+  DEFAULT_MEAL_TYPES,
   DOW_LONG,
   DOW_SHORT,
   f0,
   f1,
   GOAL_LIMITS,
   LIMITS,
+  mealTypeKey,
   normalizeTypeNames,
+  suggestMealType,
   WEEK_ORDER,
   WORKOUT_TYPES,
   type AppData,
+  type HM,
   type ReminderKind,
   type Reminders,
   type Settings,
   type Weekday,
 } from '@legko/shared';
 import { ApiError } from '@/lib/api';
+import { NBSP, PART_SEPARATOR } from '@/lib/nutrition';
 import type { PushStatus } from '@/lib/push';
 import type { ThemePref } from '@/lib/theme';
 import type { SyncState } from '@/store/data';
@@ -213,6 +218,182 @@ export function addCustomType(custom: readonly string[], raw: string): AddTypeRe
 export function removeCustomType(custom: readonly string[], name: string): string[] {
   return custom.filter((t) => t !== name);
 }
+
+// ---- meal types -----------------------------------------------------------------------
+
+export const MEAL_TYPE_ERRORS = {
+  duplicate: 'Такий тип уже є',
+  full: `Не більше ${LIMITS.mealTypes} типів`,
+  tooLong: `Назва — до ${LIMITS.mealTypeName} символів`,
+} as const;
+
+/** An edit of her meal types that went through. `changed: false` = nothing to do (the list is returned as is). */
+export interface MealTypesChange {
+  ok: true;
+  types: string[];
+  changed: boolean;
+}
+
+export type MealTypesEdit = MealTypesChange | { ok: false; error: string };
+
+const unchanged = (types: readonly string[]): MealTypesChange => ({
+  ok: true,
+  types: [...types],
+  changed: false,
+});
+const changedTo = (types: string[]): MealTypesChange => ({ ok: true, types, changed: true });
+
+/** What she typed as a type name: trimmed, inner runs of spaces as one. */
+export const cleanTypeName = (raw: string): string => raw.trim().replace(/\s+/g, ' ');
+
+/** Position of `name` in her list: the exact spelling first, else the same name in another case / spacing. */
+function typeIndex(types: readonly string[], name: string): number {
+  const exact = types.indexOf(name);
+  if (exact >= 0) return exact;
+  const key = mealTypeKey(name);
+  return types.findIndex((t) => mealTypeKey(t) === key);
+}
+
+/** A new type at the end of her list. Empty input → no change; duplicates are case-insensitive. */
+export function addMealType(types: readonly string[], input: string): MealTypesEdit {
+  const name = cleanTypeName(input);
+  if (!name) return unchanged(types);
+  if (name.length > LIMITS.mealTypeName) return { ok: false, error: MEAL_TYPE_ERRORS.tooLong };
+  if (typeIndex(types, name) >= 0) return { ok: false, error: MEAL_TYPE_ERRORS.duplicate };
+  if (types.length >= LIMITS.mealTypes) return { ok: false, error: MEAL_TYPE_ERRORS.full };
+  return changedTo([...types, name]);
+}
+
+/**
+ * Renames `from` in place (past meals keep their own label). Empty input, the same name or a type that is no longer
+ * in the list (removed on another device) → no change. Changing only the case of a name is a rename.
+ */
+export function renameMealType(types: readonly string[], from: string, to: string): MealTypesEdit {
+  const name = cleanTypeName(to);
+  const i = typeIndex(types, from);
+  if (!name || i < 0 || types[i] === name) return unchanged(types);
+  if (name.length > LIMITS.mealTypeName) return { ok: false, error: MEAL_TYPE_ERRORS.tooLong };
+  const key = mealTypeKey(name);
+  if (types.some((t, j) => j !== i && mealTypeKey(t) === key)) {
+    return { ok: false, error: MEAL_TYPE_ERRORS.duplicate };
+  }
+  const next = [...types];
+  next[i] = name;
+  return changedTo(next);
+}
+
+/** One place up (`-1`) or down (`1`); at either end, or for an unknown type, nothing changes. */
+export function moveMealType(types: readonly string[], name: string, dir: -1 | 1): MealTypesChange {
+  const i = typeIndex(types, name);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= types.length) return unchanged(types);
+  const next = [...types];
+  [next[i], next[j]] = [next[j] ?? '', next[i] ?? ''];
+  return changedTo(next);
+}
+
+/** Removes the type from the list (no confirmation: meals already logged keep their label). */
+export function removeMealType(types: readonly string[], name: string): MealTypesChange {
+  const i = typeIndex(types, name);
+  return i < 0 ? unchanged(types) : changedTo(types.filter((_, j) => j !== i));
+}
+
+/** The default types («Сніданок», «Обід», «Вечеря», «Перекус») that are not in her list, in their order. */
+export function missingDefaults(types: readonly string[]): string[] {
+  return DEFAULT_MEAL_TYPES.filter((d) => typeIndex(types, d) < 0);
+}
+
+/** Appends the missing default types at the end of her list, as many as fit under the cap of 12. */
+export function restoreDefaultMealTypes(types: readonly string[]): MealTypesEdit {
+  const missing = missingDefaults(types);
+  if (!missing.length) return unchanged(types);
+  const room = LIMITS.mealTypes - types.length;
+  if (room <= 0) return { ok: false, error: MEAL_TYPE_ERRORS.full };
+  return changedTo([...types, ...missing.slice(0, room)]);
+}
+
+/** Times at which the Settings note shows the preselected type (§2.8). */
+const NOTE_PROBES: readonly HM[] = ['08:00', '13:00', '16:30', '19:00'];
+
+const RENAME_NOTE = 'Перейменування не змінює вже записані прийоми.';
+
+/**
+ * The note under her list, generated from the same `suggestMealType` the meal editor uses, so it is true for her own
+ * names: «Тип нового прийому підказується за часом: 08:00 — Сніданок · 13:00 — Обід · … Його завжди можна змінити.
+ * Перейменування не змінює вже записані прийоми.» A probe that gives the same type as the one before is left out.
+ *
+ * The time, the dash and the type are joined by NBSPs and the parts by `PART_SEPARATOR`, so on a phone the line
+ * wraps only after «·» (or inside a type name with its own spaces): never «08:00» at the end of one line and
+ * «— Сніданок» at the start of the next, never a line starting with «—» or «·». The note's CSS lets a very long
+ * one-word name break anywhere, so it cannot overflow at 320 px.
+ */
+export function mealTypesNote(types: readonly string[]): string {
+  if (!types.length) return `Без типів новий прийом буде без назви. ${RENAME_NOTE}`;
+  const parts: string[] = [];
+  let previous: string | null = null;
+  for (const time of NOTE_PROBES) {
+    const type = suggestMealType({ types, logged: [], time });
+    if (type === previous) continue;
+    previous = type;
+    parts.push(`${time}${NBSP}—${NBSP}${type}`);
+  }
+  return (
+    `Тип нового прийому підказується за часом: ${parts.join(PART_SEPARATOR)}. ` +
+    `Його завжди можна змінити. ${RENAME_NOTE}`
+  );
+}
+
+/** Stable React keys for the rows of her list, so a rename keeps the row (and its focus) instead of remounting it. */
+export interface TypeRowKeys {
+  next: number;
+  rows: readonly { key: number; name: string }[];
+}
+
+export const NO_TYPE_ROWS: TypeRowKeys = { next: 0, rows: [] };
+
+/**
+ * Keys for `names`: a name keeps the key it had (duplicates in turn), a new name gets a fresh one. Returns `prev`
+ * itself when nothing changed, so a component can compare by identity.
+ */
+export function keyTypeRows(prev: TypeRowKeys, names: readonly string[]): TypeRowKeys {
+  if (prev.rows.length === names.length && prev.rows.every((r, i) => r.name === names[i])) return prev;
+  const pool = [...prev.rows];
+  let next = prev.next;
+  const rows = names.map((name) => {
+    const i = pool.findIndex((r) => r.name === name);
+    if (i < 0) return { key: next++, name };
+    const [reused] = pool.splice(i, 1);
+    return reused ?? { key: next++, name };
+  });
+  return { next, rows };
+}
+
+/** The keys after `from` was renamed to `to`: the row keeps its key. */
+export function renameTypeRow(prev: TypeRowKeys, from: string, to: string): TypeRowKeys {
+  let done = false;
+  const rows = prev.rows.map((r) => {
+    if (done || r.name !== from) return r;
+    done = true;
+    return { key: r.key, name: to };
+  });
+  return done ? { next: prev.next, rows } : prev;
+}
+
+// ---- macro goals ----------------------------------------------------------------------
+
+export const MACRO_GOAL_ERROR = `Від ${LIMITS.macroGoal.min} до ${f0(LIMITS.macroGoal.max)} г`;
+
+/** What a macro goal field holds: whole grams 1–1 000, `null` when empty (no goal), `'invalid'` otherwise. */
+export function parseMacroGoal(text: string): number | null | 'invalid' {
+  const digits = text.replace(/\s/g, '');
+  if (!digits) return null;
+  if (!/^\d+$/.test(digits)) return 'invalid';
+  const n = Number(digits);
+  return n >= LIMITS.macroGoal.min && n <= LIMITS.macroGoal.max ? n : 'invalid';
+}
+
+/** The field text of a stored goal: «90», or empty for no goal. */
+export const macroGoalText = (goal: number | null): string => (goal === null ? '' : String(goal));
 
 // ---- appearance -----------------------------------------------------------------------
 

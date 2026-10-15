@@ -65,7 +65,7 @@ test.describe('«+» → «Що записати?»', () => {
       const box = await rows.nth(i).boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(64);
     }
-    await expect(menuRow(menu, 'Їжа')).toContainText('Опис або фото');
+    await expect(menuRow(menu, 'Їжа')).toContainText('Новий прийом їжі');
     // The demo seed's today has a meal without kcal: «Записано», like Home's Їжа row.
     await expect(menuRow(menu, 'Їжа')).toContainText('Записано');
     await expect(menuRow(menu, 'Їжа')).not.toContainText('ккал');
@@ -165,7 +165,7 @@ test.describe('«+» → «Що записати?»', () => {
     await expect(sheet).toBeFocused();
   });
 
-  test('Їжа: a «Часті страви» chip and «Зберегти»; the workout and notes of the day stay; the menu shows the kcal', async ({
+  test('Їжа: a new meal in the same dialog; a «Часті страви» chip and «Зберегти»; the workout and notes stay; the menu shows the kcal', async ({
     app,
     page,
     server,
@@ -185,23 +185,36 @@ test.describe('«+» → «Що записати?»', () => {
     const sheet = await app.record('Їжа');
     await expect(app.dialogs).toHaveCount(1);
     await expect(sheet).toContainText('середа · сьогодні');
-    await expect(sheet.getByRole('textbox', { name: 'Що я їла' })).toHaveValue('Вівсянка з бананом, кава');
+    // A new meal: empty, the keyboard on it, the type by the time of day. The day's other blocks are not here.
+    const text = sheet.getByRole('textbox', { name: 'Що я їла', exact: true });
+    await expect(text).toHaveValue('');
+    await expect(text).toBeFocused();
+    await expect(app.mealType(sheet, 'Сніданок')).toHaveAttribute('aria-pressed', 'true');
     await expect(sheet.getByRole('group', { name: 'Тренування' })).toHaveCount(0);
     await expect(sheet.getByRole('textbox', { name: 'Нотатки' })).toHaveCount(0);
     await expect(sheet.getByRole('textbox', { name: /Вага/ })).toHaveCount(0);
+    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toHaveCount(0);
 
     await sheet.getByRole('button', { name: 'Додати «Кава з молоком», 60 ккал' }).click();
-    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toHaveValue('60');
-    await app.save(sheet);
+    await app.saveMeal(sheet);
+    await app.expectSheetClosed();
 
+    // The meal joined the day; the old text is its own block; the workout and notes are as they were.
     await expect
       .poll(async () => (await server.getData()).days[TODAY])
-      .toEqual({
-        food: 'Вівсянка з бананом, кава\nКава з молоком (1 чашка) — 60 ккал',
+      .toMatchObject({
         kcal: 60,
         trained: true,
         types: ['Кардіо'],
         notes: 'Сон 8 годин',
+        meals: [
+          {
+            type: 'Сніданок',
+            kcal: 60,
+            items: [{ name: 'Кава з молоком', portion: '1 чашка', kcal: 60, protein: 3, fat: 3, carbs: 5 }],
+          },
+          { id: 'legacy', type: '', text: 'Вівсянка з бананом, кава', kcal: null },
+        ],
       });
 
     const menu = await openMenu(app);
@@ -286,7 +299,13 @@ test.describe('«+» → «Що записати?»', () => {
     await expect(app.dialogs).toHaveCount(1);
     await expect(sheet).toContainText('14 жовтня 2026');
     await expect(sheet.getByRole('group', { name: 'Тренування' }).first()).toBeVisible();
-    for (const name of ['Що я їла', 'Калорії за день', 'Вага (за бажанням)', 'Нотатки']) {
+    // The food is the day's meal list (today: the old block) with «+ Прийом їжі» — no text or day kcal field.
+    await expect(app.mealRow(sheet, 'Їжа за день')).toBeVisible();
+    await expect(app.addMealButton(sheet)).toBeVisible();
+    for (const name of ['Що я їла', 'Калорії за день']) {
+      await expect(sheet.getByRole('textbox', { name, exact: true })).toHaveCount(0);
+    }
+    for (const name of ['Вага (за бажанням)', 'Нотатки']) {
       await expect(sheet.getByRole('textbox', { name, exact: true })).toBeVisible();
     }
     for (const field of ['chest', 'waist', 'hips'])
@@ -326,11 +345,12 @@ test.describe('«+» → «Що записати?»', () => {
     await expect(menuRow(menu, 'Їжа')).toBeFocused();
     await menu.evaluate((el) => el.setAttribute('data-e2e-swap', 'same'));
     await page.keyboard.press('Enter');
-    const food = app.sheet('Їжа');
-    await expect(food).toHaveAttribute('data-e2e-swap', 'same');
+    // Enter on «Їжа» swaps to a new meal; the typing goes straight into «Що я їла».
+    const meal = app.sheet('Прийом їжі');
+    await expect(meal).toHaveAttribute('data-e2e-swap', 'same');
     await expect(app.dialogs).toHaveCount(1);
-    await expect(food).toBeFocused();
-    const formBox = await food.boundingBox();
+    await expect(meal.getByRole('textbox', { name: 'Що я їла', exact: true })).toBeFocused();
+    const formBox = await meal.boundingBox();
     expect(formBox?.width ?? 0).toBeLessThanOrEqual(560);
   });
 

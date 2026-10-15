@@ -51,6 +51,23 @@ describe('settings routes (App.tsx)', () => {
     cleanup();
     await renderAt('/settings/goals');
     expect(screen.getByRole('heading', { level: 1, name: 'Цілі' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Цілі: білки, жири, вуглеводи' })).toBeTruthy();
+  });
+
+  it('renders «Прийоми їжі» at /settings/meals', async () => {
+    const memory = await renderAt('/settings/meals');
+    expect(memory.history).toEqual(['/settings/meals']);
+    expect(screen.getByRole('heading', { level: 1, name: 'Прийоми їжі' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Мої прийоми їжі' })).toBeTruthy();
+  });
+
+  it('still sends unknown sections back to the list', async () => {
+    for (const path of ['/settings/Meals', '/settings/food', '/settings/meal']) {
+      const memory = await renderAt(path);
+      expect(memory.history, path).toEqual(['/settings']);
+      expect(screen.getByRole('navigation', { name: 'Розділи налаштувань' })).toBeTruthy();
+      cleanup();
+    }
   });
 
   it('redirects the old /reminders (bookmarks, delivered test notifications) to /settings/reminders', async () => {

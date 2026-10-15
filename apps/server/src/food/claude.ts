@@ -49,6 +49,7 @@ How to answer:
 - name: a short Ukrainian name, e.g. «Вівсянка з бананом».
 - portion: in Ukrainian, as grams or a household measure, e.g. «250 г», «1 скибка», «1 чашка (250 мл)».
 - kcal: a whole number for that portion.
+- protein, fat, carbs: grams of protein, fat and carbohydrate in that portion, to the nearest 0.5 g. Keep them consistent with kcal (about 4 kcal per gram of protein or carbohydrate and 9 per gram of fat; alcohol adds energy without macronutrients). Water, black coffee, plain tea and other drinks without energy: 0, 0, 0.
 - comment: an empty string, or one short Ukrainian sentence when it helps her, e.g. when a portion is hard to judge from the photo.
 - If the photo shows no food or drink, return no items and the comment «Схоже, на фото немає їжі».
 - Report estimates only: no diet advice, judgement or moralising.`;
@@ -62,17 +63,23 @@ export const RECALC_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
 Recalculation:
 In this request she has already reviewed an estimate and corrected the items herself. Her numbered list is final, and these rules take precedence over the ones above:
 - Return exactly one item for each numbered line, in the same order, with her name and portion copied unchanged. Never rename, merge, split, reorder, drop or add items, even if the photo seems to show something else.
-- kcal: the energy of exactly that food in exactly that portion. Where a line has no portion, assume a typical home portion in Ukraine.
+- kcal, protein, fat, carbs: the energy and the macronutrients of exactly that food in exactly that portion. Where a line has no portion, assume a typical home portion in Ukraine.
 - If a photo is attached, use it only to understand how the food was prepared: oil, butter, sauces, dressing, cooking method. Count such additions into the item they belong to unless she lists them as a line of their own.
 - comment: an empty string, or one short Ukrainian sentence when it helps her, e.g. when a portion is ambiguous.`;
 
-/** What the model must produce; kept permissive — `sanitizeEstimate` enforces the API limits. */
+/**
+ * What the model must produce; kept permissive — structured outputs support no numeric bounds, and
+ * `sanitizeEstimate` / `sanitizeRecalculation` enforce the API limits (kcal and the 0–1000 g macros).
+ */
 const modelOutputSchema = z.object({
   items: z.array(
     z.object({
       name: z.string().describe('Short Ukrainian name of the food or drink'),
       portion: z.string().describe('Portion in Ukrainian: grams or a household measure'),
       kcal: z.number().describe('Energy of this portion in kcal, a whole number'),
+      protein: z.number().describe('Protein in this portion, grams'),
+      fat: z.number().describe('Fat in this portion, grams'),
+      carbs: z.number().describe('Carbohydrate in this portion, grams'),
     }),
   ),
   comment: z.string().describe('Empty, or one short Ukrainian sentence'),
@@ -170,7 +177,7 @@ function structuredOutput(message: EstimateMessage): RawEstimate {
 export const readEstimateResponse = (message: EstimateMessage): FoodEstimate =>
   sanitizeEstimate(structuredOutput(message));
 
-/** Checks `stop_reason`, then requires exactly `expected` items and takes their kcal by index. */
+/** Checks `stop_reason`, then requires exactly `expected` items and takes their kcal and macros by index. */
 export const readRecalcResponse = (message: EstimateMessage, expected: number): FoodRecalculation =>
   sanitizeRecalculation(structuredOutput(message), expected);
 

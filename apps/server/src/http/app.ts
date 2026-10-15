@@ -50,7 +50,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     data: createDataRepo(db, now, logger),
     sessions,
     push,
-    photos: createPhotoStore(db, deps.photosDir, now),
+    photos: createPhotoStore(db, deps.photosDir, now, logger),
     food: {
       estimator: deps.food?.estimator ?? null,
       budget: createFoodBudget(db, deps.food?.dailyLimit ?? DEFAULT_FOOD_DAILY_LIMIT),

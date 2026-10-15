@@ -13,7 +13,7 @@ vi.mock('@/store/data', () => ({
 
 const FOODS: FoodItem[] = [
   { name: 'Кава з молоком', portion: '250 мл', kcal: 90, count: 4, lastUsed: '2026-10-08' },
-  { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, count: 7, lastUsed: '2026-10-07' },
+  { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, count: 7, lastUsed: '2026-10-07', protein: 9, fat: 6, carbs: 58 },
   { name: 'Яблуко', portion: '', kcal: 80, count: 1, lastUsed: '2026-10-01' },
 ];
 
@@ -59,23 +59,43 @@ describe('FrequentDishes', () => {
     ]);
   });
 
-  it('tap adds the dish to the day; its use is only handed over, not committed', () => {
+  it('tap hands the dish over as a position, with its macros; its use is not committed here', () => {
     const onAdd = vi.fn();
     render(<FrequentDishes onAdd={onAdd} />);
     fireEvent.click(screen.getByRole('button', { name: 'Додати «Вівсянка з бананом», 320 ккал' }));
     expect(onAdd).toHaveBeenCalledWith({
-      line: 'Вівсянка з бананом (250 г) — 320 ккал',
-      consumed: '',
+      name: 'Вівсянка з бананом',
+      portion: '250 г',
       kcal: 320,
-      photoId: null,
-      items: [{ name: 'Вівсянка з бананом', portion: '250 г', kcal: 320 }],
-      uses: [{ name: 'Вівсянка з бананом', portion: '250 г', kcal: 320 }],
+      protein: 9,
+      fat: 6,
+      carbs: 58,
     });
-    // The sheet records `food.use` when the day is saved: a discarded draft counts nothing.
+    // The meal records `food.use` when it is saved: a discarded draft counts nothing.
     expect(store.commit).not.toHaveBeenCalled();
 
+    // A dish remembered without macros: unknown, not 0.
     fireEvent.click(screen.getByRole('button', { name: 'Додати «Яблуко», 80 ккал' }));
-    expect(onAdd).toHaveBeenLastCalledWith(expect.objectContaining({ line: 'Яблуко — 80 ккал', kcal: 80 }));
+    expect(onAdd).toHaveBeenLastCalledWith({ name: 'Яблуко', portion: '', kcal: 80, protein: null, fat: null, carbs: null });
+  });
+
+  it('locked when the meal is full: focusable, described by the reason, nothing added', () => {
+    const onAdd = vi.fn();
+    render(
+      <>
+        <p id="full">Не більше 30 позицій</p>
+        <FrequentDishes onAdd={onAdd} lockedBy="full" />
+      </>,
+    );
+    const chip = screen.getByRole('button', { name: 'Додати «Яблуко», 80 ккал' });
+    expect(chip.getAttribute('aria-disabled')).toBe('true');
+    expect(chip.getAttribute('aria-describedby')).toBe('full');
+    fireEvent.click(chip);
+    expect(onAdd).not.toHaveBeenCalled();
+    // Deleting dishes still works.
+    fireEvent.click(screen.getByRole('button', { name: 'Змінити' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Видалити «Яблуко» з частих страв' }));
+    expect(store.commit).toHaveBeenCalledWith({ kind: 'food.delete', name: 'Яблуко' });
   });
 
   it('«Змінити» switches the chips to delete mode', () => {

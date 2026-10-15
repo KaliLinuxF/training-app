@@ -3,16 +3,20 @@ import { create } from 'zustand';
 
 /**
  * - `menu`    — «Що записати?»: four actions for the date (Їжа, Тренування, Вага, Заміри), opened by «+»
- * - `day`     — the full «Запис дня» (training, food, kcal, weight, measurements, notes): calendar, history,
+ * - `day`     — the full «Запис дня» (training, the day's meals, weight, measurements, notes): calendar, history,
  *               «Відкрити день»
- * - `food`    — «Їжа»: food text, photos, FoodAssist, kcal
+ * - `food`    — «Їжа»: the day's meal list (totals: kcal, Б · Ж · В; one row per meal; «+ Прийом їжі»):
+ *               Home / calendar on a day with food, `/?sheet=food`
+ * - `meal`    — «Прийом їжі»: a NEW meal for the date (the «+» menu's Їжа row swaps to it; Home / calendar open
+ *               it on a day without food). Existing meals open in a stacked editor over `food` / `day` instead.
  * - `workout` — «Тренування»: ✓/✕, types, optional notes
  * - `weight`  — «Контрольне зважування»
  * - `measure` — «Заміри тіла»
  * - `setup`   — «Перші кроки» (first run: start weight, goal, calorie goal)
  * - `install` — «Встановлення на iPhone» (adding the app to the home screen, needed for push)
  */
-export type SheetMode = 'menu' | 'day' | 'food' | 'workout' | 'weight' | 'measure' | 'setup' | 'install';
+export type SheetMode =
+  'menu' | 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'setup' | 'install';
 
 /** Pre-filled draft values: `trained` pre-fills the `workout` and `day` sheets (the workout push deep link). */
 export interface SheetPatch {
@@ -71,6 +75,15 @@ export const ui = {
   },
   closeSheet(): void {
     useUiStore.setState({ sheet: null });
+  },
+  /**
+   * Moves the open sheet to another date, keeping its mode, key and patch (so a draft moves with her, e.g. the
+   * new-meal editor's ‹ ›). No-op without an open sheet or when it is already on that date.
+   */
+  moveSheet(date: ISODate): void {
+    const sheet = useUiStore.getState().sheet;
+    if (!sheet || sheet.date === date) return;
+    useUiStore.setState({ sheet: { ...sheet, date } });
   },
   /**
    * Asks a yes/no question in the app's own dialog (rendered once by the shell above sheets).

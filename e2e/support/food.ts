@@ -6,7 +6,11 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { Page, Request } from '@playwright/test';
-import type { FoodEstimateResponse, FoodStatusResponse } from '../../packages/shared/src/index';
+import type {
+  FoodEstimateItem,
+  FoodEstimateResponse,
+  FoodStatusResponse,
+} from '../../packages/shared/src/index';
 
 /** 480×360 JPEG of a plate (e2e/fixtures/food.jpg). */
 export const FOOD_JPEG = readFileSync(fileURLToPath(new URL('../fixtures/food.jpg', import.meta.url)));
@@ -14,22 +18,41 @@ export const FOOD_JPEG = readFileSync(fileURLToPath(new URL('../fixtures/food.jp
 /** Matches the server's photo id format (`photoIdSchema`). */
 export const PHOTO_ID = 'e2ePhotoFixture000001';
 
+/** «Борщ, хліб» → 2 positions, 320 ккал, Б 10,5 · Ж 10 · В 47. */
 export const TEXT_ESTIMATE: FoodEstimateResponse = {
   photoId: null,
   items: [
-    { name: 'Борщ', portion: '300 г', kcal: 180 },
-    { name: 'Хліб житній', portion: '2 скибки', kcal: 140 },
+    { name: 'Борщ', portion: '300 г', kcal: 180, protein: 6, fat: 9, carbs: 19 },
+    { name: 'Хліб житній', portion: '2 скибки', kcal: 140, protein: 4.5, fat: 1, carbs: 28 },
   ],
   totalKcal: 320,
   comment: '',
 };
 
+/** A photo of сирники → 1 position, 420 ккал, Б 22 · Ж 22 · В 33. */
 export const PHOTO_ESTIMATE: FoodEstimateResponse = {
   photoId: PHOTO_ID,
-  items: [{ name: 'Сирники зі сметаною', portion: '3 шт', kcal: 420 }],
+  items: [{ name: 'Сирники зі сметаною', portion: '3 шт', kcal: 420, protein: 22, fat: 22, carbs: 33 }],
   totalKcal: 420,
   comment: 'Сметана — приблизно 2 ложки',
 };
+
+/**
+ * A recalculation answer («✨ Перерахувати»): exactly `items` (her names and portions, new kcal and macros) with
+ * their total. `photoId` is the photo that was sent for context, if any.
+ */
+export function recalcAnswer(
+  items: readonly FoodEstimateItem[],
+  comment = '',
+  photoId: string | null = null,
+): FoodEstimateResponse {
+  return {
+    photoId,
+    items: items.map((item) => ({ ...item })),
+    totalKcal: items.reduce((sum, item) => sum + item.kcal, 0),
+    comment,
+  };
+}
 
 export interface FoodMocks {
   /** Bodies of every `POST /api/food/estimate`. */

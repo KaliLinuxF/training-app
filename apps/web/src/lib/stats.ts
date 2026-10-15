@@ -10,5 +10,6 @@ export * from './stats/range';
 export * from './stats/chart';
 export * from './stats/workouts';
 export * from './stats/kcal';
+export * from './stats/nutrition';
 export * from './stats/calendar';
 export * from './stats/reminders';

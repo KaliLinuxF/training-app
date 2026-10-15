@@ -1,344 +1,216 @@
-import type { ISODate, Op } from '@legko/shared';
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ChangeEvent,
-  type KeyboardEvent,
-} from 'react';
-import { useSyncState } from '@/store/data';
+import { useId, type ChangeEvent, type KeyboardEvent, type Ref } from 'react';
 import { Button, cx } from '@/ui';
-import { EstimateCard, EstimateLoading } from './EstimateCard';
-import { useFoodEstimate, type EstimateDeps, type EstimatePhase } from './estimate';
-import { focusFirst, focusIsAround } from './focus';
-import { useFoodStatus } from './foodStatus';
-import { FrequentDishes } from './FrequentDishes';
-import { draftsToItems } from './drafts';
-import { editorChanged } from './itemEditorModel';
-import {
-  addedMessage,
-  buildFoodAdd,
-  COMPOSER_CLOSED,
-  composerEdited,
-  consumedTail,
-  foundMessage,
-  openComposer,
-  recalculatedMessage,
-  type ComposerState,
-} from './model';
-import { unestimatedTail } from './tail';
-import type { FoodAdd } from './types';
 import s from './FoodAssist.module.css';
 
-export interface FoodAssistProps {
-  /** Day being edited (sent with the estimate request). */
-  date: ISODate;
-  /** The day's «Що я їла» text: «✨ Порахувати» pre-fills the composer with its unestimated tail. */
-  foodText: string;
-  /**
-   * She confirmed an estimate or tapped a frequent dish. The sheet inserts `add.line` (replacing
-   * `add.consumed`, see `insertEstimate`), adds the kcal and records `add.uses` as `food.use` ops
-   * when the day is saved. FoodAssist never commits `food.use` itself.
-   */
-  onAdd: (add: FoodAdd) => void;
-  /**
-   * Whether something here would be lost if the sheet closed or changed day: a request in flight,
-   * a result not added yet, or composer text she typed herself. The sheet asks before dropping it.
-   */
-  onPendingChange?: (pending: boolean) => void;
-  /** Test seams; the app uses the real API, store and toast. */
-  estimateDeps?: EstimateDeps;
-  /** Commits `food.delete` from «Часті страви» («Змінити» → ✕). */
-  commit?: (...ops: Op[]) => boolean;
-}
+/**
+ * What the first AI button does:
+ * - `count`: «✨ Порахувати» — estimates the meal text;
+ * - `rest`: «✨ Порахувати решту» — estimates the pending tail (what she wrote after the counted text);
+ * - `more`: «✨ Додати ще» — opens the composer «Що ще порахувати?».
+ */
+export type AssistMode = 'count' | 'rest' | 'more';
 
-const PLACEHOLDER = 'Напр.: борщ 300 г, 2 скибки хліба, салат';
-
-/** What is on screen in the AI block; focus follows it when it changes. */
-type View = 'actions' | 'composer' | 'loading' | 'result';
-
-interface Announcement {
-  /** New key → new node → read out again, even when the text repeats («Додано 60 ккал» twice). */
-  key: string;
+export interface AssistHint {
+  id: string;
   text: string;
 }
 
-/**
- * «✨ Порахувати» / «📷 Фото» + «Часті страви» block under the «Що я їла» textarea (SPEC §3.7).
- * The AI part is hidden when the server has no AI; the chips work offline.
- */
-export function FoodAssist(props: FoodAssistProps) {
-  // Another day in the sheet starts from scratch: no request, result, composer text or focus
-  // bookkeeping carries over (the request is aborted on unmount).
-  return <DayFoodAssist key={props.date} {...props} />;
+export interface FoodAssistProps {
+  mode: AssistMode;
+  /** The pending tail (part of «Порахувати решту»'s accessible name). */
+  tail: string;
+  /** Why both buttons cannot estimate (offline, no estimates left, 30 positions); shown under them. */
+  blocked?: AssistHint;
+  /** The positions card's alert says what `blocked` says (a 429 on «Перерахувати») and has its id: no line here. */
+  blockedInCard?: boolean;
+  /** Why the first one cannot (an empty meal text): a description, not a visible line. */
+  countHint?: AssistHint;
+  /** Why the photo one cannot (12 photos on the day); shown under them. */
+  photoHint?: AssistHint;
+  /** A request runs (estimate or recalculation): both wait. */
+  busy: boolean;
+  /** Why the last estimate failed (inline alert; when it says what `blocked` says, it is that line). */
+  error?: string;
+  composerOpen: boolean;
+  composerText: string;
+  firstRef?: Ref<HTMLButtonElement>;
+  photoRef?: Ref<HTMLButtonElement>;
+  composerRef?: Ref<HTMLTextAreaElement>;
+  /** «✨ Порахувати» / «Порахувати решту» (the meal text or its tail) — or, with the text empty, «go type». */
+  onCount: () => void;
+  /** «✨ Додати ще»: opens or folds the composer. */
+  onToggleComposer: () => void;
+  onComposerText: (text: string) => void;
+  onSubmitComposer: () => void;
+  onPhoto: (file: File) => void;
 }
 
-function DayFoodAssist({ date, foodText, onAdd, onPendingChange, estimateDeps, commit }: FoodAssistProps) {
-  const status = useFoodStatus();
-  const { online } = useSyncState();
-  const est = useFoodEstimate(date, estimateDeps);
-  const [composer, setComposer] = useState<ComposerState>(COMPOSER_CLOSED);
-  const [added, setAdded] = useState<Announcement | null>(null);
-  const addSeq = useRef(0);
-  /** Whether the last estimate was a photo: focus returns to «📷 Фото» rather than «✨ Порахувати». */
-  const lastPhoto = useRef(false);
+const COMPOSER_PLACEHOLDER = 'Напр.: яблуко, кава з молоком';
 
-  const rootRef = useRef<HTMLDivElement>(null);
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const photoRef = useRef<HTMLButtonElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const cancelRef = useRef<HTMLButtonElement>(null);
-  const titleRef = useRef<HTMLSpanElement>(null);
+/**
+ * The meal editor's AI row (above «Що я їла», so the iPhone keyboard never covers it): «✨ Порахувати»
+ * (or «Порахувати решту» / «Додати ще») and «📷 Фото», their hints and the last failure, and the
+ * composer «Що ще порахувати?». Never natively disabled: a locked button keeps her focus.
+ */
+export function FoodAssist({
+  mode,
+  tail,
+  blocked,
+  blockedInCard = false,
+  countHint,
+  photoHint,
+  busy,
+  error,
+  composerOpen,
+  composerText,
+  firstRef,
+  photoRef,
+  composerRef,
+  onCount,
+  onToggleComposer,
+  onComposerText,
+  onSubmitComposer,
+  onPhoto,
+}: FoodAssistProps) {
   const composerId = useId();
-  const hintId = useId();
+  const fileId = useId();
+  const firstLocked = busy || blocked !== undefined || (mode !== 'more' && countHint !== undefined);
+  // The open composer can still be folded away while estimating is impossible (not while a request runs).
+  const toggleLocked = mode === 'more' && (busy || (!composerOpen && blocked !== undefined));
+  const photoLocked = busy || blocked !== undefined || photoHint !== undefined;
+  const describe = (...hints: (AssistHint | undefined)[]) =>
+    hints
+      .filter((h): h is AssistHint => h !== undefined)
+      .map((h) => h.id)
+      .join(' ') || undefined;
+  // A 429: the alert says what the hint would — one line, which the buttons are described by.
+  const errorIsBlocked = error !== undefined && error === blocked?.text;
 
-  const { phase } = est;
-  const aiShown = status?.enabled === true;
-  const exhausted = aiShown && status.remainingToday <= 0;
-  const busy = phase.kind !== 'idle';
-  const blocked = !online || exhausted;
-  const hint = !online ? 'Потрібен інтернет' : exhausted ? 'Ліміт підрахунків на сьогодні вичерпано' : null;
-  const error = phase.kind === 'idle' ? phase.error : undefined;
-  // A 429 on «Перерахувати»: the card's alert says it and takes over the hint's id (one line).
-  const hintInCard = phase.kind === 'result' && phase.recalc.error === hint;
-  const composerShown = composer.open && phase.kind === 'idle';
-  const view: View =
-    phase.kind === 'loading' ? 'loading' : phase.kind === 'result' ? 'result' : composerShown ? 'composer' : 'actions';
-  // A row she is writing in the item editor counts too (the list may still be empty).
-  const editing = phase.kind === 'result' && phase.editor !== null && editorChanged(phase.editor);
-  const pending =
-    phase.kind === 'loading' ||
-    (phase.kind === 'result' && phase.drafts.length > 0) ||
-    editing ||
-    (composer.open && composerEdited(composer));
-  const live = liveMessage(phase, added);
-
-  // Tell the sheet what would be lost on close / day change.
-  const pendingRef = useRef(onPendingChange);
-  useEffect(() => {
-    pendingRef.current = onPendingChange;
-  });
-  useEffect(() => {
-    pendingRef.current?.(pending);
-  }, [pending]);
-  useEffect(() => () => pendingRef.current?.(false), []);
-
-  // The element she was on (composer, «Скасувати», «Додати») unmounts as the block changes: move
-  // focus to what replaced it, unless she is working in another control by now.
-  const shownView = useRef(view);
-  useLayoutEffect(() => {
-    if (shownView.current === view) return;
-    shownView.current = view;
-    const root = rootRef.current;
-    if (!root || !focusIsAround(root)) return;
-    if (view === 'composer') focusFirst([composerRef.current]);
-    else if (view === 'loading') focusFirst([cancelRef.current]);
-    else if (view === 'result') focusFirst([titleRef.current]);
-    else {
-      const [first, second] = lastPhoto.current
-        ? [photoRef.current, toggleRef.current]
-        : [toggleRef.current, photoRef.current];
-      focusFirst([first, second, root]);
+  const first = () => {
+    if (mode === 'more') {
+      if (!toggleLocked) onToggleComposer();
+      return;
     }
-  }, [view]);
-
-  const announceAdded = (add: FoodAdd) => setAdded({ key: `a${++addSeq.current}`, text: addedMessage(add) });
-
-  const toggleComposer = () => {
-    if (error) est.reset();
-    setComposer((c) => (c.open ? { ...c, open: false } : openComposer(c, unestimatedTail(foodText))));
+    // With the text empty it still helps: «Опиши, що їла» (the caller moves her to the text).
+    if (!busy && blocked === undefined) onCount();
   };
 
-  const submitText = () => {
-    const text = composer.text.trim();
-    if (!text || blocked || busy) return;
-    lastPhoto.current = false;
-    setAdded(null);
-    est.fromText(text, consumedTail(composer));
-  };
-
-  const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-      e.preventDefault();
-      submitText();
-    }
+  const pick = () => {
+    if (!photoLocked) document.getElementById(fileId)?.click();
   };
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     // Reset so choosing the same photo again fires `change` again.
     e.target.value = '';
-    if (!file) return;
-    lastPhoto.current = true;
-    setAdded(null);
-    est.fromPhoto(file, composerShown ? composer.text : '');
+    if (file) onPhoto(file);
   };
 
-  const addEstimate = () => {
-    // Not while «Рахую…»: the rows still carry the old dish's kcal (the card's button waits too).
-    if (phase.kind !== 'result' || phase.recalc.pending !== null) return;
-    // Her corrected names and portions: «Часті страви» learn them, not the model's first guess.
-    const items = draftsToItems(phase.drafts);
-    if (!items.length) return;
-    const add = buildFoodAdd(items, phase.photoId, phase.consumed);
-    onAdd(add);
-    announceAdded(add);
-    est.reset();
-    setComposer(COMPOSER_CLOSED);
+  const submit = () => {
+    if (composerText.trim() && !busy && blocked === undefined) onSubmitComposer();
   };
 
-  const addDish = (add: FoodAdd) => {
-    onAdd(add);
-    announceAdded(add);
+  const onComposerKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      submit();
+    }
   };
 
-  const retry = () => {
-    est.reset();
-    setComposer((c) => openComposer(c, unestimatedTail(foodText)));
-  };
+  const label =
+    mode === 'count'
+      ? 'Порахувати калорії'
+      : mode === 'rest'
+        ? `Порахувати решту: ${tail}`
+        : 'Додати ще: порахувати калорії';
+  const text = mode === 'count' ? 'Порахувати' : mode === 'rest' ? 'Порахувати решту' : 'Додати ще';
 
   return (
-    <div ref={rootRef} className={s.root} tabIndex={-1}>
-      {aiShown && (
-        <div className={s.ai}>
-          <div className={s.actions}>
-            <button
-              ref={toggleRef}
-              type="button"
-              className={cx(s.action, s.count)}
-              aria-label="Порахувати калорії"
-              aria-expanded={composerShown}
-              aria-controls={composerShown ? composerId : undefined}
-              aria-describedby={hint ? hintId : undefined}
-              // An open composer can still be folded away while estimating is impossible.
-              disabled={busy || (blocked && !composerShown)}
-              onClick={toggleComposer}
-            >
-              <span aria-hidden="true">✨</span> Порахувати
-            </button>
-            <button
-              ref={photoRef}
-              type="button"
-              className={cx(s.action, s.photo)}
-              aria-label="Порахувати калорії за фото"
-              aria-describedby={hint ? hintId : undefined}
-              disabled={blocked || busy}
-              onClick={() => fileRef.current?.click()}
-            >
-              <span aria-hidden="true">📷</span> Фото
-            </button>
-            {/* Visually hidden, not display:none: iOS opens the picker reliably only for rendered inputs. */}
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/*"
-              className="visually-hidden"
-              tabIndex={-1}
-              aria-hidden="true"
-              onChange={onFile}
-            />
-          </div>
-          {hint && hint !== error && !hintInCard && (
-            <p id={hintId} className={s.hint}>
-              {hint}
-            </p>
-          )}
-          {/* Inside the sheet (the toast sits outside the modal dialog, where VoiceOver may not read it). */}
-          {error && (
-            <p id={error === hint ? hintId : undefined} className={s.error} role="alert">
-              {error}
-            </p>
-          )}
-
-          {composerShown && (
-            <div id={composerId} className={s.composer}>
-              <textarea
-                ref={composerRef}
-                className={s.composerInput}
-                rows={2}
-                value={composer.text}
-                placeholder={PLACEHOLDER}
-                aria-label="Що порахувати"
-                enterKeyHint="send"
-                onChange={(e) => {
-                  const text = e.target.value;
-                  setComposer((c) => ({ ...c, text }));
-                }}
-                onKeyDown={onComposerKey}
-              />
-              <div className={s.composerBar}>
-                <span className={s.composerNote}>Можна додати й фото</span>
-                <Button
-                  size="sm"
-                  className={s.composerSubmit}
-                  disabled={!composer.text.trim() || blocked}
-                  onClick={submitText}
-                >
-                  Порахувати
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {phase.kind === 'loading' && (
-            <EstimateLoading photo={phase.photo} preview={phase.preview} onCancel={est.reset} cancelRef={cancelRef} />
-          )}
-
-          {phase.kind === 'result' && (
-            <EstimateCard
-              drafts={phase.drafts}
-              comment={phase.comment}
-              photo={phase.photo}
-              preview={phase.preview}
-              remaining={status.remainingToday}
-              titleRef={titleRef}
-              recalculating={phase.recalc.pending !== null}
-              recalcError={phase.recalc.error}
-              recalcInEditor={phase.recalc.fromEditor === true}
-              blockedHint={hint ? { id: hintId, text: hint } : undefined}
-              editor={phase.editor}
-              onOpenItem={est.openItem}
-              onNewItem={est.newItem}
-              onEditorChange={est.changeItem}
-              onSaveItem={est.saveItem}
-              onCloseItem={est.closeItem}
-              onRemove={est.removeItem}
-              onRecalculate={est.recalculate}
-              onAdd={addEstimate}
-              onCancel={est.reset}
-              onRetry={retry}
-            />
-          )}
-        </div>
+    <div className={s.ai}>
+      <div className={s.actions}>
+        <button
+          ref={firstRef}
+          type="button"
+          className={cx(s.action, s.count)}
+          aria-label={label}
+          aria-expanded={mode === 'more' ? composerOpen : undefined}
+          aria-controls={mode === 'more' && composerOpen ? composerId : undefined}
+          aria-disabled={(mode === 'more' ? toggleLocked : firstLocked) || undefined}
+          aria-describedby={describe(blocked, mode === 'more' ? undefined : countHint)}
+          onClick={first}
+        >
+          <span aria-hidden="true">✨</span> {text}
+        </button>
+        <button
+          ref={photoRef}
+          type="button"
+          className={cx(s.action, s.photo)}
+          aria-label="Порахувати калорії за фото"
+          aria-disabled={photoLocked || undefined}
+          aria-describedby={describe(blocked, photoHint)}
+          onClick={pick}
+        >
+          <span aria-hidden="true">📷</span> Фото
+        </button>
+        {/* Visually hidden, not display:none: iOS opens the picker reliably only for rendered inputs. */}
+        <input
+          id={fileId}
+          type="file"
+          accept="image/*"
+          className="visually-hidden"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={onFile}
+        />
+      </div>
+      {blocked && !errorIsBlocked && !blockedInCard && (
+        <p id={blocked.id} className={s.hint}>
+          {blocked.text}
+        </p>
+      )}
+      {!blocked && photoHint && (
+        <p id={photoHint.id} className={s.hint}>
+          {photoHint.text}
+        </p>
+      )}
+      {countHint && (
+        <span id={countHint.id} className="visually-hidden">
+          {countHint.text}
+        </span>
+      )}
+      {/* Inside the sheet (the toast sits outside the modal dialog, where VoiceOver may not read it). */}
+      {error && (
+        <p id={errorIsBlocked ? blocked?.id : undefined} className={s.error} role="alert">
+          {error}
+        </p>
       )}
 
-      <FrequentDishes onAdd={addDish} commit={commit} />
-
-      {/* Always mounted, so changes are read out: progress, what was found, what was added. */}
-      <div className={cx('visually-hidden', s.live)} role="status">
-        {live && <span key={live.key}>{live.text}</span>}
-      </div>
+      {composerOpen && !busy && (
+        <div id={composerId} className={s.composer}>
+          <textarea
+            ref={composerRef}
+            className={s.composerInput}
+            rows={2}
+            value={composerText}
+            placeholder={COMPOSER_PLACEHOLDER}
+            aria-label="Що ще порахувати?"
+            enterKeyHint="send"
+            onChange={(e) => onComposerText(e.target.value)}
+            onKeyDown={onComposerKey}
+          />
+          <div className={s.composerBar}>
+            <span className={s.composerNote}>Можна додати й фото</span>
+            <Button
+              size="sm"
+              className={s.composerSubmit}
+              aria-disabled={!composerText.trim() || busy || blocked !== undefined || undefined}
+              onClick={submit}
+            >
+              Порахувати
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
-
-/** Polite status for screen readers; errors go to the inline role=alert instead. */
-function liveMessage(phase: EstimatePhase, added: Announcement | null): Announcement | null {
-  if (phase.kind === 'loading') return { key: `l${phase.id}`, text: 'Рахую калорії…' };
-  if (phase.kind !== 'result') return added;
-  // «✨ Перерахувати»: progress, then the new total; until the first one, what the estimate found.
-  const { pending, done, error } = phase.recalc;
-  if (pending !== null) return { key: `l${pending}`, text: 'Рахую калорії…' };
-  // Asked for in the item editor: its kcal number says what came back (the list total, not yet
-  // with her draft in it, would mislead); the card's total speaks once she applies it. Dropped
-  // with the editor, it has nothing left to say either.
-  if (done?.fromEditor || phase.recalc.fromEditor) return null;
-  if (done) return { key: `d${done.id}`, text: recalculatedMessage(done.total) };
-  // Failed: the card's alert says so. What the estimate first found is out of date by now, and a
-  // new key would read it out again.
-  if (error !== undefined) return null;
-  return { key: `r${phase.id}`, text: foundMessage(phase.found.count, phase.found.total) };
 }

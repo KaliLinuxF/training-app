@@ -4,6 +4,7 @@ import { useSettings, useSyncState } from '@/store/data';
 import { cx, fullRowClass, ListGroup, ListRow, Pill, ScreenHeader } from '@/ui';
 import {
   goalsSummary,
+  mealTypesSummary,
   notifBadge,
   remindersSummary,
   SECTION_ICONS,
@@ -50,6 +51,7 @@ export function SettingsList({ current, push, themePref, showHeader, ref }: Sett
     reminders: remindersSummary(settings.rem),
     goals: goalsSummary(settings),
     workouts: typesSummary(settings.customTypes),
+    meals: mealTypesSummary(settings.mealTypes),
     appearance: themeSummary(themePref),
     data: (
       <span className={s.sync}>

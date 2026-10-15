@@ -1,6 +1,6 @@
-import type { FoodItem } from '@legko/shared';
+import type { FoodEstimateItem, FoodItem } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { editDraft, needsRecalc, toDrafts, type DraftItem } from './drafts';
+import { draftMacros, editDraft, emptyDraft, needsRecalc, toDrafts, type DraftItem } from './drafts';
 import {
   canSave,
   canStep,
@@ -19,13 +19,32 @@ import {
   type ItemEditorState,
 } from './itemEditorModel';
 
+const NO_MACROS = { protein: null, fat: null, carbs: null };
+
+/** A priced item; macros unknown unless given. */
+const item = (
+  name: string,
+  portion: string,
+  kcal: number,
+  m: Partial<FoodEstimateItem> = {},
+): FoodEstimateItem => ({
+  name,
+  portion,
+  kcal,
+  ...NO_MACROS,
+  ...m,
+});
+
 const ROWS = toDrafts([
-  { name: 'Гречка', portion: '200 г', kcal: 220 },
-  { name: 'Сирники зі сметаною', portion: '3 шт', kcal: 420 },
-  { name: 'Суп', portion: 'велика тарілка', kcal: 300 },
-  { name: 'Хліб', portion: '2 скибки', kcal: 160 },
-  { name: 'Сметана', portion: '', kcal: 60 },
+  item('Гречка', '200 г', 220, { protein: 8, fat: 2, carbs: 44 }),
+  item('Сирники зі сметаною', '3 шт', 420, { protein: 22, fat: 22, carbs: 33 }),
+  item('Суп', 'велика тарілка', 300),
+  item('Хліб', '2 скибки', 160),
+  item('Сметана', '', 60),
 ]);
+
+/** Б · Ж · В of the draft as typed. */
+const macrosOf = (s: ItemEditorState) => draftMacros(s.item);
 
 function row(i: number): DraftItem {
   const d = ROWS[i];
@@ -39,7 +58,16 @@ const FOODS: FoodItem[] = [
   { name: 'Сирники', portion: '3 шт', kcal: 450, count: 5, lastUsed: '2026-10-01' },
   { name: 'Борщ', portion: '300 г', kcal: 180, count: 3, lastUsed: '2026-10-05' },
   { name: 'Борщ зелений', portion: '300 г', kcal: 150, count: 1, lastUsed: '2026-10-06' },
-  { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, count: 9, lastUsed: '2026-10-08' },
+  {
+    name: 'Кава з молоком',
+    portion: '1 чашка',
+    kcal: 60,
+    count: 9,
+    lastUsed: '2026-10-08',
+    protein: 3,
+    fat: 3,
+    carbs: 5,
+  },
   { name: 'Яблуко', portion: '1 шт', kcal: 80, count: 4, lastUsed: '2026-10-02' },
   { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, count: 6, lastUsed: '2026-10-07' },
   { name: 'Курка з рисом', portion: '350 г', kcal: 520, count: 2, lastUsed: '2026-10-03' },
@@ -68,7 +96,8 @@ describe('opening the editor', () => {
   it('a new row starts empty and is not «changed» until she types', () => {
     const s = newEditor('n1');
     expect(s.original).toBeNull();
-    expect(s.item).toEqual({ id: 'n1', name: '', portion: '', kcalText: '', base: null, pinned: false });
+    // A row she adds is fresh: «Часті страви» learn it with the meal.
+    expect(s.item).toEqual({ ...emptyDraft('n1'), fresh: true });
     expect(editorChanged(s)).toBe(false);
     expect(canSave(s)).toBe(false);
     expect(editorChanged(run(s, { type: 'amount', text: '1' }))).toBe(true);
@@ -165,16 +194,12 @@ describe('amount', () => {
   });
 
   it('half of one piece is not offered, half a portion is; no model amount, no multipliers', () => {
-    const one = editDraft(
-      { ...row(1), base: { name: 'Яблуко', portion: '1 шт', kcal: 80 } },
-      'name',
-      'Яблуко',
-    );
+    const one = editDraft({ ...row(1), base: item('Яблуко', '1 шт', 80) }, 'name', 'Яблуко');
     expect(multiplierChoices(openEditor(one))[0]).toMatchObject({ label: '½', portion: null });
     const portion = {
       ...row(1),
       portion: '1 порція',
-      base: { name: 'Сирники зі сметаною', portion: '1 порція', kcal: 400 },
+      base: item('Сирники зі сметаною', '1 порція', 400),
     };
     expect(multiplierChoices(openEditor(portion))[0]).toMatchObject({ portion: '0,5 порції' });
     expect(multiplierChoices(newEditor('n1'))).toEqual([]);
@@ -243,7 +268,14 @@ describe('«Часті страви» suggestions', () => {
       name: 'Кава з молоком',
       portion: '1 чашка',
       kcal: 60,
+      protein: 3,
+      fat: 3,
+      carbs: 5,
     });
+    // A dish remembered without macros suggests them unknown.
+    expect(dishSuggestions(FOODS, run(s, { type: 'name', value: 'яблуко' }))[0]).toEqual(
+      item('Яблуко', '1 шт', 80),
+    );
     expect(dishSuggestions(FOODS, run(s, { type: 'name', value: 'піца' }))).toEqual([]);
   });
 
@@ -251,7 +283,7 @@ describe('«Часті страви» suggestions', () => {
     const s = run(
       newEditor('n1'),
       { type: 'name', value: 'сир' },
-      { type: 'dish', dish: { name: 'Сирники', portion: '3 шт', kcal: 450 } },
+      { type: 'dish', dish: item('Сирники', '3 шт', 450) },
     );
     expect(s.item).toMatchObject({ name: 'Сирники', portion: '3 шт', kcalText: '450', pinned: true });
     expect(s).toMatchObject({ amountText: '3', unit: 'шт', textMode: false });
@@ -265,7 +297,7 @@ describe('«Часті страви» suggestions', () => {
   });
 
   it('her amount rescales the dish’s kcal (still hers); another name or unit lets the dish go', () => {
-    const s = run(newEditor('n1'), { type: 'dish', dish: { name: 'Сирники', portion: '3 шт', kcal: 450 } });
+    const s = run(newEditor('n1'), { type: 'dish', dish: item('Сирники', '3 шт', 450) });
     const two = run(s, { type: 'step', dir: -1 });
     expect(two.item).toMatchObject({ portion: '2 шт', kcalText: '300', pinned: true });
     expect(two.dish).not.toBeNull();
@@ -283,7 +315,7 @@ describe('«Часті страви» suggestions', () => {
     expect(kcalSource(typed)).toEqual({ kind: 'manual' });
   });
 
-  const coffee = { name: 'Кава з молоком', portion: '1 чашка', kcal: 60 };
+  const coffee = item('Кава з молоком', '1 чашка', 60);
 
   it('the dish waits while she retypes the amount: empty, then «2»', () => {
     const picked = run(newEditor('n1'), { type: 'dish', dish: coffee });
@@ -329,7 +361,7 @@ describe('«Часті страви» suggestions', () => {
     const saved = run(newEditor('n1'), { type: 'dish', dish: coffee }, { type: 'step', dir: 1 }).item;
     expect(saved).toMatchObject({ portion: '2 чашки', kcalText: '120', fromDish: true });
     const s = openEditor(saved);
-    expect(s.dish).toEqual({ name: 'Кава з молоком', portion: '2 чашки', kcal: 120 });
+    expect(s.dish).toEqual(item('Кава з молоком', '2 чашки', 120));
     expect(kcalSource(s)).toEqual({ kind: 'dish' });
     expect(editorChanged(s)).toBe(false);
     expect(run(s, { type: 'step', dir: 1 }).item).toMatchObject({ portion: '3 чашки', kcalText: '180' });
@@ -337,6 +369,65 @@ describe('«Часті страви» suggestions', () => {
     const typed = openEditor({ ...saved, fromDish: undefined });
     expect(typed.dish).toBeNull();
     expect(kcalSource(typed)).toEqual({ kind: 'manual' });
+  });
+});
+
+describe('Б · Ж · В', () => {
+  it('follow a new amount like the kcal do, from the model’s numbers', () => {
+    const s = run(openEditor(row(1)), { type: 'step', dir: -1 });
+    expect(s.item).toMatchObject({ portion: '2 шт', kcalText: '280' });
+    expect(macrosOf(s)).toEqual({ protein: 14.5, fat: 14.5, carbs: 22 });
+  });
+
+  it('typed kcal rescale the macros she did not type, with a note; no reference → unknown', () => {
+    const s = run(openEditor(row(0)), { type: 'manualKcal' }, { type: 'kcal', value: '330' });
+    expect(macrosOf(s)).toEqual({ protein: 12, fat: 3, carbs: 66 });
+    expect(kcalSource(s)).toEqual({ kind: 'manual', rescaled: true });
+    expect(kcalNote(kcalSource(s))).toBe('Б · Ж · В перераховано за калоріями');
+    // Another dish: the device knows nothing to rescale from.
+    const renamed = run(openEditor(row(0)), { type: 'name', value: 'Рис' }, { type: 'kcal', value: '330' });
+    expect(macrosOf(renamed)).toEqual(NO_MACROS);
+    expect(kcalNote(kcalSource(renamed))).toBe('вписано вручну');
+  });
+
+  it('a macro she types pins them; typed kcal then leave them alone', () => {
+    const s = run(
+      openEditor(row(0)),
+      { type: 'macro', key: 'protein', value: '12,5' },
+      { type: 'kcal', value: '440' },
+    );
+    expect(s.manualKcal).toBe(true);
+    expect(s.item).toMatchObject({ proteinText: '12,5', fatText: '2', carbsText: '44', macrosPinned: true });
+    expect(kcalSource(s)).toEqual({ kind: 'manual' });
+    expect(editorChanged(s)).toBe(true);
+  });
+
+  it('a dish brings its macros; they follow her amount with its kcal', () => {
+    const coffee = item('Кава з молоком', '1 чашка', 60, { protein: 3, fat: 3, carbs: 5 });
+    const s = run(newEditor('n1'), { type: 'dish', dish: coffee });
+    expect(s.item).toMatchObject({
+      kcalText: '60',
+      proteinText: '3',
+      fatText: '3',
+      carbsText: '5',
+      macrosPinned: true,
+    });
+    const two = run(s, { type: 'step', dir: 1 });
+    expect(two.item).toMatchObject({
+      portion: '2 чашки',
+      kcalText: '120',
+      proteinText: '6',
+      carbsText: '10',
+    });
+    // Retyping the amount: the dish waits with its last numbers.
+    const empty = run(two, { type: 'amount', text: '' });
+    expect(empty.item).toMatchObject({ kcalText: '120', proteinText: '6', macrosPinned: true });
+  });
+
+  it('a dish without macros leaves them unknown (the model’s guess for another dish is gone)', () => {
+    const s = run(openEditor(row(0)), { type: 'dish', dish: item('Каша', '250 г', 300) });
+    expect(s.item).toMatchObject({ name: 'Каша', kcalText: '300', fromDish: true });
+    expect(macrosOf(s)).toEqual(NO_MACROS);
   });
 });
 
@@ -359,7 +450,7 @@ describe('free-text portion', () => {
 
   it('a row whose portion is text shows its unit among the chips when it has one', () => {
     expect(unitChoices(openEditor(row(0)))).toEqual(['г', 'мл', 'шт', 'ложка', 'скибка', 'порція']);
-    const plate = { ...row(2), portion: '1 тарілка', base: { name: 'Суп', portion: '1 тарілка', kcal: 300 } };
+    const plate = { ...row(2), portion: '1 тарілка', base: item('Суп', '1 тарілка', 300) };
     expect(unitChoices(openEditor(plate))).toEqual(['г', 'мл', 'шт', 'ложка', 'скибка', 'порція', 'тарілка']);
     const kg = run(openEditor(row(0)), { type: 'unit', unit: 'кг' });
     expect(unitChoices(kg).slice(6)).toEqual(['кг']);

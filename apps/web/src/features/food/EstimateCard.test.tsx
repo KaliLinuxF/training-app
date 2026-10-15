@@ -1,4 +1,4 @@
-import type { FoodItem } from '@legko/shared';
+import type { FoodEstimateItem, FoodItem } from '@legko/shared';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import {
   createRef,
@@ -12,9 +12,18 @@ import {
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfirmHost, Sheet } from '@/ui';
 import { installMatchMedia, stubScrollTo } from '@/ui/internal/testing';
-import { draftsToItems, type DraftItem } from './drafts';
-import { EstimateCard, EstimateLoading, rowLabel, type EstimateCardProps } from './EstimateCard';
-import { estimateReducer, IDLE, type EstimateAction, type EstimatePhase } from './estimate';
+import { emptyDraft, toDrafts, type DraftItem } from './drafts';
+import {
+  EstimateCard,
+  EstimateLoading,
+  rowDetail,
+  rowLabel,
+  UNDO_LABEL,
+  type EstimateCardProps,
+} from './EstimateCard';
+import { estimateReducer, initialPositions, type EstimateAction, type PositionsState } from './estimate';
+
+vi.mock('@/store/data', () => ({ useAppData: () => ({ foods: [] }) }));
 
 beforeAll(() => installMatchMedia());
 beforeEach(() => {
@@ -25,25 +34,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const ITEMS = [
-  { name: 'Борщ', portion: '300 г', kcal: 260 },
-  { name: 'Хліб житній', portion: '2 скибки', kcal: 160 },
-  { name: 'Сметана', portion: '', kcal: 60 },
+/** U+00A0 inside «Б 6» and before « ·». */
+const NB = '\u00A0';
+/** `getByText` compares with the node text whitespace-normalised (no-break spaces become spaces), not the matcher. */
+const flat = (text: string): string => text.replace(/\u00A0/g, ' ');
+
+const ITEMS: FoodEstimateItem[] = [
+  { name: 'Борщ', portion: '300 г', kcal: 260, protein: 6, fat: 12, carbs: 25 },
+  { name: 'Хліб житній', portion: '2 скибки', kcal: 160, protein: 5, fat: 1, carbs: 30 },
+  { name: 'Сметана', portion: '', kcal: 60, protein: 1, fat: 6, carbs: 1 },
 ];
 
 const FOODS: FoodItem[] = [
-  { name: 'Сирники', portion: '3 шт', kcal: 450, count: 5, lastUsed: '2026-10-01' },
+  {
+    name: 'Сирники',
+    portion: '3 шт',
+    kcal: 450,
+    count: 5,
+    lastUsed: '2026-10-01',
+    protein: 24,
+    fat: 21,
+    carbs: 39,
+  },
   { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, count: 9, lastUsed: '2026-10-08' },
   { name: 'Сир кисломолочний', portion: '200 г', kcal: 240, count: 2, lastUsed: '2026-10-02' },
 ];
 
-function resultOf(items = ITEMS): EstimatePhase {
-  const loading = estimateReducer(IDLE, { type: 'start', id: 1, photo: true, consumed: '' });
-  return estimateReducer(loading, {
-    type: 'resolve',
-    id: 1,
-    res: { photoId: null, items, totalKcal: 0, comment: 'Порції оцінені приблизно.' },
-  });
+function positionsOf(items: FoodEstimateItem[] = ITEMS): PositionsState {
+  return { ...initialPositions(toDrafts(items)), comment: 'Порції оцінені приблизно.' };
 }
 
 type HarnessProps = Partial<
@@ -52,16 +70,16 @@ type HarnessProps = Partial<
     'remaining' | 'recalculating' | 'recalcError' | 'recalcInEditor' | 'blockedHint' | 'foods'
   >
 > & {
-  onAdd?: (drafts: readonly DraftItem[]) => void;
   onRecalculate?: () => void;
-  items?: typeof ITEMS;
+  items?: FoodEstimateItem[];
+  /** Offer «Прибрати ці позиції» for the rows of estimate `e1` (all of them here). */
+  undoable?: boolean;
   /** Lets a test feed the reducer what the hook would (a recalculation and its answer). */
   dispatchRef?: RefObject<Dispatch<EstimateAction> | null>;
 };
 
-/** Card wired to the estimate reducer, as FoodAssist does through `useFoodEstimate`. */
+/** Card wired to the positions reducer, as the meal editor does. */
 function Harness({
-  onAdd = () => undefined,
   onRecalculate = () => undefined,
   items,
   remaining = 40,
@@ -69,28 +87,43 @@ function Harness({
   foods = FOODS,
   dispatchRef,
   recalculating,
+  undoable = false,
   ...rest
 }: HarnessProps) {
-  const [phase, dispatch] = useReducer(estimateReducer, items, resultOf);
+  const [state, dispatch] = useReducer(estimateReducer, items, (it) => {
+    const p = positionsOf(it);
+    return undoable
+      ? {
+          ...p,
+          drafts: p.drafts.map((d) => ({ ...d, estimateId: 'e1' })),
+          undo: { estimateId: 'e1', photoId: null },
+        }
+      : p;
+  });
   const rowSeq = useRef(0);
+  const fallbackRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (dispatchRef) dispatchRef.current = dispatch;
   }, [dispatchRef]);
-  if (phase.kind !== 'result') return null;
   return (
     <>
+      <button ref={fallbackRef} type="button">
+        Порахувати
+      </button>
       <EstimateCard
-        drafts={phase.drafts}
-        comment={phase.comment}
-        preview={null}
+        drafts={state.drafts}
+        comment={state.comment}
+        showEmpty={state.emptyResult}
         remaining={remaining}
         blockedHint={blockedHint}
-        editor={phase.editor}
+        editor={state.editor}
         foods={foods}
-        recalculating={recalculating ?? phase.recalc.pending !== null}
-        recalcError={phase.recalc.error}
-        recalcInEditor={phase.recalc.fromEditor === true}
+        recalculating={recalculating ?? state.recalc.pending !== null}
+        recalcError={state.recalc.error}
+        recalcInEditor={state.recalc.fromEditor === true}
         {...rest}
+        onUndo={state.undo ? () => dispatch({ type: 'undo' }) : undefined}
+        fallbackFocus={() => fallbackRef.current}
         onOpenItem={(itemId) => dispatch({ type: 'openItem', itemId })}
         onNewItem={() => dispatch({ type: 'newItem', itemId: `n${++rowSeq.current}` })}
         onEditorChange={(action) => dispatch({ type: 'editor', action })}
@@ -98,20 +131,17 @@ function Harness({
         onCloseItem={() => dispatch({ type: 'closeItem' })}
         onRemove={(itemId) => dispatch({ type: 'remove', itemId })}
         onRecalculate={onRecalculate}
-        onAdd={() => onAdd(phase.drafts)}
-        onCancel={() => undefined}
-        onRetry={() => undefined}
       />
-      {/* FoodAssist's line under ✨/📷, unless the card's alert says the same. */}
+      {/* The AI row's line, unless the card's alert says the same. */}
       {blockedHint && blockedHint.text !== rest.recalcError && <p id={blockedHint.id}>{blockedHint.text}</p>}
       <ConfirmHost />
     </>
   );
 }
 
-/** The day sheet the card lives in: the editor stacks over it. */
-const InDaySheet = ({ children }: { children: ReactNode }) => (
-  <Sheet open onClose={() => undefined} heading="Запис дня">
+/** The meal editor the card lives in: the item editor stacks over it. */
+const InMealSheet = ({ children }: { children: ReactNode }) => (
+  <Sheet open onClose={() => undefined} heading="Прийом їжі">
     {children}
   </Sheet>
 );
@@ -119,8 +149,8 @@ const InDaySheet = ({ children }: { children: ReactNode }) => (
 const OFFLINE = { id: 'blocked-hint', text: 'Потрібен інтернет' };
 const LIMIT = 'Ліміт підрахунків на сьогодні вичерпано';
 
-const card = () => screen.getByRole('region', { name: 'Оцінка калорій' });
-/** A position in the card, by the start of its accessible name («Борщ, 300 г, 260 ккал. Змінити»). */
+const card = () => screen.getByRole('region', { name: 'Позиції' });
+/** A position in the card, by the start of its accessible name («Борщ, 300 г, 260 ккал, …. Змінити»). */
 const row = (name: string) =>
   within(card()).getByRole('button', { name: new RegExp(`^${name}, `) }) as HTMLButtonElement;
 const editor = () => screen.getByRole('dialog', { name: /^(Позиція|Нова позиція)$/ });
@@ -129,7 +159,8 @@ const field = (name: string) => inEditor().getByRole('textbox', { name }) as HTM
 const editorButton = (name: string | RegExp) => inEditor().getByRole('button', { name }) as HTMLButtonElement;
 const recalcButton = () =>
   within(card()).queryByRole('button', { name: /Перерахувати|Рахую…/ }) as HTMLButtonElement | null;
-const addButton = () => screen.getByRole('button', { name: /^Додати \d+ ккал$/ }) as HTMLButtonElement;
+/** «Разом 480 ккал». */
+const totalLine = () => within(card()).getByText('Разом').parentElement?.textContent;
 const editorGone = () =>
   waitFor(() => expect(screen.queryByRole('dialog', { name: /^(Позиція|Нова позиція)$/ })).toBeNull());
 
@@ -141,28 +172,44 @@ function openRow(name: string) {
 }
 
 describe('EstimateCard: the list', () => {
-  it('is a clean list of positions: one button each, no fields; total and «Додати»', () => {
+  it('is a clean list of positions: one button each, no fields; «Разом» with Б · Ж · В', () => {
     render(<Harness />);
-    expect(screen.getByRole('heading', { name: 'Оцінка калорій' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Позиції' })).toBeTruthy();
     expect(screen.getByText('3 позиції · можна виправити')).toBeTruthy();
     expect(screen.getByText('Порції оцінені приблизно.')).toBeTruthy();
     expect(within(card()).queryAllByRole('textbox')).toHaveLength(0);
     expect(within(card()).getAllByRole('listitem')).toHaveLength(3);
-    expect(row('Борщ').getAttribute('aria-label')).toBe('Борщ, 300 г, 260 ккал. Змінити');
-    expect(row('Хліб житній').textContent).toBe('Хліб житній2 скибки160 ккал›');
-    // No portion: name and kcal only.
-    expect(row('Сметана').getAttribute('aria-label')).toBe('Сметана, 60 ккал. Змінити');
-    expect(addButton().textContent).toBe('Додати 480 ккал');
+    expect(row('Борщ').getAttribute('aria-label')).toBe(
+      'Борщ, 300 г, 260 ккал, білки 6, жири 12, вуглеводи 25 г. Змінити',
+    );
+    expect(row('Хліб житній').textContent).toBe(
+      `Хліб житній2 скибки · Б${NB}5${NB}· Ж${NB}1${NB}· В${NB}30160 ккал›`,
+    );
+    // No portion: name, kcal and the macros.
+    expect(row('Сметана').getAttribute('aria-label')).toBe(
+      'Сметана, 60 ккал, білки 1, жири 6, вуглеводи 1 г. Змінити',
+    );
+    expect(totalLine()).toBe('Разом480 ккал');
+    expect(within(card()).getByText(flat(`Б${NB}12${NB}· Ж${NB}19${NB}· В${NB}56${NB}г`))).toBeTruthy();
     expect(recalcButton()).toBeNull();
+    // Positions are the meal's: nothing to «add» or «cancel» any more.
+    expect(within(card()).queryByRole('button', { name: /^Додати|^Скасувати|Спробувати/ })).toBeNull();
   });
 
-  it('rowLabel says what is waiting for the model or typed by hand', () => {
-    const base = { id: 'i0', name: 'Котлета', portion: '1 шт', kcalText: '180', base: null, pinned: false };
+  it('rowLabel / rowDetail say what is known, what waits for the model, what she typed', () => {
+    const base: DraftItem = { ...emptyDraft('i0'), name: 'Котлета', portion: '1 шт', kcalText: '180' };
     expect(rowLabel(base, 0)).toBe('Котлета, 1 шт, 180 ккал, змінено. Змінити');
     expect(rowLabel({ ...base, pinned: true }, 0)).toBe('Котлета, 1 шт, 180 ккал, вписано вручну. Змінити');
     expect(rowLabel({ ...base, name: ' ', kcalText: '' }, 2)).toBe('Позиція 3, 1 шт, 0 ккал. Змінити');
     // A «Часті страви» dish's numbers are hers, but nothing she typed: no tag.
     expect(rowLabel({ ...base, pinned: true, fromDish: true }, 0)).toBe('Котлета, 1 шт, 180 ккал. Змінити');
+    const grams = { ...base, pinned: true, proteinText: '24', carbsText: '0,5' };
+    expect(rowLabel(grams, 0)).toBe(
+      'Котлета, 1 шт, 180 ккал, білки 24, вуглеводи 1 г, вписано вручну. Змінити',
+    );
+    expect(rowDetail(grams)).toBe(`1 шт · Б${NB}24${NB}· В${NB}1`);
+    expect(rowDetail({ ...grams, portion: '' })).toBe(`Б${NB}24${NB}· В${NB}1`);
+    expect(rowDetail(base)).toBe('1 шт');
   });
 
   it('shows the remaining budget only when it is low', () => {
@@ -171,6 +218,22 @@ describe('EstimateCard: the list', () => {
     unmount();
     render(<Harness remaining={4} />);
     expect(screen.getByText('Сьогодні ще 4 підрахунки')).toBeTruthy();
+  });
+
+  it('«Прибрати ці позиції» right after an estimate: named for what it does, takes the rows back', () => {
+    const { unmount } = render(<Harness />);
+    expect(screen.queryByRole('button', { name: UNDO_LABEL })).toBeNull();
+    unmount();
+    render(<Harness undoable />);
+    const undo = screen.getByRole('button', { name: 'Прибрати ці позиції — останній підрахунок' });
+    expect(UNDO_LABEL).toBe('Прибрати ці позиції — останній підрахунок');
+    expect(undo.textContent).toBe('Прибрати ці позиції');
+    // The name starts with the visible words, so a voice command for them finds it (WCAG 2.5.3).
+    expect(undo.getAttribute('aria-label')?.startsWith(undo.textContent ?? '–')).toBe(true);
+    undo.focus();
+    fireEvent.click(undo);
+    // All three came from that estimate: the card goes (focus is the editor's to move, see MealEditorBody).
+    expect(screen.queryByRole('region', { name: 'Позиції' })).toBeNull();
   });
 });
 
@@ -187,10 +250,15 @@ describe('EstimateCard: the item editor', () => {
     expect(within(units).getByRole('button', { name: 'г' }).getAttribute('aria-pressed')).toBe('true');
     expect(within(units).getByRole('button', { name: 'шт' }).getAttribute('aria-pressed')).toBe('false');
     expect(inEditor().getByText('260')).toBeTruthy();
+    // Б · Ж · В under the number, read out with it.
+    const macros = inEditor().getByText(flat(`Б${NB}6${NB}· Ж${NB}12${NB}· В${NB}25${NB}г`));
+    expect(macros.closest('[aria-live="polite"]')).toBe(
+      inEditor().getByText('260').closest('[aria-live="polite"]'),
+    );
     expect(editorButton('Готово')).toBeTruthy();
   });
 
-  it('− / + and the multipliers change the amount; kcal rescale live; «Готово» applies and focus returns to the row', () => {
+  it('− / + and the multipliers change the amount; kcal and macros rescale live; «Готово» applies and focus returns', () => {
     render(<Harness />);
     const borshch = openRow('Борщ');
     fireEvent.click(editorButton('Збільшити'));
@@ -198,7 +266,9 @@ describe('EstimateCard: the item editor', () => {
     expect(inEditor().getByText('269')).toBeTruthy();
     expect(inEditor().getByText('перераховано за вагою')).toBeTruthy();
     // Nothing is applied before «Готово».
-    expect(row('Борщ').getAttribute('aria-label')).toBe('Борщ, 300 г, 260 ккал. Змінити');
+    expect(row('Борщ').getAttribute('aria-label')).toBe(
+      'Борщ, 300 г, 260 ккал, білки 6, жири 12, вуглеводи 25 г. Змінити',
+    );
 
     const quick = inEditor().getByRole('group', { name: 'Від порції' });
     const half = within(quick).getByRole('button', { name: '½ — 150 г' });
@@ -209,13 +279,16 @@ describe('EstimateCard: the item editor', () => {
     expect(half.getAttribute('aria-pressed')).toBe('true');
     expect(field('Скільки').value).toBe('150');
     expect(inEditor().getByText('130')).toBeTruthy();
+    expect(inEditor().getByText(flat(`Б${NB}3${NB}· Ж${NB}6${NB}· В${NB}12,5${NB}г`))).toBeTruthy();
 
     fireEvent.change(field('Скільки'), { target: { value: '450' } });
     expect(inEditor().getByText('390')).toBeTruthy();
 
     fireEvent.click(editorButton('Готово'));
-    expect(row('Борщ').getAttribute('aria-label')).toBe('Борщ, 450 г, 390 ккал. Змінити');
-    expect(addButton().textContent).toBe('Додати 610 ккал');
+    expect(row('Борщ').getAttribute('aria-label')).toBe(
+      'Борщ, 450 г, 390 ккал, білки 9, жири 18, вуглеводи 38 г. Змінити',
+    );
+    expect(totalLine()).toBe('Разом610 ккал');
     expect(document.activeElement).toBe(borshch);
     // Rescaled on the device: nothing for the model.
     expect(recalcButton()).toBeNull();
@@ -240,13 +313,16 @@ describe('EstimateCard: the item editor', () => {
     expect(field('Скільки').value).toBe('100');
     expect(inEditor().getByText('змінено — уточни калорії')).toBeTruthy();
     fireEvent.click(editorButton('Готово'));
+    // Grams the device cannot compare with slices: the numbers stay until the model answers.
     expect(row('Хліб житній').getAttribute('aria-label')).toBe(
-      'Хліб житній, 100 г, 400 ккал, змінено. Змінити',
+      'Хліб житній, 100 г, 400 ккал, білки 13, жири 3, вуглеводи 75 г, змінено. Змінити',
     );
   });
 
   it('− at the smallest amount is locked but keeps her focus', () => {
-    render(<Harness items={[{ name: 'Котлета', portion: '1 шт', kcal: 180 }]} />);
+    render(
+      <Harness items={[{ name: 'Котлета', portion: '1 шт', kcal: 180, protein: 16, fat: 11, carbs: 5 }]} />,
+    );
     openRow('Котлета');
     const minus = editorButton('Зменшити');
     minus.focus();
@@ -266,7 +342,7 @@ describe('EstimateCard: the item editor', () => {
     openRow('Хліб житній');
     fireEvent.change(field('Що це'), { target: { value: 'Хліб білий' } });
     expect(inEditor().getByText('змінено — уточни калорії')).toBeTruthy();
-    // The old number until the model answers.
+    // The old numbers until the model answers.
     expect(inEditor().getByText('160')).toBeTruthy();
     fireEvent.click(editorButton('повернути: Хліб житній'));
     expect(field('Що це').value).toBe('Хліб житній');
@@ -278,20 +354,16 @@ describe('EstimateCard: the item editor', () => {
 
     fireEvent.click(editorButton('Готово'));
     expect(row('Хліб білий').getAttribute('aria-label')).toBe(
-      'Хліб білий, 2 скибки, 160 ккал, змінено. Змінити',
+      'Хліб білий, 2 скибки, 160 ккал, білки 5, жири 1, вуглеводи 30 г, змінено. Змінити',
     );
     expect(within(row('Хліб білий')).getByText('змінено')).toBeTruthy();
     const button = recalcButton();
     expect(button?.textContent).toBe('✨ Перерахувати');
-    // Right above «Додати».
-    expect(
-      button && button.compareDocumentPosition(addButton()) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
     fireEvent.click(within(card()).getByRole('button', { name: 'Перерахувати' }));
     expect(onRecalculate).toHaveBeenCalledTimes(2);
   });
 
-  it('a frequent dish from the suggestions takes its name, portion and kcal: hers, no model needed', () => {
+  it('a frequent dish from the suggestions takes its name, portion, kcal and macros: hers, no model needed', () => {
     render(<Harness />);
     openRow('Сметана');
     fireEvent.change(field('Що це'), { target: { value: 'СИР' } });
@@ -309,20 +381,24 @@ describe('EstimateCard: the item editor', () => {
     expect(field('Що це').value).toBe('Сирники');
     expect(field('Скільки').value).toBe('3');
     expect(inEditor().getByText('450')).toBeTruthy();
+    expect(inEditor().getByText(flat(`Б${NB}24${NB}· Ж${NB}21${NB}· В${NB}39${NB}г`))).toBeTruthy();
     expect(inEditor().getByText('як у «Частих стравах»')).toBeTruthy();
     expect(inEditor().queryByRole('button', { name: /Перерахувати/ })).toBeNull();
-    // Two of them: the dish's kcal follow.
+    // Two of them: the dish's kcal and macros follow.
     fireEvent.click(editorButton('Зменшити'));
     expect(inEditor().getByText('300')).toBeTruthy();
+    expect(inEditor().getByText(flat(`Б${NB}16${NB}· Ж${NB}14${NB}· В${NB}26${NB}г`))).toBeTruthy();
 
     fireEvent.click(editorButton('Готово'));
     // Her usual numbers, not a correction: the row is not tagged «вручну».
-    expect(row('Сирники').getAttribute('aria-label')).toBe('Сирники, 2 шт, 300 ккал. Змінити');
+    expect(row('Сирники').getAttribute('aria-label')).toBe(
+      'Сирники, 2 шт, 300 ккал, білки 16, жири 14, вуглеводи 26 г. Змінити',
+    );
     expect(within(row('Сирники')).queryByText('вручну')).toBeNull();
     expect(recalcButton()).toBeNull();
-    expect(addButton().textContent).toBe('Додати 720 ккал');
+    expect(totalLine()).toBe('Разом720 ккал');
 
-    // Opened again, it is still the dish: the editor says so and its kcal follow the amount.
+    // Opened again, it is still the dish: the editor says so and its numbers follow the amount.
     openRow('Сирники');
     expect(inEditor().getByText('як у «Частих стравах»')).toBeTruthy();
     fireEvent.click(editorButton('Збільшити'));
@@ -346,12 +422,13 @@ describe('EstimateCard: the item editor', () => {
     }
     expect(inEditor().getByText('30')).toBeTruthy();
     fireEvent.click(editorButton('Додати позицію'));
+    // A dish without macros: none on the row.
     expect(row('Кава з молоком').getAttribute('aria-label')).toBe(
       'Кава з молоком, 0,5 чашки, 30 ккал. Змінити',
     );
   });
 
-  it('«Вписати вручну» turns the number into a field: her kcal pin the row', () => {
+  it('«Вписати вручну»: kcal and Б · Ж · В fields; typed kcal rescale the macros she did not type', () => {
     render(<Harness />);
     openRow('Хліб житній');
     fireEvent.click(editorButton('Вписати вручну'));
@@ -359,20 +436,40 @@ describe('EstimateCard: the item editor', () => {
     expect(document.activeElement).toBe(kcal);
     expect(kcal.value).toBe('160');
     expect(kcal.getAttribute('inputmode')).toBe('numeric');
-    fireEvent.change(kcal, { target: { value: '19o' } });
-    expect(kcal.value).toBe('19');
-    fireEvent.change(kcal, { target: { value: '190' } });
-    expect(inEditor().getByText('вписано вручну')).toBeTruthy();
+    const protein = field('Білки');
+    expect([field('Білки').value, field('Жири').value, field('Вуглеводи').value]).toEqual(['5', '1', '30']);
+    expect(protein.getAttribute('inputmode')).toBe('decimal');
+    // The «г» is decoration: the field is named by its label only.
+    expect(protein.closest('label')?.querySelector('[aria-hidden="true"]')?.textContent).toBe('г');
+    fireEvent.change(kcal, { target: { value: '32o' } });
+    expect(kcal.value).toBe('32');
+    fireEvent.change(kcal, { target: { value: '320' } });
+    expect([field('Білки').value, field('Жири').value, field('Вуглеводи').value]).toEqual(['10', '2', '60']);
+    const note = inEditor().getByText('Б · Ж · В перераховано за калоріями');
+    expect(field('Білки').getAttribute('aria-describedby')).toBe(note.id);
+    expect(kcal.getAttribute('aria-describedby')).toBe(note.id);
     expect(inEditor().queryByRole('button', { name: 'Вписати вручну' })).toBeNull();
+    // Her own grams: pinned, typed kcal leave them.
+    fireEvent.change(field('Білки'), { target: { value: '12,5' } });
+    fireEvent.change(kcal, { target: { value: '300' } });
+    expect(field('Білки').value).toBe('12,5');
+    expect(inEditor().getByText('вписано вручну')).toBeTruthy();
     fireEvent.click(editorButton('Готово'));
     expect(row('Хліб житній').getAttribute('aria-label')).toBe(
-      'Хліб житній, 2 скибки, 190 ккал, вписано вручну. Змінити',
+      'Хліб житній, 2 скибки, 300 ккал, білки 13, жири 2, вуглеводи 60 г, вписано вручну. Змінити',
     );
-    expect(addButton().textContent).toBe('Додати 510 ккал');
+    expect(totalLine()).toBe('Разом620 ккал');
   });
 
   it('a portion it cannot read stays text; «Порція текстом» lets her write one', async () => {
-    render(<Harness items={[{ name: 'Суп', portion: 'велика тарілка', kcal: 300 }, ...ITEMS]} />);
+    render(
+      <Harness
+        items={[
+          { name: 'Суп', portion: 'велика тарілка', kcal: 300, protein: null, fat: null, carbs: null },
+          ...ITEMS,
+        ]}
+      />,
+    );
     openRow('Суп');
     expect(field('Скільки').value).toBe('велика тарілка');
     expect(inEditor().queryByRole('group', { name: 'Одиниця' })).toBeNull();
@@ -388,7 +485,9 @@ describe('EstimateCard: the item editor', () => {
     expect(document.activeElement).toBe(field('Скільки'));
     fireEvent.change(field('Скільки'), { target: { value: '2 ст. л.' } });
     fireEvent.click(editorButton('Готово'));
-    expect(row('Сметана').getAttribute('aria-label')).toBe('Сметана, 2 ст. л., 60 ккал, змінено. Змінити');
+    expect(row('Сметана').getAttribute('aria-label')).toBe(
+      'Сметана, 2 ст. л., 60 ккал, білки 1, жири 6, вуглеводи 1 г, змінено. Змінити',
+    );
   });
 
   it('✕ on an untouched draft closes at once; a changed one asks first', async () => {
@@ -419,11 +518,11 @@ describe('EstimateCard: the item editor', () => {
       }),
     );
     await editorGone();
-    expect(row('Хліб житній').getAttribute('aria-label')).toBe('Хліб житній, 2 скибки, 160 ккал. Змінити');
+    expect(row('Хліб житній').getAttribute('aria-label')).toMatch(/^Хліб житній, 2 скибки, 160 ккал, /);
     expect(document.activeElement).toBe(row('Хліб житній'));
   });
 
-  it('«Видалити позицію» removes it without asking; focus goes to the next row, else the previous one', async () => {
+  it('«Видалити позицію» removes it without asking; focus goes to the next row, the previous one, then on', async () => {
     render(<Harness />);
     openRow('Борщ');
     fireEvent.click(editorButton('Видалити позицію'));
@@ -437,10 +536,12 @@ describe('EstimateCard: the item editor', () => {
     expect(document.activeElement).toBe(row('Хліб житній'));
     await editorGone();
 
+    // The last one: the card goes with it, focus goes where the editor says (the AI row here).
     openRow('Хліб житній');
     fireEvent.click(editorButton('Видалити позицію'));
-    expect(screen.getByText('Нічого не знайдено')).toBeTruthy();
-    expect(document.activeElement).toBe(screen.getByRole('button', { name: '+ позиція' }));
+    expect(screen.queryByRole('region', { name: 'Позиції' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Порахувати' }));
+    await editorGone();
   });
 
   it('«+ позиція» opens «Нова позиція» with the name focused; «Додати позицію» puts it in the list', () => {
@@ -472,13 +573,15 @@ describe('EstimateCard: the item editor', () => {
     fireEvent.change(field('Скільки'), { target: { value: '300' } });
     fireEvent.click(editorButton('Вписати вручну'));
     fireEvent.change(field('Калорії'), { target: { value: '5' } });
+    // Nothing to rescale a new row's macros from: «—».
+    expect(field('Білки').value).toBe('');
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
 
     expect(screen.getByText('4 позиції · можна виправити')).toBeTruthy();
     expect(row('Чай').getAttribute('aria-label')).toBe('Чай, 300 мл, 5 ккал, вписано вручну. Змінити');
     expect(document.activeElement).toBe(row('Чай'));
-    expect(addButton().textContent).toBe('Додати 485 ккал');
+    expect(totalLine()).toBe('Разом485 ккал');
   });
 
   it('a new row closed untouched adds nothing and gives focus back to «+ позиція»', async () => {
@@ -500,19 +603,19 @@ describe('EstimateCard: the item editor', () => {
     expect(inEditor().getByText('Без назви позицію не зберегти')).toBeTruthy();
   });
 
-  it('over the day sheet: «Готово» and «Видалити позицію» put focus back in the list', async () => {
+  it('over the meal editor: «Готово» and «Видалити позицію» put focus back in the list', async () => {
     render(
-      <InDaySheet>
+      <InMealSheet>
         <Harness />
-      </InDaySheet>,
+      </InMealSheet>,
     );
-    const day = screen.getByRole('dialog', { name: 'Запис дня' });
+    const meal = screen.getByRole('dialog', { name: 'Прийом їжі' });
     const bread = openRow('Хліб житній');
-    // The day sheet sleeps under the editor.
-    expect(day.parentElement?.hasAttribute('inert')).toBe(true);
+    // The meal editor sleeps under the item editor.
+    expect(meal.parentElement?.hasAttribute('inert')).toBe(true);
     fireEvent.click(editorButton('Збільшити'));
     fireEvent.click(editorButton('Готово'));
-    expect(day.parentElement?.hasAttribute('inert')).toBe(false);
+    expect(meal.parentElement?.hasAttribute('inert')).toBe(false);
     expect(document.activeElement).toBe(bread);
     await editorGone();
     expect(document.activeElement).toBe(bread);
@@ -548,34 +651,7 @@ describe('EstimateCard: recalculation', () => {
     expect(onRecalculate).not.toHaveBeenCalled();
   });
 
-  it('«Додати» waits for «Рахую…»: focusable, says what it waits for, a tap adds nothing', () => {
-    const onAdd = vi.fn();
-    const { rerender } = render(<Harness onAdd={onAdd} />);
-    openRow('Хліб житній');
-    fireEvent.change(field('Що це'), { target: { value: 'Хліб білий' } });
-    fireEvent.click(editorButton('Готово'));
-    rerender(<Harness onAdd={onAdd} recalculating />);
-    const add = addButton();
-    expect(add.disabled).toBe(false);
-    expect(add.getAttribute('aria-disabled')).toBe('true');
-    expect(add.getAttribute('aria-describedby')).toBe(recalcButton()?.id);
-    add.focus();
-    fireEvent.click(add);
-    expect(onAdd).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(add);
-
-    // The answer is in: «Додати» adds again, her name with the numbers on screen.
-    rerender(<Harness onAdd={onAdd} />);
-    expect(addButton().hasAttribute('aria-disabled')).toBe(false);
-    fireEvent.click(addButton());
-    expect(draftsToItems(onAdd.mock.calls[0]![0] as DraftItem[])[1]).toEqual({
-      name: 'Хліб білий',
-      portion: '2 скибки',
-      kcal: 160,
-    });
-  });
-
-  it('when «Перерахувати» goes away under her focus, focus moves on to «Додати»', async () => {
+  it('when «Перерахувати» goes away under her focus, focus moves on to «+ позиція»', async () => {
     const dispatchRef = createRef<Dispatch<EstimateAction>>();
     render(<Harness dispatchRef={dispatchRef} />);
     openRow('Хліб житній');
@@ -590,14 +666,22 @@ describe('EstimateCard: recalculation', () => {
       { id: 'i1', name: 'Хліб білий', portion: '2 скибки' },
       { id: 'i2', name: 'Сметана', portion: '' },
     ];
-    const res = { photoId: null, items: rows.map((r) => ({ ...r, kcal: 170 })), totalKcal: 0, comment: '' };
+    const res = {
+      photoId: null,
+      items: rows.map((r) => ({ ...r, kcal: 170, protein: 4, fat: 1.5, carbs: 32 })),
+      totalKcal: 0,
+      comment: '',
+    };
     act(() => dispatchRef.current?.({ type: 'recalcResolve', id: 2, rows, res }));
     expect(recalcButton()).toBeNull();
-    expect(row('Хліб білий').getAttribute('aria-label')).toBe('Хліб білий, 2 скибки, 170 ккал. Змінити');
-    expect(document.activeElement).toBe(addButton());
+    // The model's kcal and macros for the row that waited.
+    expect(row('Хліб білий').getAttribute('aria-label')).toBe(
+      'Хліб білий, 2 скибки, 170 ккал, білки 4, жири 2, вуглеводи 32 г. Змінити',
+    );
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '+ позиція' }));
   });
 
-  it('asked in the editor: «Рахую…», then the draft takes the model’s kcal; focus stays in the editor', () => {
+  it('asked in the editor: «Рахую…», then the draft takes the model’s numbers; focus stays in the editor', () => {
     const dispatchRef = createRef<Dispatch<EstimateAction>>();
     const onRecalculate = vi.fn(() => dispatchRef.current?.({ type: 'recalcStart', id: 3 }));
     render(<Harness dispatchRef={dispatchRef} onRecalculate={onRecalculate} />);
@@ -622,10 +706,16 @@ describe('EstimateCard: recalculation', () => {
       { id: 'i1', name: 'Хліб білий', portion: '2 скибки' },
       { id: 'i2', name: 'Сметана', portion: '' },
     ];
-    const res = { photoId: null, items: rows.map((r) => ({ ...r, kcal: 150 })), totalKcal: 0, comment: '' };
+    const res = {
+      photoId: null,
+      items: rows.map((r) => ({ ...r, kcal: 150, protein: 5, fat: 1, carbs: 28 })),
+      totalKcal: 0,
+      comment: '',
+    };
     act(() => dispatchRef.current?.({ type: 'recalcResolve', id: 3, rows, res }));
     const kcal = inEditor().getByText('150');
     expect(kcal.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(inEditor().getByText(flat(`Б${NB}5${NB}· Ж${NB}1${NB}· В${NB}28${NB}г`))).toBeTruthy();
     expect(inEditor().queryByText('змінено — уточни калорії')).toBeNull();
     // Its button went away under her focus: on to «Готово» next to it, still in the editor.
     expect(inEditor().queryByRole('button', { name: /Перерахувати|Рахую…/ })).toBeNull();
@@ -633,8 +723,10 @@ describe('EstimateCard: recalculation', () => {
     // Not in the list until «Готово».
     expect(row('Хліб житній')).toBeTruthy();
     fireEvent.click(editorButton('Готово'));
-    expect(row('Хліб білий').getAttribute('aria-label')).toBe('Хліб білий, 2 скибки, 150 ккал. Змінити');
-    expect(addButton().textContent).toBe('Додати 470 ккал');
+    expect(row('Хліб білий').getAttribute('aria-label')).toBe(
+      'Хліб білий, 2 скибки, 150 ккал, білки 5, жири 1, вуглеводи 28 г. Змінити',
+    );
+    expect(totalLine()).toBe('Разом470 ккал');
   });
 
   it('offline or out of estimates: «Перерахувати» is locked, says why, and keeps her focus', () => {
@@ -655,7 +747,6 @@ describe('EstimateCard: recalculation', () => {
     expect(document.activeElement).toBe(button);
     fireEvent.click(within(card()).getByRole('button', { name: 'Перерахувати' }));
     expect(onRecalculate).not.toHaveBeenCalled();
-    expect(addButton().hasAttribute('aria-disabled')).toBe(false);
   });
 
   it('in the editor too: locked offline with the reason, and kcal can still be typed', () => {
@@ -756,7 +847,7 @@ describe('EstimateCard: recalculation', () => {
     expect(recalcButton()?.getAttribute('aria-describedby')).toBe(alert.id);
   });
 
-  it('out of estimates: the card does not repeat the sheet’s «Ліміт…» line', () => {
+  it('out of estimates: the card does not repeat the AI row’s «Ліміт…» line', () => {
     render(<Harness remaining={0} blockedHint={{ id: 'blocked-hint', text: LIMIT }} />);
     expect(screen.getAllByText(LIMIT)).toHaveLength(1);
     expect(screen.getByText(LIMIT).id).toBe('blocked-hint');
@@ -767,7 +858,6 @@ describe('EstimateCard: nothing found', () => {
   const props = (over: Partial<EstimateCardProps> = {}): EstimateCardProps => ({
     drafts: [],
     comment: '',
-    preview: null,
     remaining: null,
     foods: [],
     onOpenItem: () => undefined,
@@ -777,59 +867,43 @@ describe('EstimateCard: nothing found', () => {
     onCloseItem: () => undefined,
     onRemove: () => undefined,
     onRecalculate: () => undefined,
-    onAdd: () => undefined,
-    onCancel: () => undefined,
-    onRetry: () => undefined,
     ...over,
   });
 
-  it('comment, «+ позиція» and «Спробувати ще», no add button', () => {
-    const onRetry = vi.fn();
-    const onCancel = vi.fn();
+  it('the advice and «+ позиція», nothing to add or take back', () => {
     const onNewItem = vi.fn();
     render(
       <EstimateCard
-        {...props({
-          comment: 'Схоже, на фото немає їжі.',
-          preview: 'data:image/jpeg;base64,AAAA',
-          onRetry,
-          onCancel,
-          onNewItem,
-        })}
+        {...props({ showEmpty: true, comment: 'Схоже, на фото немає їжі.', onNewItem, onUndo: vi.fn() })}
       />,
     );
+    expect(screen.getByText('Нічого не знайдено')).toBeTruthy();
     expect(screen.getByText('Схоже, на фото немає їжі.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Додати/ })).toBeNull();
-    expect(screen.getByRole('img', { name: 'Фото їжі' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Додати|Скасувати|Спробувати|Прибрати/ })).toBeNull();
+    expect(screen.queryByText('Разом')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '+ позиція' }));
     expect(onNewItem).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: 'Спробувати ще' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Скасувати' }));
-    expect(onRetry).toHaveBeenCalledOnce();
-    expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it('without a comment the advice fits text vs photo', () => {
-    const { rerender } = render(<EstimateCard {...props({ photo: false })} />);
-    expect(screen.getByText('Не вдалося знайти їжу в описі — спробуй сформулювати інакше.')).toBeTruthy();
-    rerender(<EstimateCard {...props({ photo: true })} />);
-    expect(screen.getByText('Не вдалося знайти їжу на фото — спробуй описати текстом.')).toBeTruthy();
+  it('no rows and no empty result: no card at all (the manual numbers take its place)', () => {
+    render(<EstimateCard {...props()} />);
+    expect(screen.queryByRole('region', { name: 'Позиції' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ позиція' })).toBeNull();
   });
 
   it('the title can take focus (programmatically only) and still names the card', () => {
     const titleRef = createRef<HTMLSpanElement>();
-    const phase = resultOf();
-    render(<EstimateCard {...props({ drafts: phase.kind === 'result' ? phase.drafts : [], titleRef })} />);
-    expect(screen.getByRole('region', { name: 'Оцінка калорій' })).toBeTruthy();
+    render(<EstimateCard {...props({ drafts: positionsOf().drafts, titleRef })} />);
+    expect(screen.getByRole('region', { name: 'Позиції' })).toBeTruthy();
     expect(titleRef.current?.tabIndex).toBe(-1);
     titleRef.current?.focus();
     expect(document.activeElement).toBe(titleRef.current);
-    expect(screen.getByRole('heading', { name: 'Оцінка калорій' }).contains(titleRef.current)).toBe(true);
+    expect(screen.getByRole('heading', { name: 'Позиції' }).contains(titleRef.current)).toBe(true);
   });
 });
 
 describe('EstimateLoading', () => {
-  it('shows progress and can be cancelled (FoodAssist announces it)', () => {
+  it('shows progress and can be cancelled (the editor announces it)', () => {
     const onCancel = vi.fn();
     const cancelRef = createRef<HTMLButtonElement>();
     render(<EstimateLoading photo preview={null} onCancel={onCancel} cancelRef={cancelRef} />);

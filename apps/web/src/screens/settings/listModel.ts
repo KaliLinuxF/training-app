@@ -12,7 +12,7 @@ import { plural, REMINDER_ORDER, syncStatus, THEME_OPTIONS, type SyncStatusView 
 // ---- sections & routes ----------------------------------------------------------------
 
 /** URL slugs of the sub-pages (`/settings/:section`). */
-export type SettingsSectionId = 'reminders' | 'goals' | 'workouts' | 'appearance' | 'data';
+export type SettingsSectionId = 'reminders' | 'goals' | 'workouts' | 'meals' | 'appearance' | 'data';
 
 export const SETTINGS_ROOT = '/settings';
 
@@ -25,6 +25,7 @@ export const SECTION_TITLES: Readonly<Record<SettingsSectionId, string>> = {
   reminders: 'Нагадування',
   goals: 'Цілі',
   workouts: 'Типи тренувань',
+  meals: 'Прийоми їжі',
   appearance: 'Вигляд',
   data: 'Дані і копія',
 };
@@ -33,13 +34,14 @@ export const SECTION_ICONS: Readonly<Record<SettingsSectionId, { icon: IconName;
   reminders: { icon: 'bell', tone: 'acc' },
   goals: { icon: 'target', tone: 'acc2' },
   workouts: { icon: 'workout', tone: 'acc' },
+  meals: { icon: 'food', tone: 'acc2' },
   appearance: { icon: 'theme', tone: 'neutral' },
   data: { icon: 'data', tone: 'acc2' },
 };
 
 /** The list's groups, in order: what she plans with, then the app itself. */
 export const SETTINGS_GROUPS: readonly (readonly SettingsSectionId[])[] = [
-  ['reminders', 'goals', 'workouts'],
+  ['reminders', 'goals', 'workouts', 'meals'],
   ['appearance', 'data'],
 ];
 
@@ -74,6 +76,12 @@ export function goalsSummary(settings: Pick<Settings, 'goal' | 'kcalGoal'>): str
 export function typesSummary(customTypes: readonly string[]): string {
   const n = normalizeTypeNames([...WORKOUT_TYPES, ...customTypes]).length;
   return `${n} ${plural(n, 'тип', 'типи', 'типів')}`;
+}
+
+/** Her meal types: «4 типи», «1 тип», «12 типів»; an empty list → «Немає типів». */
+export function mealTypesSummary(mealTypes: readonly string[]): string {
+  const n = normalizeTypeNames(mealTypes).length;
+  return n > 0 ? `${n} ${plural(n, 'тип', 'типи', 'типів')}` : 'Немає типів';
 }
 
 /** «Авто» / «Світла» / «Темна». */

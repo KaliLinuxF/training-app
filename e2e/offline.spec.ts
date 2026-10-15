@@ -16,7 +16,7 @@ test.describe('offline', () => {
   // The offline shell needs the real service worker.
   test.use({ serviceWorkers: 'allow' });
 
-  test('a day saved offline survives an offline reload and reaches the server once online', async ({
+  test('a workout and a meal saved offline survive an offline reload and reach the server once online', async ({
     app,
     page,
     context,
@@ -28,14 +28,22 @@ test.describe('offline', () => {
     await context.setOffline(true);
     await expect(page.getByText(OFFLINE_NOTE)).toBeVisible();
 
+    // The workout through the day sheet (`day.meta`: the mark and the type only).
     await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
     const sheet = app.sheet('Запис дня');
     await sheet.getByRole('button', { name: 'Було', exact: true }).click();
     await sheet.getByRole('button', { name: 'Прес', exact: true }).click();
-    await sheet.getByRole('textbox', { name: 'Калорії за день' }).fill('1620');
     await app.save(sheet);
+
+    // A meal with only its kcal (`meal.put`): the day sheet has no kcal field any more.
+    const meal = await app.newMeal();
+    await expect(app.mealType(meal, 'Сніданок')).toHaveAttribute('aria-pressed', 'true');
+    await meal.getByRole('textbox', { name: 'Калорії', exact: true }).fill('1620');
+    await app.saveMeal(meal);
     await expect(app.homeRow('Їжа')).toContainText('1 620 / 1 700 ккал');
-    expect((await server.getData()).days[TODAY]?.kcal).toBeNull();
+    const before = (await server.getData()).days[TODAY];
+    expect(before?.kcal).toBeNull();
+    expect(before?.meals).toBeUndefined();
 
     // Reload without network: the service worker serves the app, IndexedDB the data.
     await page.reload();
@@ -44,9 +52,15 @@ test.describe('offline', () => {
     await expect(app.homeRow('Тренування')).toContainText('Прес');
     await expect(app.trainingToggle('Було')).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByText(OFFLINE_NOTE)).toBeVisible();
+    // The day's list from the device cache: the new meal and the old text as its own block.
+    const list = await app.openFoodDay();
+    await expect(app.mealRow(list, 'Сніданок')).toBeVisible();
+    await expect(app.mealRow(list, 'Їжа за день')).toBeVisible();
+    await list.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await app.expectSheetClosed();
     // In-app navigation (the list row, not a page load): the sync status of the data sub-page.
     await app.openSettings('Дані і копія');
-    await expect(app.region('Дані')).toContainText('Офлайн — 1 зміна чекає на інтернет');
+    await expect(app.region('Дані')).toContainText('Офлайн — 2 зміни чекають на інтернет');
 
     // Calendar and progress work offline too.
     await app.go('Календар');
@@ -56,9 +70,37 @@ test.describe('offline', () => {
     ).toHaveAccessibleName('Тренування: було, Прес');
 
     await context.setOffline(false);
+    // The server got both: the workout, and the meal next to today's old text (now the untyped meal 'legacy').
     await expect
-      .poll(async () => (await server.getData()).days[TODAY])
-      .toEqual({ food: 'Вівсянка з бананом, кава', kcal: 1620, trained: true, types: ['Прес'], notes: '' });
+      .poll(async () => {
+        const day = (await server.getData()).days[TODAY];
+        return {
+          kcal: day?.kcal,
+          trained: day?.trained,
+          types: day?.types,
+          notes: day?.notes,
+          meals: day?.meals?.map(({ id, type, text, kcal }) => ({
+            id: id === 'legacy' ? id : 'new',
+            type,
+            text,
+            kcal,
+          })),
+        };
+      })
+      .toEqual({
+        kcal: 1620,
+        trained: true,
+        types: ['Прес'],
+        notes: '',
+        meals: [
+          { id: 'new', type: 'Сніданок', text: '', kcal: 1620 },
+          { id: 'legacy', type: '', text: 'Вівсянка з бананом, кава', kcal: null },
+        ],
+      });
+    const stored = (await server.getData()).days[TODAY];
+    expect(stored?.meals?.[0]?.time).toMatch(/^10:\d\d$/);
+    // Old clients still read the derived day text.
+    expect(stored?.food).toBe('Сніданок\nВівсянка з бананом, кава');
     await app.openSettings('Дані і копія');
     await expect(app.region('Дані')).toContainText('Усе синхронізовано');
     await app.go('Головна');

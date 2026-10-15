@@ -84,44 +84,94 @@ test.describe('touch gestures (iPhone)', () => {
     await app.expectSheetClosed();
   });
 
-  test('dragging the item editor down closes only it; with changes it asks and snaps back', async ({
-    app,
-    page,
-  }) => {
-    await mockFood(page);
-    await app.goto('/');
-    await app.region('Сьогодні').getByRole('button', { name: 'Відкрити день' }).click();
-    const day = app.sheet('Запис дня');
-    await day.getByRole('button', { name: 'Порахувати калорії', exact: true }).click();
-    await day.getByRole('textbox', { name: 'Що порахувати' }).fill('борщ і хліб');
-    await day.getByRole('button', { name: 'Порахувати', exact: true }).click();
-    const card = day.getByRole('region', { name: 'Оцінка калорій' });
-    const borshch = card.getByRole('button', { name: /^Борщ, / });
+  test.describe('stacked sheets (seed: meals)', () => {
+    test.use({ seed: 'meals' });
 
-    await borshch.click();
-    const editor = page.getByRole('dialog', { name: 'Позиція', exact: true });
-    const heading = editor.getByRole('heading', { name: 'Позиція' });
-    let start = await center(heading);
-    await touchDrag(page, start, { x: start.x, y: start.y + 300 });
-    await expect(editor).toBeHidden();
-    // The day sheet under it stays, live again, with focus back on the row.
-    await expect(day).toBeVisible();
-    await expect(borshch).toBeFocused();
+    test('dragging a stacked «Прийом їжі» down closes only it; with changes it asks first; «Їжа» stays', async ({
+      app,
+      page,
+    }) => {
+      await app.goto('/');
+      const list = await app.openFoodDay();
+      const row = app.mealRow(list, 'Перекус');
+      await row.click();
+      const editor = app.sheet('Прийом їжі');
+      await expect(editor).toBeVisible();
+      const heading = editor.getByRole('heading', { name: 'Прийом їжі' });
 
-    // A changed draft: the question, «Залишитись» slides the editor back with her change.
-    await borshch.click();
-    await editor.getByRole('textbox', { name: 'Скільки', exact: true }).fill('150');
-    start = await center(heading);
-    await touchDrag(page, start, { x: start.x, y: start.y + 300 });
-    const ask = page.getByRole('alertdialog', { name: 'Скасувати зміни?' });
-    await ask.getByRole('button', { name: 'Залишитись' }).click();
-    await expect(ask).toBeHidden();
-    await expect.poll(() => editor.evaluate((el) => el.style.transform)).toBe('');
-    await expect(editor.getByRole('textbox', { name: 'Скільки', exact: true })).toHaveValue('150');
+      // Untouched: it slides away without a question; the list under it is live again, focus on the row.
+      let start = await center(heading);
+      await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+      await expect(editor).toBeHidden();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(list).toBeVisible();
+      await expect(row).toBeFocused();
 
-    // Dragging the dimmed day sheet above the editor does nothing to either.
-    await touchDrag(page, { x: 40, y: 90 }, { x: 40, y: 420 });
-    await expect(editor).toBeVisible();
-    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      // Changed: the question while the panel waits off-screen; «Залишитись» slides it back with her text.
+      await row.click();
+      const text = editor.getByRole('textbox', { name: 'Що я їла', exact: true });
+      await text.fill('Яблуко і груша');
+      start = await center(heading);
+      await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+      const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
+      await expect(ask).toContainText('Закрити без збереження?');
+      await ask.getByRole('button', { name: 'Залишитись' }).click();
+      await expect(ask).toBeHidden();
+      await expect(editor).toBeVisible();
+      await expect.poll(() => editor.evaluate((el) => el.style.transform)).toBe('');
+      await expect(text).toHaveValue('Яблуко і груша');
+
+      // Dragged again and confirmed: only the meal editor goes, with its draft; the list stays as it was.
+      start = await center(heading);
+      await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+      await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
+      await expect(editor).toBeHidden();
+      await expect(list).toBeVisible();
+      await expect(app.dialogs).toHaveCount(1);
+      await expect(app.mealRow(list, 'Перекус')).toHaveAccessibleName(/^Перекус о 09:40: яблуко\. 80\sккал$/);
+    });
+
+    test('dragging the item editor (a position of a meal) down closes only it; with changes it asks and snaps back', async ({
+      app,
+      page,
+    }) => {
+      await mockFood(page);
+      await app.goto('/');
+      const list = await app.openFoodDay();
+      await app.mealRow(list, 'Сніданок').click();
+      const meal = app.sheet('Прийом їжі');
+      await expect(meal).toBeVisible();
+      const card = meal.getByRole('region', { name: 'Позиції', exact: true });
+      const oats = card.getByRole('button', { name: /^Вівсянка з бананом, / });
+
+      await oats.click();
+      const editor = app.sheet('Позиція');
+      const heading = editor.getByRole('heading', { name: 'Позиція' });
+      let start = await center(heading);
+      await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+      await expect(editor).toBeHidden();
+      // The meal under it stays, live again, with focus back on the row; the list under that stays too.
+      await expect(meal).toBeVisible();
+      await expect(list).toBeVisible();
+      await expect(oats).toBeFocused();
+
+      // A changed draft: the question, «Залишитись» slides the editor back with her change.
+      await oats.click();
+      await editor.getByRole('textbox', { name: 'Скільки', exact: true }).fill('150');
+      start = await center(heading);
+      await touchDrag(page, start, { x: start.x, y: start.y + 300 });
+      const ask = page.getByRole('alertdialog', { name: 'Скасувати зміни?' });
+      await ask.getByRole('button', { name: 'Залишитись' }).click();
+      await expect(ask).toBeHidden();
+      await expect.poll(() => editor.evaluate((el) => el.style.transform)).toBe('');
+      await expect(editor.getByRole('textbox', { name: 'Скільки', exact: true })).toHaveValue('150');
+
+      // Dragging the dimmed sheets above the editor does nothing to any of them.
+      await touchDrag(page, { x: 40, y: 90 }, { x: 40, y: 420 });
+      await expect(editor).toBeVisible();
+      await expect(meal).toBeVisible();
+      await expect(page.getByRole('alertdialog')).toHaveCount(0);
+      await expect(app.dialogs).toHaveCount(3);
+    });
   });
 });

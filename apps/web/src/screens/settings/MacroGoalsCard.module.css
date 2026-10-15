@@ -1,0 +1,80 @@
+.title {
+  margin: 0;
+  padding: 0 2px;
+  font-family: var(--display);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* Label on the left, the grams field on the right; an error under both. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 6px;
+}
+
+.label {
+  min-width: 0;
+  font-size: 15px;
+  color: var(--ink2);
+}
+
+.field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input {
+  width: 96px;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r12);
+  transition: border-color 150ms ease;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--accD);
+}
+
+.unit {
+  font-size: 15px;
+  color: var(--ink2);
+}
+
+.error {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  color: var(--accD);
+  text-align: right;
+}
+
+.note {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}

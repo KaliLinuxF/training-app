@@ -2,9 +2,20 @@ import { z } from 'zod';
 
 // No eval-based fast path: the web app runs under a strict CSP without 'unsafe-eval'.
 z.config({ jitless: true });
-import { normalizeTypeNames } from './defaults';
+import { DEFAULT_MEAL_TYPES, emptyMacroGoals, normalizeTypeNames } from './defaults';
 import { isValidHM, isValidISODate, isValidTimeZone } from './dates';
-import type { AppData, DayEntry, FoodItem, MeasureValues, Settings } from './types';
+import type {
+  AppData,
+  DayEntry,
+  DayMeta,
+  FoodItem,
+  MacroGoals,
+  Meal,
+  MealItem,
+  MeasureValues,
+  Settings,
+  SettingsPut,
+} from './types';
 
 export const LIMITS = {
   text: 5000,
@@ -15,6 +26,7 @@ export const LIMITS = {
   kg: { min: 20, max: 400 },
   cm: { min: 10, max: 300 },
   goalKcal: { min: 500, max: 10000 },
+  /** Per day; with meals, the union of the meals' photos. */
   photosPerDay: 12,
   foods: 200,
   foodName: 80,
@@ -23,6 +35,16 @@ export const LIMITS = {
   /** Base64 characters (≈ 3/4 bytes): full photo ≈ 2 MB, thumbnail ≈ 300 KB. */
   photoB64: 2_800_000,
   thumbB64: 400_000,
+  mealsPerDay: 20,
+  mealTypeName: 30,
+  mealTypes: 12,
+  mealItems: 30,
+  /** Grams of one macronutrient in one position. */
+  macro: { min: 0, max: 1000 },
+  /** Grams of one macronutrient in one meal (sum of positions, or typed by hand). */
+  mealMacro: { min: 0, max: 3000 },
+  /** Daily macro goal, whole grams. */
+  macroGoal: { min: 1, max: 1000 },
 } as const;
 
 export const isoDateSchema = z.string().refine(isValidISODate, 'Expected a YYYY-MM-DD date');
@@ -34,14 +56,75 @@ const typeName = z.string().trim().min(1).max(LIMITS.typeName);
 /** Server-generated random id of a stored food photo. */
 export const photoIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,40}$/, 'Invalid photo id');
 
+const foodName = z.string().trim().min(1).max(LIMITS.foodName);
+const kcalValue = z.number().int().min(LIMITS.kcal.min).max(LIMITS.kcal.max);
+
+/** Grams in steps of 0.5 g, 0…max. */
+const halfGram = (max: number) =>
+  z
+    .number()
+    .min(0)
+    .max(max)
+    .refine((v) => Number.isInteger(v * 2), 'Expected a multiple of 0.5 g');
+
+/** Grams of one macronutrient in one position (null = unknown). */
+export const itemMacroSchema = halfGram(LIMITS.macro.max).nullable();
+/** Grams of one macronutrient in one meal (null = unknown). */
+export const mealMacroSchema = halfGram(LIMITS.mealMacro.max).nullable();
+/** Client-generated meal id: `legacy`, `old-<base36>` (Rule L) or 12 random base64url characters. */
+export const mealIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,40}$/, 'Invalid meal id');
+
+export const mealItemSchema = z.object({
+  name: foodName,
+  portion: z.string().trim().max(LIMITS.portion),
+  kcal: kcalValue,
+  protein: itemMacroSchema.default(null),
+  fat: itemMacroSchema.default(null),
+  carbs: itemMacroSchema.default(null),
+}) satisfies z.ZodType<MealItem>;
+
+export const mealSchema = z.object({
+  id: mealIdSchema,
+  /** '' = untyped. */
+  type: z.string().trim().max(LIMITS.mealTypeName),
+  time: hmSchema.nullable(),
+  text: z.string().max(LIMITS.text),
+  kcal: kcalValue.nullable(),
+  protein: mealMacroSchema,
+  fat: mealMacroSchema,
+  carbs: mealMacroSchema,
+  photos: z.array(photoIdSchema).max(LIMITS.photosPerDay).optional(),
+  items: z.array(mealItemSchema).max(LIMITS.mealItems).optional(),
+}) satisfies z.ZodType<Meal>;
+
+const uniqueIds = (meals: readonly { id: string }[]): boolean => new Set(meals.map((m) => m.id)).size === meals.length;
+
+/**
+ * Stored / cached / exported / imported day (AppData). With `meals`, the day's food / kcal / photos are derived
+ * from them by `normalizeDay`; an empty `meals` array means a legacy day (its food is kept).
+ */
 export const dayEntrySchema = z.object({
   food: z.string().max(LIMITS.text),
-  kcal: z.number().int().min(LIMITS.kcal.min).max(LIMITS.kcal.max).nullable(),
+  kcal: kcalValue.nullable(),
   trained: z.boolean().nullable(),
   types: z.array(typeName).max(LIMITS.types),
   notes: z.string().max(LIMITS.text),
   photos: z.array(photoIdSchema).max(LIMITS.photosPerDay).optional(),
+  meals: z.array(mealSchema).max(LIMITS.mealsPerDay).refine(uniqueIds, 'Duplicate meal ids').optional(),
 }) satisfies z.ZodType<DayEntry>;
+
+/** The `day.put` op value: never carries meals (zod strips the key), so every day.put is legacy-shaped. */
+export const dayPutValueSchema = dayEntrySchema.omit({ meals: true });
+
+/** The `day.meta` op value: only the keys present are applied (at least one). */
+export const dayMetaSchema = z
+  .object({
+    trained: z.boolean().nullable(),
+    types: z.array(typeName).max(LIMITS.types),
+    notes: z.string().max(LIMITS.text),
+  })
+  .partial()
+  .refine((v) => v.trained !== undefined || v.types !== undefined || v.notes !== undefined, 'Empty day.meta') satisfies z.ZodType<DayMeta>;
 
 export const kgSchema = z.number().min(LIMITS.kg.min).max(LIMITS.kg.max);
 const cmSchema = z.number().min(LIMITS.cm.min).max(LIMITS.cm.max).nullable();
@@ -49,6 +132,19 @@ const cmSchema = z.number().min(LIMITS.cm.min).max(LIMITS.cm.max).nullable();
 export const measureValuesSchema = z
   .object({ chest: cmSchema, waist: cmSchema, hips: cmSchema })
   .refine((m) => m.chest != null || m.waist != null || m.hips != null, 'At least one measurement is required') satisfies z.ZodType<MeasureValues>;
+
+const macroGoal = z.number().int().min(LIMITS.macroGoal.min).max(LIMITS.macroGoal.max).nullable();
+export const macroGoalsSchema = z.object({
+  protein: macroGoal,
+  fat: macroGoal,
+  carbs: macroGoal,
+}) satisfies z.ZodType<MacroGoals>;
+
+/** Her meal types: trimmed 1–30 characters, at most 12, de-duplicated case-insensitively (first spelling wins). */
+export const mealTypesSchema = z
+  .array(z.string().trim().min(1).max(LIMITS.mealTypeName))
+  .max(LIMITS.mealTypes)
+  .transform(normalizeTypeNames);
 
 export const settingsSchema = z.object({
   goal: kgSchema,
@@ -61,16 +157,28 @@ export const settingsSchema = z.object({
   timezone: z.string().max(64).refine(isValidTimeZone, 'Unknown time zone'),
   customTypes: z.array(typeName).max(LIMITS.customTypes).transform(normalizeTypeNames),
   onboarded: z.boolean(),
+  // Defaults keep settings stored before meal types existed (and old backups) valid.
+  mealTypes: mealTypesSchema.default(() => [...DEFAULT_MEAL_TYPES]),
+  macroGoals: macroGoalsSchema.default(() => emptyMacroGoals()),
 }) satisfies z.ZodType<Settings>;
 
-const foodName = z.string().trim().min(1).max(LIMITS.foodName);
-const kcalValue = z.number().int().min(LIMITS.kcal.min).max(LIMITS.kcal.max);
+/** The `settings.put` op value: no defaults — an absent `mealTypes` / `macroGoals` keeps the stored one (old clients). */
+export const settingsPutSchema = settingsSchema.extend({
+  mealTypes: mealTypesSchema.optional(),
+  macroGoals: macroGoalsSchema.optional(),
+}) satisfies z.ZodType<SettingsPut>;
+
+/** Grams of one macronutrient in a «Часті страви» dish / a use of it; the key is omitted when unknown (never null). */
+const dishMacro = halfGram(LIMITS.macro.max).optional();
 
 /** What gets recorded when a dish is added to a day (estimate line or quick-add chip). */
 export const foodUseSchema = z.object({
   name: foodName,
   portion: z.string().trim().max(LIMITS.portion),
   kcal: kcalValue,
+  protein: dishMacro,
+  fat: dishMacro,
+  carbs: dishMacro,
 });
 export type FoodUse = z.infer<typeof foodUseSchema>;
 
@@ -80,17 +188,30 @@ export const foodItemSchema = z.object({
   kcal: kcalValue,
   count: z.number().int().min(1),
   lastUsed: isoDateSchema,
+  protein: dishMacro,
+  fat: dishMacro,
+  carbs: dishMacro,
 }) satisfies z.ZodType<FoodItem>;
 
-/** A single idempotent change. The client queues these offline and the server applies them in order. */
+/**
+ * A single idempotent change. The client queues these offline and the server applies them in order.
+ * Wire v2 = v1 + additions: every v1 op stays valid forever (see `reduceDay` for the semantics on days with meals).
+ */
 export const opSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('day.put'), date: isoDateSchema, value: dayEntrySchema }),
+  /** Legacy whole-day write (old clients and old outboxes; the current client never sends it). */
+  z.object({ kind: z.literal('day.put'), date: isoDateSchema, value: dayPutValueSchema }),
+  /** Old clients only: on a day with meals it keeps the meals and clears the workout mark, types and notes. */
   z.object({ kind: z.literal('day.delete'), date: isoDateSchema }),
+  /** Partial write of the workout mark / types / notes (never the food). */
+  z.object({ kind: z.literal('day.meta'), date: isoDateSchema, value: dayMetaSchema }),
+  /** Upserts one meal by id (converts a legacy day first); an empty meal deletes it. */
+  z.object({ kind: z.literal('meal.put'), date: isoDateSchema, value: mealSchema }),
+  z.object({ kind: z.literal('meal.delete'), date: isoDateSchema, id: mealIdSchema }),
   z.object({ kind: z.literal('weight.put'), date: isoDateSchema, kg: kgSchema }),
   z.object({ kind: z.literal('weight.delete'), date: isoDateSchema }),
   z.object({ kind: z.literal('measure.put'), date: isoDateSchema, value: measureValuesSchema }),
   z.object({ kind: z.literal('measure.delete'), date: isoDateSchema }),
-  z.object({ kind: z.literal('settings.put'), value: settingsSchema }),
+  z.object({ kind: z.literal('settings.put'), value: settingsPutSchema }),
   /** Not strictly idempotent: a replay bumps `count` once more (harmless for ranking). */
   z.object({ kind: z.literal('food.use'), date: isoDateSchema, value: foodUseSchema }),
   z.object({ kind: z.literal('food.delete'), name: foodName }),
@@ -175,8 +296,11 @@ export const foodEstimateResultSchema = z.object({
         name: z.string().trim().min(1).max(LIMITS.foodName),
         portion: z.string().trim().max(LIMITS.portion),
         kcal: kcalValue,
+        protein: z.number().min(LIMITS.macro.min).max(LIMITS.macro.max).nullable(),
+        fat: z.number().min(LIMITS.macro.min).max(LIMITS.macro.max).nullable(),
+        carbs: z.number().min(LIMITS.macro.min).max(LIMITS.macro.max).nullable(),
       }),
     )
-    .max(30),
+    .max(LIMITS.mealItems),
   comment: z.string().trim().max(300),
 });

@@ -9,6 +9,11 @@ export interface SheetGuard {
   close: () => void;
   /** ‹ › day navigation: runs `action` right away when the draft is clean, otherwise once she agrees. */
   guard: (action: () => void) => void;
+  /**
+   * Swaps the sheet to another one for the same day («Усі прийоми за день →»): like `guard`, with the close
+   * question («Закрити без збереження?»), since the draft goes away but the day stays.
+   */
+  replace: (action: () => void) => void;
 }
 
 /** Runs an action that replaces the open sheet, asking first when its draft is dirty. */
@@ -77,6 +82,9 @@ export function useSheetGuard(dirty: boolean, open: boolean): SheetGuard {
     },
     guard(action) {
       whenDiscarded(dirty, DISCARD_ON_NAVIGATE_CONFIRM, action);
+    },
+    replace(action) {
+      whenDiscarded(dirty, DISCARD_CONFIRM, action);
     },
   };
 }

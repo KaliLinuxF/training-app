@@ -2,10 +2,12 @@ import {
   addDays,
   diffDays,
   emptyData,
+  normalizeDay,
   weekdayOf,
   type AppData,
   type DayEntry,
   type ISODate,
+  type Meal,
   type MeasureEntry,
   type Settings,
   type Weekday,
@@ -27,6 +29,7 @@ import {
   kcalBars,
   kcalHistory,
   kcalTone,
+  macroAverages,
   MEASURE_LABELS,
   MEASURE_PARAMS,
   measureSummary,
@@ -793,6 +796,85 @@ describe('kcalHistory', () => {
 
   it('guards a zero scale', () => {
     expect(kcalHistory(data, 1, 0).items[0]?.pct).toBe(0);
+  });
+});
+
+describe('macroAverages', () => {
+  const meal = (id: string, patch: Partial<Meal> = {}): Meal => ({
+    id,
+    type: 'Обід',
+    time: '13:00',
+    text: 'Суп',
+    kcal: 500,
+    protein: 30,
+    fat: 20,
+    carbs: 50,
+    ...patch,
+  });
+  const mealDay = (...meals: Meal[]): DayEntry => normalizeDay(day({ meals }));
+  const data = makeData({
+    days: {
+      // Complete for all three.
+      '2026-10-05': mealDay(meal('a'), meal('b', { time: '19:00', protein: 50, fat: 10, carbs: 70 })),
+      // Complete for protein only: the second meal has energy but no fat / carbs.
+      '2026-10-06': mealDay(
+        meal('a', { protein: 60 }),
+        meal('b', { time: '19:00', protein: 40, fat: null, carbs: null }),
+      ),
+      // A legacy block with kcal: incomplete for everything (no macros at all).
+      '2026-10-07': day({ food: 'Борщ', kcal: 500 }),
+      // Converted legacy block + a meal with macros: partial, left out.
+      '2026-10-08': normalizeDay(
+        day({
+          meals: [
+            meal('x'),
+            { ...meal('legacy', { type: '', time: null }), protein: null, fat: null, carbs: null },
+          ],
+        }),
+      ),
+      // Outside the range.
+      '2026-09-01': mealDay(meal('a', { protein: 999 })),
+    },
+  });
+
+  it('averages each macronutrient over the days that are complete for it', () => {
+    expect(macroAverages(data, MONDAY, SUNDAY)).toEqual({
+      protein: (80 + 100) / 2,
+      fat: 30,
+      carbs: 120,
+      days: 2,
+    });
+  });
+
+  it('includes a complete day; a partial day is excluded', () => {
+    expect(macroAverages(data, '2026-10-05', '2026-10-05')).toEqual({
+      protein: 80,
+      fat: 30,
+      carbs: 120,
+      days: 1,
+    });
+    expect(macroAverages(data, '2026-10-07', '2026-10-08')).toEqual({
+      protein: null,
+      fat: null,
+      carbs: null,
+      days: 0,
+    });
+  });
+
+  it('counts a day without energy in its meals as complete (nothing to know)', () => {
+    const d = makeData({
+      days: { [TODAY]: mealDay(meal('w', { text: 'Вода', kcal: 0, protein: 0, fat: null, carbs: null })) },
+    });
+    expect(macroAverages(d, TODAY, TODAY)).toEqual({ protein: 0, fat: null, carbs: null, days: 1 });
+  });
+
+  it('is empty without days', () => {
+    expect(macroAverages(makeData(), MONDAY, SUNDAY)).toEqual({
+      protein: null,
+      fat: null,
+      carbs: null,
+      days: 0,
+    });
   });
 });
 

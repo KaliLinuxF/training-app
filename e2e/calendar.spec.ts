@@ -10,7 +10,23 @@ const todayShortcut = (page: Page) => page.getByRole('button', { name: 'Сьог
 const row = (day: Locator, title: 'Їжа' | 'Тренування' | 'Вага' | 'Заміри' | 'Нотатки') =>
   day.getByRole('button', { name: new RegExp(`^${title}`) });
 
-const OCT13_FOOD = 'Тост з авокадо, салат з куркою, індичка з броколі';
+/** 7 October is a legacy day (logged before meals existed): one food text, 1 880 ккал (over the 1 700 goal). */
+const OCT7_FOOD = 'Омлет, борщ, курка з рисом, кефір';
+/** 13 October is logged as three typed meals (demo seed, meals doc §6.5 / §7.8): 1 740 ккал in all. */
+const OCT13_MEALS = [
+  { type: 'Сніданок', time: '08:30', text: 'Тост з авокадо', kcal: 520, protein: 23, fat: 17, carbs: 68 },
+  { type: 'Обід', time: '13:00', text: 'Салат з куркою', kcal: 700, protein: 49, fat: 25, carbs: 70 },
+  { type: 'Вечеря', time: '19:30', text: 'Індичка з броколі', kcal: 520, protein: 42, fat: 20, carbs: 43 },
+];
+/** Its Їжа row: one line per meal, then the day's «Б · Ж · В» (text matching treats NO-BREAK SPACEs as spaces). */
+const OCT13_LINES = [
+  'Сніданок · 520 ккал · Тост з авокадо',
+  'Обід · 700 ккал · Салат з куркою',
+  'Вечеря · 520 ккал · Індичка з броколі',
+  'Б 114 · Ж 62 · В 181 г',
+];
+/** 1 740 is over the default 1 700 goal: the short name says so after the meal count. */
+const OCT13_FOOD_NAME = 'Їжа: 1 740 ккал, 3 прийоми, більше цілі';
 const NOTES = 'Гарне самопочуття, випила 2 л води';
 
 test.describe('calendar', () => {
@@ -92,24 +108,35 @@ test.describe('calendar', () => {
     const day = app.region('7 жовтня 2026');
     await expect(day).toContainText('середа');
     await expect(day).toContainText('Заповнено');
-    await expect(day).toContainText('Омлет, борщ, курка з рисом, кефір');
+    await expect(day).toContainText(OCT7_FOOD);
     await expect(day).toContainText('1 880 ккал');
     await expect(day).toContainText('Низ тіла, Прес');
     await expect(day).not.toContainText('—');
-    // Short spoken names; the food text is the row's description.
+    // Short spoken names; the food text is the row's description. A legacy day keeps its one text (no meal count).
     await expect(row(day, 'Їжа')).toHaveAccessibleName('Їжа: 1 880 ккал, більше цілі');
-    await expect(row(day, 'Їжа')).toHaveAccessibleDescription('Омлет, борщ, курка з рисом, кефір');
+    await expect(row(day, 'Їжа')).toHaveAccessibleDescription(OCT7_FOOD);
     await expect(row(day, 'Тренування')).toHaveAccessibleName('Тренування: було, Низ тіла, Прес');
     await expect(grid(page).getByRole('button', { name: /^7 жовтня/ })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
 
-    // «Редагувати день» opens that day (not today).
+    // The Їжа row opens that day's «Їжа»: the day's total against the goal, the legacy block as one entry.
+    await row(day, 'Їжа').click();
+    const food = app.sheet('Їжа');
+    await expect(food).toContainText('7 жовтня 2026');
+    await expect(food).toContainText('1 880 / 1 700 ккал');
+    await expect(app.mealRow(food, 'Їжа за день')).toHaveCount(1);
+    await food.getByRole('button', { name: 'Закрити' }).click();
+    await app.expectSheetClosed();
+    await expect(row(day, 'Їжа')).toBeFocused();
+
+    // «Редагувати день» opens that day (not today); its food block lists the same entry and the day's total.
     await day.getByRole('button', { name: 'Редагувати день' }).click();
     const sheet = app.sheet('Запис дня');
     await expect(sheet).toContainText('7 жовтня 2026');
-    await expect(sheet.getByRole('textbox', { name: 'Калорії за день' })).toHaveValue('1880');
+    await expect(sheet).toContainText('1 880 / 1 700 ккал');
+    await expect(app.mealRow(sheet, 'Їжа за день')).toHaveCount(1);
     await sheet.getByRole('button', { name: 'Закрити' }).click();
     await app.expectSheetClosed();
 
@@ -216,23 +243,90 @@ test.describe('calendar', () => {
     await measure.getByRole('button', { name: 'Закрити' }).click();
     await app.expectSheetClosed();
 
-    // The food text and the notes stay audible as the rows' descriptions.
-    await expect(row(oct13, 'Їжа')).toHaveAccessibleDescription(OCT13_FOOD);
+    // The meal lines and the notes stay audible as the rows' descriptions.
+    await expect(row(oct13, 'Їжа')).toHaveAccessibleName(OCT13_FOOD_NAME);
+    await expect(row(oct13, 'Їжа')).toHaveAccessibleDescription(OCT13_LINES.join(' '));
     await expect(row(oct13, 'Нотатки')).toHaveAccessibleName('Нотатки');
     await expect(row(oct13, 'Нотатки')).toHaveAccessibleDescription(NOTES);
 
-    for (const [title, name] of [
-      ['Їжа', 'Їжа'],
-      ['Тренування', 'Тренування'],
-    ] as const) {
-      await row(oct13, title).click();
-      const sheet = app.sheet(name);
-      await expect(sheet).toContainText('13 жовтня 2026');
-      await sheet.getByRole('button', { name: 'Закрити' }).click();
-      await app.expectSheetClosed();
-      await expect(row(oct13, title)).toBeFocused();
+    // Їжа opens that day's list of meals.
+    await row(oct13, 'Їжа').click();
+    const food = app.sheet('Їжа');
+    await expect(food).toContainText('13 жовтня 2026');
+    await expect(food).toContainText('1 740 / 1 700 ккал');
+    for (const type of ['Сніданок', 'Обід', 'Вечеря']) {
+      await expect(app.mealRow(food, type)).toHaveCount(1);
     }
+    await expect(app.mealRow(food, 'Сніданок')).toContainText('Тост з авокадо');
+    await expect(app.mealRow(food, 'Обід')).toContainText('Салат з куркою');
+    await expect(app.mealRow(food, 'Вечеря')).toContainText('Індичка з броколі');
+    await food.getByRole('button', { name: 'Закрити' }).click();
+    await app.expectSheetClosed();
+    await expect(row(oct13, 'Їжа')).toBeFocused();
+
+    await row(oct13, 'Тренування').click();
+    const workout = app.sheet('Тренування');
+    await expect(workout).toContainText('13 жовтня 2026');
+    await workout.getByRole('button', { name: 'Закрити' }).click();
+    await app.expectSheetClosed();
+    await expect(row(oct13, 'Тренування')).toBeFocused();
     await expect(page).toHaveURL(/date=2026-10-13$/);
+  });
+
+  test('a day with meals: one line per meal and the day’s Б · Ж · В, never wrapped at 390 or 320', async ({
+    app,
+    page,
+  }) => {
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      await app.goto('/calendar?date=2026-10-13');
+      const oct13 = app.region('13 жовтня 2026');
+      const food = row(oct13, 'Їжа');
+      await expect(food).toHaveAccessibleName(OCT13_FOOD_NAME);
+      await expect(food).toContainText('1 740 ккал');
+      for (const text of OCT13_LINES) {
+        const line = food.getByText(text, { exact: true });
+        await expect(line).toBeVisible();
+        // One line tall: a wrapped line would be about twice its line height (an ellipsis cuts it instead).
+        const box = await line.boundingBox();
+        const lineHeight = await line.evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+        expect(box, `${text} at ${width}px`).not.toBeNull();
+        expect(box?.height ?? Infinity, `${text} at ${width}px`).toBeLessThan(lineHeight * 1.5);
+      }
+      // The lines sit in their order under the title, inside the row.
+      const tops = await Promise.all(
+        OCT13_LINES.map(async (text) => (await food.getByText(text, { exact: true }).boundingBox())?.y ?? 0),
+      );
+      expect(tops).toEqual([...tops].sort((a, b) => a - b));
+      const [rowBox, lastBox] = await Promise.all([
+        food.boundingBox(),
+        food.getByText(OCT13_LINES.at(-1) ?? '', { exact: true }).boundingBox(),
+      ]);
+      expect(rowBox && lastBox && lastBox.x + lastBox.width <= rowBox.x + rowBox.width).toBe(true);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+    }
+  });
+
+  test('an empty past day: «Додати» on Їжа opens a new meal for that date', async ({ app }) => {
+    await app.goto('/calendar?date=2026-10-05');
+    const oct5 = app.region('5 жовтня 2026');
+    await expect(row(oct5, 'Їжа')).toHaveAccessibleName('Їжа: додати');
+    await expect(row(oct5, 'Їжа')).toContainText('Додати');
+    await row(oct5, 'Їжа').click();
+
+    const meal = app.sheet('Прийом їжі');
+    await expect(meal).toContainText('5 жовтня 2026');
+    // Nothing logged that day yet: the first type is preselected, the text takes focus (keyboard up on the phone).
+    await expect(app.mealType(meal, 'Сніданок')).toHaveAttribute('aria-pressed', 'true');
+    await expect(meal.getByRole('textbox', { name: 'Що я їла' })).toBeFocused();
+    await meal.getByRole('button', { name: 'Закрити' }).click();
+    await app.expectSheetClosed();
+    await expect(row(oct5, 'Їжа')).toBeFocused();
+    await expect(row(oct5, 'Їжа')).toHaveAccessibleName('Їжа: додати');
   });
 
   test('the inline ✕ marks a past day without a sheet and survives a reload', async ({ app, server }) => {
@@ -250,9 +344,10 @@ test.describe('calendar', () => {
     await expect(yes).toHaveAttribute('aria-pressed', 'false');
     await expect(app.dialogs).toHaveCount(0);
     await expect(row(oct13, 'Тренування')).toHaveAccessibleName('Тренування: не було');
+    // Only the mark changed on the server: the meals, their day total and the notes are as they were.
     await expect
       .poll(async () => (await server.getData()).days['2026-10-13'])
-      .toMatchObject({ trained: false, types: [], food: OCT13_FOOD, kcal: 1740, notes: NOTES });
+      .toMatchObject({ trained: false, types: [], meals: OCT13_MEALS, kcal: 1740, notes: NOTES });
 
     await app.reload();
     await expect(no).toHaveAttribute('aria-pressed', 'true');

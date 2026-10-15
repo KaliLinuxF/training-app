@@ -1,6 +1,10 @@
 import type { FoodEstimateItem, FoodUse } from '@legko/shared';
 
-/** What the day sheet receives when a meal is added (AI estimate line or a «Часті страви» chip). */
+/**
+ * What the record sheet's old food block received when a meal was added (an AI estimate line or a
+ * «Часті страви» chip). The meal editor no longer produces it; kept so that block still compiles
+ * until it moves to the meal editor (docs/meals-macros.md §8.2).
+ */
 export interface FoodAdd {
   /** Ready-to-insert line for the day's food text, e.g. «Борщ (300 г), хліб (1 шматок) — 420 ккал». */
   line: string;

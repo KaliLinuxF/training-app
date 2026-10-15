@@ -34,7 +34,7 @@ test.describe('deep links', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test('/?sheet=day opens the full day, /?sheet=food «Їжа», /?sheet=workout «Тренування»', async ({
+  test('/?sheet=day opens the full day, /?sheet=food the day’s meals «Їжа», /?sheet=workout «Тренування»', async ({
     app,
     page,
   }) => {
@@ -44,12 +44,16 @@ test.describe('deep links', () => {
       'aria-pressed',
       'false',
     );
-    await expect(day.getByRole('textbox', { name: 'Що я їла' })).toBeVisible();
+    await expect(app.mealRow(day, 'Їжа за день')).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
 
     await app.goto('/?sheet=food');
     const food = app.sheet('Їжа');
-    await expect(food.getByRole('textbox', { name: 'Що я їла' })).toHaveValue('Вівсянка з бананом, кава');
+    await expect(food.getByRole('region', { name: 'Підсумок дня', exact: true })).toBeVisible();
+    await expect(app.mealRow(food, 'Їжа за день')).toHaveAccessibleName(
+      /^Їжа за день: вівсянка з бананом, кава$/,
+    );
+    await expect(food.getByRole('textbox')).toHaveCount(0);
     await expect(page).toHaveURL(/\/$/);
 
     await app.goto('/?sheet=workout');
@@ -62,6 +66,12 @@ test.describe('deep links', () => {
 
   test('the menu is not linkable', async ({ app, page }) => {
     await app.goto('/?sheet=menu');
+    await expect(page).toHaveURL(/\/$/);
+    await expect(app.dialogs).toHaveCount(0);
+  });
+
+  test('a new meal is not linkable (it opens from a tap, with the keyboard)', async ({ app, page }) => {
+    await app.goto('/?sheet=meal');
     await expect(page).toHaveURL(/\/$/);
     await expect(app.dialogs).toHaveCount(0);
   });
@@ -90,11 +100,14 @@ test.describe('deep links', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test('a notification tap while a draft is open asks before dropping it', async ({ app, page }) => {
+  test('a notification tap while a new meal is being typed asks before dropping it', async ({
+    app,
+    page,
+  }) => {
     await app.goto('/');
     const sheet = await app.record('Їжа');
     const food = sheet.getByRole('textbox', { name: 'Що я їла' });
-    await food.fill('Вівсянка з бананом, кава, борщ — ще пишу…');
+    await food.fill('Борщ, салат — ще пишу…');
 
     // The in-app question (not a native confirm); «Залишитись» keeps the draft.
     const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
@@ -103,15 +116,42 @@ test.describe('deep links', () => {
     await expect(ask).toContainText('Закрити без збереження?');
     await ask.getByRole('button', { name: 'Залишитись' }).click();
     await expect(ask).toBeHidden();
-    await expect(food).toHaveValue('Вівсянка з бананом, кава, борщ — ще пишу…');
+    await expect(food).toHaveValue('Борщ, салат — ще пишу…');
 
     // Agreeing opens the linked sheet; the draft is gone.
     await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
     await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
     await expect(app.sheet('Контрольне зважування')).toBeVisible();
-    await expect(app.sheet('Їжа')).toHaveCount(0);
+    await expect(app.sheet('Прийом їжі')).toHaveCount(0);
     await expect(app.dialogs).toHaveCount(1);
     await expect(page).toHaveURL(/\/$/);
+  });
+
+  test('a notification tap over «Їжа» with a meal being typed on top of it asks first', async ({
+    app,
+    page,
+  }) => {
+    await app.goto('/');
+    const list = await app.openFoodDay();
+    await app.addMealButton(list).click();
+    const meal = app.sheet('Прийом їжі');
+    await expect(meal).toBeVisible();
+    await meal.getByRole('textbox', { name: 'Що я їла', exact: true }).fill('Горіхи');
+
+    const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
+    await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
+    await expect(ask).toContainText('Закрити без збереження?');
+    await ask.getByRole('button', { name: 'Залишитись' }).click();
+    await expect(ask).toBeHidden();
+    await expect(meal.getByRole('textbox', { name: 'Що я їла', exact: true })).toHaveValue('Горіхи');
+    await expect(app.dialogs).toHaveCount(2);
+
+    await page.evaluate(() => history.pushState(null, '', '/?sheet=weight'));
+    await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
+    await expect(app.sheet('Контрольне зважування')).toBeVisible();
+    await expect(app.sheet('Прийом їжі')).toHaveCount(0);
+    await expect(app.sheet('Їжа')).toHaveCount(0);
+    await expect(app.dialogs).toHaveCount(1);
   });
 
   test('a notification tap over an untouched sheet just opens the linked one', async ({ app, page }) => {

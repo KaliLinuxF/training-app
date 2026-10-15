@@ -1,4 +1,11 @@
-import { defaultSettings, emptyData, type AppData } from '@legko/shared';
+import {
+  DEFAULT_MEAL_TYPES,
+  defaultSettings,
+  emptyData,
+  emptyMacroGoals,
+  normalizeDay,
+  type AppData,
+} from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import { createTestServer, json } from './helpers';
 
@@ -76,6 +83,114 @@ describe('export / import', () => {
     const { foods: _foods, ...old } = sample;
     expect((await s.call('/api/import', { cookie, body: old })).status).toBe(200);
     expect(await json(await s.call('/api/data', { cookie }))).toEqual({ ...sample, foods: [] });
+  });
+
+  it('round-trips days with meals, meal types, macro goals and dish macros (export → import deep-equal)', async () => {
+    const withMeals: AppData = {
+      ...sample,
+      days: {
+        ...sample.days,
+        '2026-10-11': normalizeDay({
+          food: '',
+          kcal: null,
+          trained: true,
+          types: ['Кардіо'],
+          notes: '',
+          meals: [
+            {
+              id: 'breakfast001',
+              type: 'Сніданок',
+              time: '08:30',
+              text: 'Вівсянка з бананом, кава з молоком',
+              kcal: null,
+              protein: null,
+              fat: null,
+              carbs: null,
+              items: [
+                { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, protein: 9, fat: 6, carbs: 58 },
+                { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, protein: 3, fat: 3, carbs: 5 },
+              ],
+              photos: ['CCCCCCCCCCCCCCCCCCCCCC'],
+            },
+            {
+              id: 'snack0000001',
+              type: 'Перекус',
+              time: '09:40',
+              text: 'Яблуко',
+              kcal: 80,
+              protein: null,
+              fat: null,
+              carbs: null,
+            },
+          ],
+        }),
+      },
+      foods: [
+        ...sample.foods,
+        {
+          name: 'Борщ',
+          portion: '300 г',
+          kcal: 180,
+          count: 3,
+          lastUsed: '2026-10-11',
+          protein: 6,
+          fat: 9,
+          carbs: 19,
+        },
+      ],
+      settings: {
+        ...sample.settings,
+        mealTypes: ['Сніданок', 'Після тренування'],
+        macroGoals: { protein: 90, fat: 60, carbs: null },
+      },
+    };
+    const s = await createTestServer();
+    const cookie = await s.login();
+    expect((await s.call('/api/import', { cookie, body: withMeals })).status).toBe(200);
+    const exported = await json<AppData>(await s.call('/api/export', { cookie }));
+    expect(exported).toEqual(withMeals);
+    expect(exported.days['2026-10-11']).toMatchObject({
+      kcal: 460,
+      food: 'Сніданок: Вівсянка з бананом, кава з молоком\nПерекус: Яблуко',
+    });
+
+    const other = await createTestServer();
+    const otherCookie = await other.login();
+    expect((await other.call('/api/import', { cookie: otherCookie, body: exported })).status).toBe(200);
+    expect(await json(await other.call('/api/data', { cookie: otherCookie }))).toEqual(withMeals);
+  });
+
+  it('imports a backup made before meals and macros (no meals, meal types, macro goals or dish macros)', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const { mealTypes: _m, macroGoals: _g, ...oldSettings } = sample.settings;
+    const old = { ...sample, settings: oldSettings };
+    expect((await s.call('/api/import', { cookie, body: old })).status).toBe(200);
+    const data = await json<AppData>(await s.call('/api/data', { cookie }));
+    expect(data).toEqual({
+      ...sample,
+      settings: { ...sample.settings, mealTypes: [...DEFAULT_MEAL_TYPES], macroGoals: emptyMacroGoals() },
+    });
+    for (const day of Object.values(data.days)) expect(day).not.toHaveProperty('meals');
+  });
+
+  it('a backup day with meals: [] is a legacy day that keeps its food', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const body = { ...sample, days: { '2026-10-09': { ...sample.days['2026-10-09'], meals: [] } } };
+    expect((await s.call('/api/import', { cookie, body })).status).toBe(200);
+    const data = await json<AppData>(await s.call('/api/data', { cookie }));
+    expect(data.days).toEqual({ '2026-10-09': sample.days['2026-10-09'] });
+  });
+
+  it('rejects a backup with duplicate meal ids', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    const m = { id: 'x', type: '', time: null, text: 'a', kcal: null, protein: null, fat: null, carbs: null };
+    const body = { ...sample, days: { '2026-10-09': { ...sample.days['2026-10-09'], meals: [m, m] } } };
+    const res = await s.call('/api/import', { cookie, body });
+    expect(res.status).toBe(400);
+    expect(await json(res)).toMatchObject({ error: 'bad_request' });
   });
 
   it('normalises imported records the same way ops do', async () => {

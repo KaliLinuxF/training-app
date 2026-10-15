@@ -70,7 +70,10 @@ function initFoodAi(config: Config, logger: Logger): FoodEstimator | null {
 function startScheduler(db: Database, config: Config, logger: Logger, push: PushService | null): Loop {
   const backups = createBackupJob({ db, dir: backupsDir(config.dataDir), logger });
   backups.atStartup(new Date());
-  const photoGc = createPhotoGcJob({ photos: createPhotoStore(db, photosDir(config.dataDir)), logger });
+  const photoGc = createPhotoGcJob({
+    photos: createPhotoStore(db, photosDir(config.dataDir), Date.now, logger),
+    logger,
+  });
   const reminderDeps = push
     ? { data: createDataRepo(db, Date.now, logger), log: createReminderLog(db), push, logger }
     : null;
@@ -124,7 +127,7 @@ async function main(): Promise<void> {
     `Легко server ${APP_VERSION} (${config.production ? 'production' : 'development'}), database ${file}`,
   );
 
-  const db = openDatabase(file);
+  const db = openDatabase(file, { logger });
   await applyDevPassword(db, config, logger);
   if (!hasPassword(db)) logger.warn(`No password is set: every login fails. Run: ${setPasswordHint()}`);
   if (!config.staticDir) logger.info('STATIC_DIR is not set: serving the API only');

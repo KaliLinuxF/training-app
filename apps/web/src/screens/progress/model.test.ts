@@ -1,16 +1,28 @@
-import { f0, type AppData } from '@legko/shared';
+import { f0, type AppData, type Meal } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
+import { NBSP } from '@/lib/nutrition';
 import type { Period } from '@/lib/stats';
 import type { StatItem } from '@/ui';
 import {
   buildProgressModel,
   HISTORY_FIRST,
   HISTORY_PAGE,
+  MACROS_LABEL,
+  NO_MACROS_IN_PERIOD,
   TYPES_SHOWN,
   type ProgressOptions,
   type SummaryItem,
 } from './model';
-import { freshData, progressData, TODAY } from './progress.fixtures';
+import {
+  freshData,
+  meal,
+  mealDay,
+  MEALS_THU,
+  MEALS_TUE,
+  MEALS_WED,
+  progressData,
+  TODAY,
+} from './progress.fixtures';
 
 const opts = (patch: Partial<ProgressOptions> = {}): ProgressOptions => ({
   period: 'week',
@@ -360,9 +372,195 @@ describe('buildProgressModel — nutrition', () => {
       ['Сер. цього тижня', '—', undefined, 'faint'],
       ['Сер. цього місяця', '—', undefined, 'faint'],
     ]);
+    expect(n.macros.items).toBeNull();
+    expect(n.macros.empty).toBe(NO_MACROS_IN_PERIOD);
     expect(n.hasBarData).toBe(false);
     expect(n.history).toEqual([]);
     expect(n.hasMore).toBe(false);
+  });
+});
+
+/** Whitespace (incl. NBSP) as plain spaces, to compare copy. */
+const plain = (s: string) => s.replace(/\s+/g, ' ');
+/** `[label, value, unit, tone]` of the «Б · Ж · В» strip, labels as plain text. */
+const macroCells = (data: AppData, patch: Partial<ProgressOptions> = {}) =>
+  (build(data, patch).nutrition.macros.items ?? []).map((c) => [plain(c.label), c.value, c.unit, c.tone]);
+
+/** progressData with one day replaced by `meals` (kcal of the day = their sum). */
+function withDay(date: string, meals: Meal[], data: AppData = progressData()): AppData {
+  data.days[date] = mealDay(meals, { trained: data.days[date]?.trained ?? null });
+  return data;
+}
+
+describe('buildProgressModel — Б · Ж · В', () => {
+  it('the fixture keeps every day kcal: meal days sum to the same numbers', () => {
+    const { days } = progressData();
+    expect([days['2026-10-06']?.kcal, days['2026-10-07']?.kcal, days['2026-10-08']?.kcal]).toEqual([
+      1800, 1500, 1700,
+    ]);
+    expect(days['2026-10-07']?.meals?.map((m) => m.id)).toEqual(['wedDinner', 'legacy']);
+  });
+
+  it('averages each macronutrient per day over the complete days of the week, in whole grams', () => {
+    const { macros } = build(progressData()).nutrition;
+    expect(plain(macros.caption)).toBe('Б · Ж · В — середнє за день · цього тижня');
+    expect(macros.label).toBe(MACROS_LABEL);
+    expect(macros.empty).toBeNull();
+    // Tue 100 / 60 / 200 and Thu 97 / 58 / 188 (the energy-free tea on Tue is ignored); Wed is partial, Mon and today
+    // are legacy days: left out. Protein 98,5 shows as 99.
+    expect(macroCells(progressData())).toEqual([
+      ['Білки', '99', 'г', 'ink'],
+      ['Жири', '59', 'г', 'ink'],
+      ['Вуглеводи', '194', 'г', 'ink'],
+    ]);
+  });
+
+  it('leaves out a day with a legacy block next to an AI meal, and legacy days with kcal', () => {
+    // Only Wednesday (legacy block 600 kcal + AI meal with positions) and the legacy days: nothing counts.
+    const data = progressData();
+    delete data.days['2026-10-06'];
+    delete data.days['2026-10-08'];
+    const { macros } = build(data).nutrition;
+    expect(macros.items).toBeNull();
+    expect(macros.empty).toBe(NO_MACROS_IN_PERIOD);
+    expect(plain(macros.caption)).toBe('Б · Ж · В — середнє за день · цього тижня');
+    // Once the legacy block is gone, the AI meal alone is a complete day.
+    const complete = withDay(
+      '2026-10-07',
+      MEALS_WED.filter((m) => m.id !== 'legacy'),
+      data,
+    );
+    expect(macroCells(complete)).toEqual([
+      ['Білки', '48', 'г', 'ink'],
+      ['Жири', '44', 'г', 'ink'],
+      ['Вуглеводи', '80', 'г', 'ink'],
+    ]);
+  });
+
+  it('decides per macronutrient: a day missing one of them still counts for the others', () => {
+    // Thursday's dinner without fat: Thursday counts for protein and carbs, not for fat.
+    const thu = MEALS_THU.map((m) => (m.id === 'thuDinner' ? { ...m, fat: null } : m));
+    expect(macroCells(withDay('2026-10-08', thu))).toEqual([
+      ['Білки', '99', 'г', 'ink'],
+      ['Жири', '60', 'г', 'ink'],
+      ['Вуглеводи', '194', 'г', 'ink'],
+    ]);
+    // A position with energy but without carbs makes Tuesday partial for carbs only.
+    const tue = MEALS_TUE.map((m) =>
+      m.id === 'tueLunch' && m.items
+        ? { ...m, items: m.items.map((i, n) => (n === 0 ? { ...i, carbs: null } : i)) }
+        : m,
+    );
+    expect(macroCells(withDay('2026-10-06', tue))).toEqual([
+      ['Білки', '99', 'г', 'ink'],
+      ['Жири', '59', 'г', 'ink'],
+      ['Вуглеводи', '188', 'г', 'ink'],
+    ]);
+  });
+
+  it('shows a faint «—» without a unit for a macronutrient no complete day has', () => {
+    const data = freshData();
+    data.days[TODAY] = mealDay([
+      meal({
+        id: 'm1',
+        type: 'Обід',
+        time: '13:00',
+        text: 'Суп',
+        kcal: 300,
+        protein: 12,
+        fat: null,
+        carbs: 30,
+      }),
+    ]);
+    expect(macroCells(data)).toEqual([
+      ['Білки', '12', 'г', 'ink'],
+      ['Жири', '—', undefined, 'faint'],
+      ['Вуглеводи', '30', 'г', 'ink'],
+    ]);
+  });
+
+  it('puts a goal into the label, keeps the unit «г» and tones a rounded average above it lavender', () => {
+    const data = progressData();
+    data.settings.macroGoals = { protein: 98, fat: 59, carbs: null };
+    // 98,5 rounds to 99 > 98: over. 59 = 59: not over.
+    expect(macroCells(data)).toEqual([
+      ['Білки · ціль 98 г', '99', 'г', 'acc'],
+      ['Жири · ціль 59 г', '59', 'г', 'ink'],
+      ['Вуглеводи', '194', 'г', 'ink'],
+    ]);
+    data.settings.macroGoals = { protein: 99, fat: null, carbs: 1000 };
+    expect(macroCells(data)).toEqual([
+      ['Білки · ціль 99 г', '99', 'г', 'ink'],
+      ['Жири', '59', 'г', 'ink'],
+      ['Вуглеводи · ціль 1 000 г', '194', 'г', 'ink'],
+    ]);
+    // The label may wrap only after the dot: «Білки ·» / «ціль 99 г».
+    expect(build(data).nutrition.macros.items?.[0]?.label).toBe(`Білки${NBSP}· ціль${NBSP}99${NBSP}г`);
+  });
+
+  it('follows the selected period, with its own short phrase in the caption', () => {
+    const data = progressData();
+    // 10 September is inside the 30 days, not inside the week.
+    data.days['2026-09-10'] = mealDay(
+      [meal({ id: 'sep', type: 'Обід', text: 'Паста', kcal: 1600, protein: 80, fat: 50, carbs: 190 })],
+      { trained: true, types: ['Кардіо'] },
+    );
+    const caption = (period: Period) => plain(build(data, { period }).nutrition.macros.caption);
+    expect(caption('week')).toBe('Б · Ж · В — середнє за день · цього тижня');
+    expect(caption('month')).toBe('Б · Ж · В — середнє за день · за 30 днів');
+    expect(caption('q')).toBe('Б · Ж · В — середнє за день · за 3 місяці');
+    expect(caption('all')).toBe('Б · Ж · В — середнє за день · за весь час');
+    expect(macroCells(data)).toEqual([
+      ['Білки', '99', 'г', 'ink'],
+      ['Жири', '59', 'г', 'ink'],
+      ['Вуглеводи', '194', 'г', 'ink'],
+    ]);
+    // (100 + 97 + 80) / 3 = 92,3 · (60 + 58 + 50) / 3 = 56 · (200 + 188 + 190) / 3 = 192,7.
+    for (const period of ['month', 'q', 'all'] as const) {
+      expect(macroCells(data, { period })).toEqual([
+        ['Білки', '92', 'г', 'ink'],
+        ['Жири', '56', 'г', 'ink'],
+        ['Вуглеводи', '193', 'г', 'ink'],
+      ]);
+    }
+  });
+
+  it('keeps «Б · Ж · В —» on one line and the dot before the period', () => {
+    const { caption } = build(progressData()).nutrition.macros;
+    expect(caption.startsWith(`Б${NBSP}·${NBSP}Ж${NBSP}·${NBSP}В${NBSP}—`)).toBe(true);
+    expect(caption.endsWith(`${NBSP}·${' '}цього${NBSP}тижня`)).toBe(true);
+  });
+
+  it('wraps the caption only inside «середнє за день» or after its « ·», never inside the period phrase', () => {
+    const head = `Б${NBSP}·${NBSP}Ж${NBSP}·${NBSP}В${NBSP}— середнє за день${NBSP}·${' '}`;
+    const caption = (period: Period) => build(progressData(), { period }).nutrition.macros.caption;
+    expect(caption('week')).toBe(`${head}цього${NBSP}тижня`);
+    expect(caption('month')).toBe(`${head}за${NBSP}30${NBSP}днів`);
+    expect(caption('q')).toBe(`${head}за${NBSP}3${NBSP}місяці`);
+    expect(caption('all')).toBe(`${head}за${NBSP}весь${NBSP}час`);
+    for (const period of ['week', 'month', 'q', 'all'] as const) {
+      const phrase = caption(period).slice(head.length);
+      expect(phrase.length).toBeGreaterThan(0);
+      expect(phrase).not.toMatch(/ /);
+      // The only ordinary spaces: «— середнє за день» (three) and the one after « ·».
+      expect(caption(period).split(' ')).toHaveLength(5);
+    }
+  });
+
+  it('leaves the kcal strip, the summary sentence and the chart as they were', () => {
+    const data = progressData();
+    data.settings.macroGoals = { protein: 90, fat: 60, carbs: 150 };
+    const m = build(data);
+    expect(m.nutrition.stats.map((c) => c.label)).toEqual(['Сер. цього тижня', 'Сер. цього місяця']);
+    expect(m.summary.items.map((i) => i.key)).toEqual([
+      'workouts',
+      'kcal',
+      'weight',
+      'waist',
+      'hips',
+      'chest',
+    ]);
+    expect(m.nutrition.chartLabel).toBe(`Калорії цього тижня, ціль ${f0(1700)} ккал`);
   });
 });
 

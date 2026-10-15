@@ -3,5 +3,6 @@ export * from './defaults';
 export * from './dates';
 export * from './format';
 export * from './schemas';
+export * from './meals';
 export * from './ops';
 export * from './api';

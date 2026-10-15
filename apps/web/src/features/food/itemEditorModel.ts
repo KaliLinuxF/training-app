@@ -1,12 +1,13 @@
 /**
- * The item editor («Позиція» / «Нова позиція», a second sheet over the day sheet): a local draft of
- * one estimate row. Every change goes through `editDraft`, so kcal follow exactly the rules of the
- * rows (rescale on the device, «змінено» for the model, pins). Nothing reaches the list until
- * «Готово» / «Додати позицію»; ✕ drops it. Pure; the estimate reducer holds the state.
+ * The item editor («Позиція» / «Нова позиція», a sheet stacked over the meal editor): a local draft
+ * of one position. Every change goes through `editDraft`, so kcal and Б · Ж · В follow exactly the
+ * rules of the rows (rescale on the device, «змінено» for the model, pins). Nothing reaches the
+ * list until «Готово» / «Додати позицію»; ✕ drops it. Pure; the estimate reducer holds the state.
  */
-import { rankFoods, type FoodEstimateItem, type FoodItem } from '@legko/shared';
+import { MACRO_KEYS, rankFoods, type FoodEstimateItem, type FoodItem, type MacroKey } from '@legko/shared';
 import {
   dishKcal,
+  draftMacros,
   draftStatus,
   editDraft,
   emptyDraft,
@@ -17,7 +18,7 @@ import {
   sameText,
   type DraftItem,
 } from './drafts';
-import { parseKcal } from './model';
+import { dishItem, parseKcal } from './model';
 import {
   BASIC_UNITS,
   composePortion,
@@ -29,7 +30,7 @@ import {
   readPortion,
   roundAmount,
   sanitizeAmountInput,
-  scaleKcal,
+  scaleItem,
   stepAmount,
   unitGroup,
   type PortionParts,
@@ -47,9 +48,9 @@ export interface ItemEditorState {
   unit: UnitKey;
   /** The portion is a plain text field: it is not «<number> <unit>», or she chose «Порція текстом». */
   textMode: boolean;
-  /** «Вписати вручну»: kcal is a field she types in. */
+  /** «Вписати вручну»: kcal and Б · Ж · В are fields she types in. */
   manualKcal: boolean;
-  /** The frequent dish she picked: its kcal follow her amount while the name is still that dish. */
+  /** The frequent dish she picked: its kcal and macros follow her amount while the name is still that dish. */
   dish: FoodEstimateItem | null;
   /**
    * The model's remark from a recalculation asked for here. It is about her draft, so it joins the
@@ -62,7 +63,7 @@ export type EditorAction =
   | { type: 'name'; value: string }
   /** «повернути: <назва>»: the model's name back. */
   | { type: 'restoreName' }
-  /** A «Часті страви» suggestion: its name, portion and kcal (pinned: no model needed). */
+  /** A «Часті страви» suggestion: its name, portion, kcal and macros (pinned: no model needed). */
   | { type: 'dish'; dish: FoodEstimateItem }
   | { type: 'amount'; text: string }
   | { type: 'step'; dir: 1 | -1 }
@@ -71,6 +72,8 @@ export type EditorAction =
   | { type: 'portionText'; value: string }
   | { type: 'textMode'; on: boolean }
   | { type: 'kcal'; value: string }
+  /** Grams of one macronutrient she types (pins Б · Ж · В). */
+  | { type: 'macro'; key: MacroKey; value: string }
   | { type: 'manualKcal' };
 
 /** Unit the amount field starts with when the portion says none. */
@@ -96,7 +99,7 @@ function portionFields(
 export function openEditor(row: DraftItem): ItemEditorState {
   const dish =
     row.pinned && row.fromDish
-      ? { name: row.name, portion: row.portion, kcal: parseKcal(row.kcalText) }
+      ? { name: row.name, portion: row.portion, kcal: parseKcal(row.kcalText), ...draftMacros(row) }
       : null;
   return {
     item: row,
@@ -110,7 +113,8 @@ export function openEditor(row: DraftItem): ItemEditorState {
 /** The editor on a row she adds; it joins the list on «Додати позицію». */
 export function newEditor(itemId: string): ItemEditorState {
   return {
-    item: emptyDraft(itemId),
+    // A row she adds is recorded in «Часті страви» with the meal.
+    item: { ...emptyDraft(itemId), fresh: true },
     original: null,
     amountText: '',
     unit: DEFAULT_UNIT,
@@ -129,16 +133,16 @@ export function editorChanged(s: ItemEditorState): boolean {
 export const canSave = (s: ItemEditorState): boolean => isNamed(s.item);
 
 /**
- * While the name is still the picked dish's, its kcal follow her amount (and stay hers: pinned).
- * Another name, or an amount the dish cannot be scaled to, lets the dish go.
+ * While the name is still the picked dish's, its kcal and macros follow her amount (and stay hers:
+ * pinned). Another name, or an amount the dish cannot be scaled to, lets the dish go.
  */
 function followDish(s: ItemEditorState): ItemEditorState {
   const { dish, item } = s;
   if (!dish) return s;
   if (!sameText(item.name, dish.name)) return { ...s, dish: null };
-  const kcal = sameText(item.portion, dish.portion) ? dish.kcal : scaleKcal(dish, item.portion);
-  if (kcal === null) return { ...s, dish: null };
-  return { ...s, item: dishKcal(item, kcal) };
+  const scaled = sameText(item.portion, dish.portion) ? dish : scaleItem(dish, item.portion);
+  if (scaled === null) return { ...s, dish: null };
+  return { ...s, item: dishKcal(item, scaled) };
 }
 
 /**
@@ -149,7 +153,9 @@ function followDish(s: ItemEditorState): ItemEditorState {
 function withPortion(s: ItemEditorState, portion: string): ItemEditorState {
   const item = editDraft(s.item, 'portion', portion);
   if (s.dish && !s.textMode && parseAmount(s.amountText) === null) {
-    return { ...s, item: { ...item, kcalText: s.item.kcalText, pinned: true, fromDish: true } };
+    const { kcalText, proteinText, fatText, carbsText, macrosPinned } = s.item;
+    const waiting = { kcalText, proteinText, fatText, carbsText, macrosPinned, pinned: true, fromDish: true };
+    return { ...s, item: { ...item, ...waiting } };
   }
   return followDish({ ...s, item });
 }
@@ -178,10 +184,11 @@ export function editorReducer(s: ItemEditorState, action: EditorAction): ItemEdi
       return base ? editorReducer(s, { type: 'name', value: base.name }) : s;
     }
     case 'dish': {
-      const dish = { name: action.dish.name, portion: action.dish.portion, kcal: action.dish.kcal };
+      const { name, portion, kcal, protein, fat, carbs } = action.dish;
+      const dish = { name, portion, kcal, protein, fat, carbs };
       let item = editDraft(s.item, 'name', dish.name);
       item = editDraft(item, 'portion', dish.portion);
-      item = dishKcal(item, dish.kcal);
+      item = dishKcal(item, dish);
       return { ...s, ...portionFields(dish.portion, s.unit), item, dish };
     }
     case 'amount':
@@ -210,6 +217,9 @@ export function editorReducer(s: ItemEditorState, action: EditorAction): ItemEdi
     }
     case 'kcal':
       return { ...s, item: editDraft(s.item, 'kcal', action.value), dish: null, manualKcal: true };
+    case 'macro':
+      // Kcal still follow a picked dish; her grams are pinned (an amount change releases them).
+      return { ...s, item: editDraft(s.item, action.key, action.value), manualKcal: true };
     case 'manualKcal':
       return { ...s, manualKcal: true };
   }
@@ -273,12 +283,17 @@ export type KcalSource =
   | { kind: 'scaled'; group: UnitGroup }
   | { kind: 'needsAi'; isNew: boolean }
   | { kind: 'dish' }
-  | { kind: 'manual' }
+  /** `rescaled`: Б · Ж · В follow her kcal (known, not typed by her). */
+  | { kind: 'manual'; rescaled?: true }
   | { kind: 'empty' };
 
 export function kcalSource(s: ItemEditorState): KcalSource {
   const { item } = s;
-  if (item.pinned) return item.fromDish ? { kind: 'dish' } : { kind: 'manual' };
+  if (item.pinned) {
+    if (item.fromDish) return { kind: 'dish' };
+    const rescaled = !item.macrosPinned && MACRO_KEYS.some((k) => draftMacros(item)[k] !== null);
+    return rescaled ? { kind: 'manual', rescaled: true } : { kind: 'manual' };
+  }
   if (!isNamed(item)) return { kind: 'empty' };
   if (needsRecalc(item)) return { kind: 'needsAi', isNew: item.base === null };
   if (draftStatus(item) === 'scaled') {
@@ -302,7 +317,7 @@ export function kcalNote(source: KcalSource): string | null {
     case 'dish':
       return 'як у «Частих стравах»';
     case 'manual':
-      return 'вписано вручну';
+      return source.rescaled ? 'Б · Ж · В перераховано за калоріями' : 'вписано вручну';
     case 'model':
     case 'empty':
       return null;
@@ -331,7 +346,7 @@ export function dishSuggestions(
         ),
     )
     .slice(0, limit)
-    .map((f) => ({ name: f.name, portion: f.portion, kcal: f.kcal }));
+    .map(dishItem);
 }
 
 /** The model's name, when hers is another one («повернути: Борщ»). */

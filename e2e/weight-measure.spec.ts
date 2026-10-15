@@ -1,3 +1,5 @@
+import { MEALS_TODAY } from './fixtures/data';
+import { TODAY } from './support/env';
 import { expect, test } from './support/test';
 
 test.describe('weigh-in sheet', () => {
@@ -153,5 +155,35 @@ test.describe('measurements sheet', () => {
     await expect.poll(async () => (await server.getData()).measures.at(-1)?.date).toBe('2026-10-05');
     await app.goto('/calendar?date=2026-10-12');
     await expect(app.region('12 жовтня 2026')).not.toContainText('Груди');
+  });
+});
+
+test.describe('on a day with meals', () => {
+  test.use({ seed: 'meals' });
+
+  test('a weigh-in and measurements saved from the menu leave the day’s meals as they are', async ({
+    app,
+    server,
+  }) => {
+    await app.goto('/');
+    let sheet = await app.record('Вага');
+    await sheet.getByRole('textbox', { name: 'Вага', exact: true }).fill('65,2');
+    await app.save(sheet);
+    sheet = await app.record('Заміри');
+    await sheet.locator('input[name="waist"]').fill('69,5');
+    await app.save(sheet);
+
+    await expect
+      .poll(async () => {
+        const d = await server.getData();
+        return {
+          kg: d.weights.find((w) => w.date === TODAY)?.kg,
+          waist: d.measures.find((m) => m.date === TODAY)?.waist,
+        };
+      })
+      .toEqual({ kg: 65.2, waist: 69.5 });
+    const day = (await server.getData()).days[TODAY];
+    expect(day?.meals).toEqual(MEALS_TODAY);
+    expect(day).toMatchObject({ kcal: 460, trained: null, types: [], notes: '' });
   });
 });

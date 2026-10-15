@@ -5,6 +5,8 @@ import { AppearanceCard } from './AppearanceCard';
 import { DataCard } from './DataCard';
 import { GoalsCard } from './GoalsCard';
 import type { SettingsSectionId } from './listModel';
+import { MacroGoalsCard } from './MacroGoalsCard';
+import { MealTypesCard } from './MealTypesCard';
 import { REMINDER_ORDER } from './model';
 import { NotificationsCard } from './NotificationsCard';
 import { ReminderCard } from './ReminderCard';
@@ -32,8 +34,14 @@ export const SECTION_BODIES: Readonly<Record<SettingsSectionId, (props: SectionB
       ))}
     </>
   ),
-  goals: ({ settings }) => <GoalsCard settings={settings} />,
+  goals: ({ settings, headingLevel }) => (
+    <>
+      <GoalsCard settings={settings} />
+      <MacroGoalsCard goals={settings.macroGoals} headingLevel={headingLevel} />
+    </>
+  ),
   workouts: ({ settings }) => <WorkoutTypesCard customTypes={settings.customTypes} />,
+  meals: ({ settings }) => <MealTypesCard mealTypes={settings.mealTypes} />,
   // In the desktop pane (h3 titles) the pane's own region «Вигляд» names the card.
   appearance: ({ themePref, setThemePref, headingLevel }) => (
     <AppearanceCard pref={themePref} onChange={setThemePref} inPane={headingLevel === 'h3'} />

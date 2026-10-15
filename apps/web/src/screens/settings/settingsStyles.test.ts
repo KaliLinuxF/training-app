@@ -42,3 +42,45 @@ describe('the push badge on the selected «Нагадування» row (desktop
     }
   });
 });
+
+describe('«Прийоми їжі» and «Б · Ж · В на день»', () => {
+  const meals = readCss('screens/settings/MealTypesCard.module.css');
+  const macros = readCss('screens/settings/MacroGoalsCard.module.css');
+  const px = (value: string | undefined) => parseFloat(value ?? 'NaN');
+
+  it('keeps every text field at 16px (iOS zooms into anything smaller) and at least 44px tall', () => {
+    expect(px(cssValue(meals, '.name', 'font-size'))).toBe(16);
+    expect(px(cssValue(meals, '.name', 'min-height'))).toBeGreaterThanOrEqual(44);
+    expect(px(cssValue(meals, '.input', 'font-size'))).toBe(16);
+    expect(px(cssValue(meals, '.input', 'min-height'))).toBeGreaterThanOrEqual(44);
+    expect(px(cssValue(macros, '.input', 'font-size'))).toBe(16);
+    expect(px(cssValue(macros, '.input', 'height'))).toBeGreaterThanOrEqual(44);
+    expect(px(cssValue(macros, '.input', 'width'))).toBe(96);
+  });
+
+  it('gives the view rows 44px and the edit row three 44px buttons next to a field that may shrink', () => {
+    expect(px(cssValue(meals, '.row', 'min-height'))).toBeGreaterThanOrEqual(44);
+    expect(cssValue(meals, '.editRow', 'grid-template-columns')).toBe('minmax(0, 1fr) repeat(3, 44px)');
+    expect(cssValue(meals, '.name', 'min-width')).toBe('0');
+  });
+
+  it('dims an aria-disabled ↑ / ↓ like a disabled glyph button', () => {
+    expect(cssValue(meals, ".control[aria-disabled='true']", 'color')).toBe('var(--faint)');
+    expect(cssValue(meals, ".list .control[aria-disabled='true']:active", 'transform')).toBe('none');
+  });
+
+  it.each(THEMES)('keeps the notes and errors readable on their surfaces (%s)', (theme) => {
+    expect(tokenContrast(theme, cssValue(meals, '.note', 'color'), 'var(--paper)')).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(tokenContrast(theme, cssValue(macros, '.note', 'color'), 'var(--card)')).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(tokenContrast(theme, cssValue(meals, '.error', 'color'), 'var(--card)')).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    expect(tokenContrast(theme, cssValue(macros, '.error', 'color'), 'var(--card)')).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+});

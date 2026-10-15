@@ -28,18 +28,21 @@ const STATUS = '/api/food/status';
 
 const result: FoodEstimate = {
   items: [
-    { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320 },
-    { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60 },
+    { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, protein: 9, fat: 6, carbs: 58 },
+    { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60, protein: 3, fat: 3, carbs: 5 },
   ],
   comment: 'Порцію вівсянки оцінено приблизно',
 };
+
+/** Default recalculation macros by position: 10 / 1 / 20 g, 20 / 2 / 40 g, … */
+const recalcMacros = (i: number) => ({ protein: 10 * (i + 1), fat: i + 1, carbs: 20 * (i + 1) });
 
 interface FakeEstimator extends FoodEstimator {
   inputs: FoodEstimateInput[];
   /** What the next calls do; default: resolve with `result`. */
   next: (() => FoodEstimate | Promise<FoodEstimate>) | null;
   recalcInputs: FoodRecalcInput[];
-  /** What the next recalculations do; default: 100, 200, 300… kcal by position. */
+  /** What the next recalculations do; default: 100, 200, 300… kcal (and `recalcMacros`) by position. */
   nextRecalc: ((input: FoodRecalcInput) => FoodRecalculation | Promise<FoodRecalculation>) | null;
 }
 
@@ -56,7 +59,11 @@ function fakeEstimator(): FakeEstimator {
     async recalculate(input) {
       fake.recalcInputs.push(input);
       if (fake.nextRecalc) return fake.nextRecalc(input);
-      return { kcal: input.items.map((_, i) => 100 * (i + 1)), comment: 'Перераховано' };
+      return {
+        kcal: input.items.map((_, i) => 100 * (i + 1)),
+        macros: input.items.map((_, i) => recalcMacros(i)),
+        comment: 'Перераховано',
+      };
     },
   };
   return fake;
@@ -298,8 +305,8 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
     expect(await json<FoodEstimateResponse>(res)).toEqual({
       photoId: null,
       items: [
-        { name: 'Вівсянка на молоці з бананом', portion: '300 г', kcal: 100 },
-        { name: 'Кава без цукру', portion: '', kcal: 200 },
+        { name: 'Вівсянка на молоці з бананом', portion: '300 г', kcal: 100, ...recalcMacros(0) },
+        { name: 'Кава без цукру', portion: '', kcal: 200, ...recalcMacros(1) },
       ],
       totalKcal: 300,
       comment: 'Перераховано',
@@ -319,8 +326,8 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
     const body = await json<FoodEstimateResponse>(res);
     expect(body.photoId).toBe(id);
     expect(body.items).toEqual([
-      { ...corrected[0], kcal: 100 },
-      { ...corrected[1], kcal: 200 },
+      { ...corrected[0], kcal: 100, ...recalcMacros(0) },
+      { ...corrected[1], kcal: 200, ...recalcMacros(1) },
     ]);
     expect(estimator.recalcInputs).toEqual([{ items: corrected, imageBase64: image.full }]);
     expect(photoRows()).toBe(1);
@@ -334,18 +341,40 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
     expect(estimator.inputs).toHaveLength(0);
   });
 
-  it('clamps the new kcal to the API limits', async () => {
+  it('clamps the new kcal and macros to the API limits', async () => {
     const { estimate, estimator } = await setup();
-    estimator.nextRecalc = () => ({ kcal: [99_999, -40.2], comment: '' });
+    estimator.nextRecalc = () => ({
+      kcal: [99_999, -40.2],
+      macros: [
+        { protein: 4000, fat: 0.3, carbs: -2 },
+        { protein: Number.NaN, fat: null, carbs: 12.24 },
+      ],
+      comment: '',
+    });
     const body = await json<FoodEstimateResponse>(await estimate({ date: DATE, items: corrected }));
     expect(body.items.map((item) => item.kcal)).toEqual([LIMITS.kcal.max, 0]);
+    expect(body.items.map(({ protein, fat, carbs }) => [protein, fat, carbs])).toEqual([
+      [LIMITS.macro.max, 0.5, 0],
+      [null, null, 12],
+    ]);
     expect(body.totalKcal).toBe(LIMITS.kcal.max);
+  });
+
+  it('returns null macros when the estimator gives none for an item', async () => {
+    const { estimate, estimator } = await setup();
+    estimator.nextRecalc = () => ({
+      kcal: [300, 50],
+      macros: [{ protein: 20, fat: 10, carbs: 30 }],
+      comment: '',
+    });
+    const body = await json<FoodEstimateResponse>(await estimate({ date: DATE, items: corrected }));
+    expect(body.items[1]).toEqual({ ...corrected[1], kcal: 50, protein: null, fat: null, carbs: null });
   });
 
   it('502 ai_failed when the estimator does not return one kcal per item', async () => {
     const { estimate, estimator, status } = await setup();
     for (const kcal of [[300], [300, 50, 10]]) {
-      estimator.nextRecalc = () => ({ kcal, comment: '' });
+      estimator.nextRecalc = () => ({ kcal, macros: [], comment: '' });
       const res = await estimate({ date: DATE, items: corrected });
       expect(res.status).toBe(502);
       expect(await json(res)).toEqual({ error: 'ai_failed', message: expect.any(String) });

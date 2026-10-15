@@ -1,9 +1,9 @@
-import { applyOps, emptyData, type AppData, type FoodUse, type Op } from '@legko/shared';
+import { applyOps, emptyData, normalizeDay, type AppData, type Meal, type Op } from '@legko/shared';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FoodAdd } from '@/features/food';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as ApiModule from '@/lib/api';
 import type * as DataModule from '@/store/data';
 import { useDataStore } from '@/store/data';
 import { initialSyncState } from '@/store/state';
@@ -23,6 +23,8 @@ const mocks = vi.hoisted(() => ({
   idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() },
   /** Every `commit()` call the sheets make, in order. */
   commits: [] as Op[][],
+  /** The next `commit()` is refused (nothing applied), as the store does with an op it cannot accept. */
+  refuseNext: false,
 }));
 vi.mock('idb-keyval', () => mocks.idb);
 vi.mock('@/lib/useToday', () => ({ useToday: () => '2026-10-10' }));
@@ -32,62 +34,18 @@ vi.mock('@/store/data', async (importOriginal) => {
     ...actual,
     commit: (...ops: Op[]) => {
       mocks.commits.push(ops);
+      if (mocks.refuseNext) {
+        mocks.refuseNext = false;
+        return false;
+      }
       return actual.commit(...ops);
     },
   };
 });
-
-const BORSCHT: FoodUse = { name: 'Борщ', portion: '300 г', kcal: 420 };
-const addOf = (patch: Partial<FoodAdd> = {}): FoodAdd => ({
-  line: 'Борщ (300 г) — 420 ккал',
-  consumed: '',
-  kcal: 420,
-  photoId: 'photo_bbbbbbbbbbbbbbbb',
-  items: [],
-  uses: [BORSCHT],
-  ...patch,
-});
-
-interface FoodAssistStub {
-  foodText: string;
-  onAdd: (add: FoodAdd) => void;
-  onPendingChange?: (pending: boolean) => void;
-}
-
-// The food feature is built separately; stand-ins with the documented props (the text helpers are real).
-vi.mock('@/features/food', async () => {
-  const tail = await import('@/features/food/tail');
-  return {
-    ...tail,
-    FoodAssist: ({ foodText, onAdd, onPendingChange }: FoodAssistStub) => (
-      <div>
-        <span data-testid="assist-food-text">{foodText}</span>
-        <button type="button" onClick={() => onAdd(addOf())}>
-          test-add-food
-        </button>
-        <button type="button" onClick={() => onAdd(addOf({ consumed: 'борщ', photoId: null }))}>
-          test-estimate-typed
-        </button>
-        <button type="button" onClick={() => onAdd(addOf({ photoId: 'bad id!' }))}>
-          test-add-bad-photo
-        </button>
-        <button type="button" onClick={() => onPendingChange?.(true)}>
-          test-estimate-pending
-        </button>
-      </div>
-    ),
-    PhotoStrip: ({ ids, onRemove }: { ids: readonly string[]; onRemove?: (id: string) => void }) => (
-      <ul aria-label="test-photos">
-        {ids.map((id) => (
-          <li key={id}>
-            <button type="button" onClick={() => onRemove?.(id)}>
-              remove {id}
-            </button>
-          </li>
-        ))}
-      </ul>
-    ),
-  };
+// The real meal editor renders in these sheets; its AI status request never answers (no AI row).
+vi.mock('@/lib/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof ApiModule>();
+  return { ...actual, api: { ...actual.api, foodStatus: vi.fn(() => new Promise(() => undefined)) } };
 });
 
 function seed(): AppData {
@@ -99,8 +57,22 @@ function seed(): AppData {
   return data;
 }
 
+const LUNCH: Meal = {
+  id: 'lunch0000001',
+  type: 'Обід',
+  time: '13:10',
+  text: 'Борщ',
+  kcal: 560,
+  protein: 21,
+  fat: 19,
+  carbs: 64,
+};
+
 function setData(data: AppData) {
-  useDataStore.setState({ data, sync: { ...initialSyncState(), online: true, loaded: true, lastSyncedAt: 1 } });
+  useDataStore.setState({
+    data,
+    sync: { ...initialSyncState(), online: true, loaded: true, lastSyncedAt: 1 },
+  });
 }
 
 /** What a server refresh does: the store gets another device's changes. */
@@ -113,6 +85,8 @@ const dialog = () => screen.getByRole('dialog');
 const saveButton = () => screen.getByRole('button', { name: 'Зберегти' });
 const textbox = (name: string | RegExp) => screen.getByRole('textbox', { name }) as HTMLInputElement;
 const discardDialog = () => screen.queryByRole('alertdialog', { name: DISCARD_CONFIRM.title });
+/** The day's meal list (the «Їжа» sheet and the «Запис дня» food field). */
+const mealList = () => screen.getByRole('region', { name: 'Прийоми їжі' });
 
 /** Answers the open «Є незбережені зміни» dialog (the answer resolves a promise: flush it). */
 async function answer(label: string) {
@@ -134,7 +108,15 @@ function renderHost(path = '/') {
   return memory;
 }
 
-beforeAll(() => installMatchMedia());
+beforeAll(() => {
+  installMatchMedia();
+  // The meal editor reads the clock: 10:00 on the day the app thinks is today.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 10, 10, 0));
+});
+afterAll(() => {
+  vi.useRealTimers();
+});
 beforeEach(() => {
   stubScrollTo();
   const idb = fakeIdb();
@@ -142,6 +124,7 @@ beforeEach(() => {
   mocks.idb.setMany.mockImplementation(idb.setMany);
   mocks.idb.delMany.mockImplementation(idb.delMany);
   mocks.commits.length = 0;
+  mocks.refuseNext = false;
   useUiStore.setState({ sheet: null, toast: null, confirm: null });
   setData(seed());
 });
@@ -171,19 +154,21 @@ describe('deep links', () => {
     expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('true');
     // ✓ is pre-selected, so the types are offered right away.
     expect(screen.getByRole('button', { name: 'Кардіо' })).toBeTruthy();
-    expect(screen.queryByRole('textbox', { name: 'Що я їла' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Прийоми їжі' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Додати прийом їжі' })).toBeNull();
     expect(memory.history.at(-1)).toBe('/');
   });
 
-  it('/?sheet=day opens the full day, /?sheet=food and /?sheet=workout the short sheets', () => {
+  it('/?sheet=day opens the full day, /?sheet=food the day’s meals, /?sheet=workout the short sheet', () => {
     const memory = renderHost('/?sheet=day');
     expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('false');
-    expect(textbox('Що я їла')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Додати прийом їжі' })).toBeTruthy();
     expect(memory.history.at(-1)).toBe('/');
 
     act(() => memory.navigate('/?sheet=food'));
     expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Підсумок дня' })).toBeTruthy();
     act(() => memory.navigate('/?sheet=workout'));
     expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('false');
@@ -192,14 +177,20 @@ describe('deep links', () => {
     expect(screen.getByRole('dialog', { name: 'Тренування' })).toBeTruthy();
   });
 
-  it('a notification tap over a short «Їжа» sheet with unsaved changes asks first', async () => {
+  it('a new meal is not linkable: /?sheet=meal is ignored and cleaned', () => {
+    const memory = renderHost('/?sheet=meal');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(memory.history.at(-1)).toBe('/');
+  });
+
+  it('a notification tap over a new meal she is typing asks first', async () => {
     const memory = renderHost('/');
-    act(() => ui.openSheet(TODAY, 'food'));
+    act(() => ui.openSheet(TODAY, 'meal'));
     fireEvent.change(textbox('Що я їла'), { target: { value: 'Борщ' } });
     act(() => memory.navigate('/?sheet=day&trained=1'));
     expect(discardDialog()).toBeTruthy();
     await answer('Залишитись');
-    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Прийом їжі' })).toBeTruthy();
     expect(textbox('Що я їла').value).toBe('Борщ');
 
     act(() => memory.navigate('/?sheet=day&trained=1'));
@@ -211,7 +202,7 @@ describe('deep links', () => {
   it('a notification tap over a sheet with unsaved changes asks first', async () => {
     const memory = renderHost('/');
     act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.change(textbox('Що я їла'), { target: { value: 'Вівсянка, ще пишу…' } });
+    fireEvent.change(textbox('Нотатки'), { target: { value: 'Сон 8 год, ще пишу…' } });
 
     act(() => memory.navigate('/?sheet=day&trained=1'));
     expect(memory.history.at(-1)).toBe('/');
@@ -219,7 +210,7 @@ describe('deep links', () => {
     expect(screen.getByText(DISCARD_CONFIRM.body ?? '')).toBeTruthy();
     await answer('Залишитись');
     expect(discardDialog()).toBeNull();
-    expect(textbox('Що я їла').value).toBe('Вівсянка, ще пишу…');
+    expect(textbox('Нотатки').value).toBe('Сон 8 год, ще пишу…');
 
     act(() => memory.navigate('/?sheet=weight'));
     await answer('Закрити');
@@ -245,7 +236,7 @@ describe('deep links', () => {
   });
 });
 
-/** The «Що записати?» row whose name starts with `title` («Їжа Опис або фото 1 500 ккал»). */
+/** The «Що записати?» row whose name starts with `title` («Їжа Новий прийом їжі 1 500 ккал»). */
 const menuRow = (title: string) => within(dialog()).getByRole('button', { name: new RegExp(`^${title}`) });
 
 /** Taps a row like a finger or Enter would: the row has focus, and it is gone after the swap. */
@@ -261,20 +252,19 @@ describe('«Що записати?» menu', () => {
     act(() => ui.openSheet(TODAY, 'menu'));
     const menu = screen.getByRole('dialog', { name: 'Що записати?' });
     for (const title of ['Їжа', 'Тренування', 'Вага', 'Заміри']) expect(menuRow(title)).toBeTruthy();
-    expect(within(menu).getByRole('button', { name: 'Повний запис дня' }).textContent).toBe('Повний запис дня →');
-    expect(within(menu).getByRole('button', { name: /^Їжа/ }).textContent).toContain('Опис або фото');
+    expect(within(menu).getByRole('button', { name: 'Повний запис дня' }).textContent).toBe(
+      'Повний запис дня →',
+    );
+    expect(within(menu).getByRole('button', { name: /^Їжа/ }).textContent).toContain('Новий прийом їжі');
     expect(within(menu).queryByRole('button', { name: 'Зберегти' })).toBeNull();
     expect(within(menu).queryByRole('button', { name: 'Попередній день' })).toBeNull();
     expect(within(menu).queryByRole('textbox')).toBeNull();
     // Tab order: ✕, the four rows, «Повний запис дня».
-    expect(within(menu).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent?.split(' ')[0])).toEqual([
-      'Закрити',
-      'Їжа',
-      'Тренування',
-      'Вага',
-      'Заміри',
-      'Повний запис дня',
-    ]);
+    expect(
+      within(menu)
+        .getAllByRole('button')
+        .map((b) => b.getAttribute('aria-label') ?? b.textContent?.split(' ')[0]),
+    ).toEqual(['Закрити', 'Їжа', 'Тренування', 'Вага', 'Заміри', 'Повний запис дня']);
     // Today: no date line.
     expect(within(menu).queryByText(/жовтня ·/)).toBeNull();
   });
@@ -295,7 +285,13 @@ describe('«Що записати?» menu', () => {
 
   it('a meal without kcal reads «Записано» on the Їжа row, like Home', () => {
     const seeded = seed();
-    seeded.days[TODAY] = { food: 'Вівсянка з бананом, кава', kcal: null, trained: null, types: [], notes: '' };
+    seeded.days[TODAY] = {
+      food: 'Вівсянка з бананом, кава',
+      kcal: null,
+      trained: null,
+      types: [],
+      notes: '',
+    };
     setData(seeded);
     renderHost();
     act(() => ui.openSheet(TODAY, 'menu'));
@@ -313,7 +309,7 @@ describe('«Що записати?» menu', () => {
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Повний запис дня' }));
     expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
     expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
-    expect(textbox('Що я їла').value).toBe('Омлет');
+    expect(within(mealList()).getByRole('button', { name: /^Їжа за день: омлет/ })).toBeTruthy();
     expect(useUiStore.getState().sheet).toMatchObject({ date: '2026-10-09', mode: 'day' });
   });
 
@@ -326,7 +322,12 @@ describe('«Що записати?» menu', () => {
     expect(screen.getByRole('dialog', { name: 'Запис дня' })).toBeTruthy();
     expect(screen.getByText('10 жовтня 2026')).toBeTruthy();
     expect(screen.getByRole('group', { name: 'Тренування' })).toBeTruthy();
-    for (const name of ['Що я їла', 'Калорії за день', 'Вага (за бажанням)', 'Нотатки']) expect(textbox(name)).toBeTruthy();
+    // The food is the day's meal list (nothing yet) with «+ Прийом їжі»; no food text or day kcal any more.
+    expect(screen.getByText('Ще нічого не записано')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Додати прийом їжі' })).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Що я їла' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Калорії за день' })).toBeNull();
+    for (const name of ['Вага (за бажанням)', 'Нотатки']) expect(textbox(name)).toBeTruthy();
     expect(textbox(/^Талія/)).toBeTruthy();
   });
 
@@ -351,33 +352,30 @@ describe('«Що записати?» menu', () => {
     expect(discardDialog()).toBeNull();
     expect(screen.getByRole('dialog', { name: 'Контрольне зважування' })).toBe(menu);
   });
-});
 
-describe('short «Їжа» sheet', () => {
-  it('swaps in place: the same dialog, now «Їжа», only food and kcal, focus on the dialog, scrolled to the top', () => {
+  it('a row swaps in place: the same dialog, scrolled to the top, focus on the dialog', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'menu'));
     const menu = screen.getByRole('dialog', { name: 'Що записати?' });
     Object.defineProperty(menu, 'scrollTop', { value: 120, writable: true, configurable: true });
 
-    pick('Їжа');
+    pick('Вага');
 
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
-    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBe(menu);
+    expect(screen.getByRole('dialog', { name: 'Контрольне зважування' })).toBe(menu);
     expect(menu.scrollTop).toBe(0);
     // The tapped row is gone: focus went to the dialog, not to <body>.
     expect(document.activeElement).toBe(menu);
-    expect(screen.getByText('10 жовтня 2026')).toBeTruthy();
-    expect(textbox('Що я їла').value).toBe('');
-    expect(textbox('Калорії за день')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Зберегти' })).toBeTruthy();
-    expect(screen.queryByRole('group', { name: 'Тренування' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Нотатки' })).toBeNull();
-    expect(screen.queryByRole('button', { name: '+ Нотатка до дня' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: /Вага/ })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: /^Талія/ })).toBeNull();
-    // No visible «Що я їла» label: the heading says it.
-    expect(screen.queryByText('Що я їла')).toBeNull();
+  });
+
+  it('Їжа swaps in place to a new meal, with «Що я їла» focused (not the dialog)', () => {
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'menu'));
+    const menu = dialog();
+    pick('Їжа');
+    expect(screen.getByRole('dialog', { name: 'Прийом їжі' })).toBe(menu);
+    expect(document.activeElement).toBe(textbox('Що я їла'));
+    expect(useUiStore.getState().sheet).toMatchObject({ date: TODAY, mode: 'meal' });
   });
 
   it('leaves focus alone when it did not fall to <body>', () => {
@@ -393,102 +391,33 @@ describe('short «Їжа» sheet', () => {
       outside.remove();
     }
   });
+});
 
-  it('a chip + «Зберегти» saves the food and kcal, keeps the stored workout and notes, and records the dish', () => {
-    const seeded = seed();
-    seeded.days[TODAY] = { food: 'Салат', kcal: 300, trained: true, types: ['Йога'], notes: 'Сон 8 год' };
-    setData(seeded);
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'menu'));
-    pick('Їжа');
-    expect(textbox('Що я їла').value).toBe('Салат');
-    fireEvent.click(screen.getByRole('button', { name: 'test-add-food' }));
-    expect(textbox('Калорії за день').value).toBe('720');
-    fireEvent.click(saveButton());
-
-    expect(mocks.commits).toEqual([
-      [
-        {
-          kind: 'day.put',
-          date: TODAY,
-          value: {
-            food: 'Салат\nБорщ (300 г) — 420 ккал',
-            kcal: 720,
-            trained: true,
-            types: ['Йога'],
-            notes: 'Сон 8 год',
-            photos: ['photo_bbbbbbbbbbbbbbbb'],
-          },
-        },
-        { kind: 'food.use', date: TODAY, value: BORSCHT },
-      ],
-    ]);
-    expect(useUiStore.getState().sheet).toBeNull();
-    expect(useUiStore.getState().toast?.text).toBe('Збережено');
-  });
-
-  it('a stale device: a workout recorded elsewhere survives the food save', () => {
+describe('«Їжа» — the day’s meals', () => {
+  it('the list follows a server refresh (another device’s meal)', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'food'));
-    fireEvent.change(textbox('Що я їла'), { target: { value: 'Борщ' } });
-    refresh([{ kind: 'day.put', date: TODAY, value: { food: '', kcal: null, trained: true, types: ['Кардіо'], notes: 'Легко' } }]);
-    fireEvent.click(saveButton());
-    expect(data().days[TODAY]).toEqual({ food: 'Борщ', kcal: null, trained: true, types: ['Кардіо'], notes: 'Легко' });
-  });
-
-  it('with unsaved changes it asks before closing', async () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'menu'));
-    pick('Їжа');
-    fireEvent.change(textbox('Що я їла'), { target: { value: 'Вівсянка' } });
+    expect(screen.getByText('Ще нічого не записано за цей день')).toBeTruthy();
+    refresh([{ kind: 'meal.put', date: TODAY, value: LUNCH }]);
+    expect(within(mealList()).getByRole('button', { name: /^Обід о 13:10: борщ/ })).toBeTruthy();
+    // Nothing of hers to lose: closes without asking.
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    expect(discardDialog()).toBeTruthy();
-    expect(screen.getByText(DISCARD_CONFIRM.body ?? '')).toBeTruthy();
-    await answer('Залишитись');
-    expect(textbox('Що я їла').value).toBe('Вівсянка');
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await answer('Закрити');
+    expect(discardDialog()).toBeNull();
     expect(useUiStore.getState().sheet).toBeNull();
-    expect(mocks.commits).toEqual([]);
-  });
-
-  it('an estimate waiting in FoodAssist counts as unsaved work', () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'food'));
-    fireEvent.click(screen.getByRole('button', { name: 'test-estimate-pending' }));
-    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    expect(discardDialog()).toBeTruthy();
-  });
-
-  it('only validates its own blocks', () => {
-    const seeded = seed();
-    seeded.days[TODAY] = { food: '', kcal: null, trained: null, types: [], notes: 'а'.repeat(5040) };
-    setData(seeded);
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'food'));
-    fireEvent.change(textbox('Калорії за день'), { target: { value: '25000' } });
-    expect(screen.getByText(FIELD_ERRORS.kcal)).toBeTruthy();
-    expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(textbox('Калорії за день'), { target: { value: '1200' } });
-    // The over-long notes are not this sheet's business.
-    expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
-  });
-
-  it('‹ › keep the short sheet', () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'food'));
-    fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
-    expect(screen.getByRole('dialog', { name: 'Їжа' })).toBeTruthy();
-    expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
-    expect(textbox('Що я їла').value).toBe('Омлет');
-    expect(useUiStore.getState().sheet).toMatchObject({ date: '2026-10-09', mode: 'food' });
   });
 });
 
 describe('short «Тренування» sheet', () => {
   it('«Було» shows the types, «+ Нотатка до дня» opens and focuses the notes, the save keeps the food', () => {
     const seeded = seed();
-    seeded.days[TODAY] = { food: 'Омлет', kcal: 400, trained: null, types: [], notes: '', photos: ['photo_aaaaaaaaaaaaaaaa'] };
+    seeded.days[TODAY] = {
+      food: 'Омлет',
+      kcal: 400,
+      trained: null,
+      types: [],
+      notes: '',
+      photos: ['photo_aaaaaaaaaaaaaaaa'],
+    };
     setData(seeded);
     renderHost();
     act(() => ui.openSheet(TODAY, 'menu'));
@@ -498,7 +427,7 @@ describe('short «Тренування» sheet', () => {
     expect(screen.getByRole('group', { name: 'Тренування' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Кардіо' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: 'Що я їла' })).toBeNull();
-    expect(screen.queryByRole('textbox', { name: 'Калорії за день' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Прийоми їжі' })).toBeNull();
     expect(screen.queryByRole('textbox', { name: /Вага/ })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Було' }));
@@ -520,22 +449,18 @@ describe('short «Тренування» sheet', () => {
     fireEvent.change(notes, { target: { value: 'Легко' } });
     fireEvent.click(saveButton());
 
+    // Only what she changed, never the food.
     expect(mocks.commits).toEqual([
-      [
-        {
-          kind: 'day.put',
-          date: TODAY,
-          value: {
-            food: 'Омлет',
-            kcal: 400,
-            trained: true,
-            types: ['Кардіо'],
-            notes: 'Легко',
-            photos: ['photo_aaaaaaaaaaaaaaaa'],
-          },
-        },
-      ],
+      [{ kind: 'day.meta', date: TODAY, value: { trained: true, types: ['Кардіо'], notes: 'Легко' } }],
     ]);
+    expect(data().days[TODAY]).toEqual({
+      food: 'Омлет',
+      kcal: 400,
+      trained: true,
+      types: ['Кардіо'],
+      notes: 'Легко',
+      photos: ['photo_aaaaaaaaaaaaaaaa'],
+    });
   });
 
   it('a day with notes shows them open; an opened fold folds again on another day', () => {
@@ -562,7 +487,7 @@ describe('short «Тренування» sheet', () => {
     expect(screen.getByRole('button', { name: '+ Нотатка до дня' })).toBeTruthy();
   });
 
-  it('«✕» drops the stored types and keeps the food', () => {
+  it('«✕» drops the stored types and keeps the food (on the wire: { trained } only)', () => {
     const seeded = seed();
     seeded.days[TODAY] = { food: 'Омлет', kcal: 400, trained: true, types: ['Кардіо', 'Прес'], notes: '' };
     setData(seeded);
@@ -572,7 +497,27 @@ describe('short «Тренування» sheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Не було' }));
     expect(screen.queryByRole('button', { name: 'Прес' })).toBeNull();
     fireEvent.click(saveButton());
+    expect(mocks.commits).toEqual([[{ kind: 'day.meta', date: TODAY, value: { trained: false } }]]);
     expect(data().days[TODAY]).toEqual({ food: 'Омлет', kcal: 400, trained: false, types: [], notes: '' });
+  });
+
+  it('a workout saved on a meal day keeps every meal', () => {
+    const seeded = seed();
+    seeded.days[TODAY] = normalizeDay({
+      food: '',
+      kcal: null,
+      trained: null,
+      types: [],
+      notes: '',
+      meals: [LUNCH],
+    });
+    setData(seeded);
+    renderHost();
+    act(() => ui.openSheet(TODAY, 'workout'));
+    fireEvent.click(screen.getByRole('button', { name: 'Було' }));
+    fireEvent.click(saveButton());
+    expect(mocks.commits).toEqual([[{ kind: 'day.meta', date: TODAY, value: { trained: true } }]]);
+    expect(data().days[TODAY]).toMatchObject({ trained: true, meals: [LUNCH], kcal: 560 });
   });
 
   it('only validates its own blocks', () => {
@@ -618,7 +563,7 @@ describe('short «Тренування» sheet', () => {
 });
 
 describe('day record', () => {
-  it('records a workout with a new custom type, food from the assistant and saves', () => {
+  it('records a workout with a new custom type, notes and a weigh-in; the save is day.meta + weight.put', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'day'));
 
@@ -632,79 +577,45 @@ describe('day record', () => {
     expect(screen.getByRole('button', { name: 'Пілатес' }).getAttribute('aria-pressed')).toBe('true');
     expect(data().settings.customTypes).toEqual(['Йога', 'Пілатес']);
 
-    fireEvent.change(textbox('Що я їла'), { target: { value: 'Вівсянка' } });
-    expect(screen.getByTestId('assist-food-text').textContent).toBe('Вівсянка');
-    fireEvent.click(screen.getByRole('button', { name: 'test-add-food' }));
-    expect(textbox('Що я їла').value).toBe('Вівсянка\nБорщ (300 г) — 420 ккал');
-    fireEvent.click(screen.getByRole('button', { name: 'Плюс 50 ккал' }));
-    expect(textbox('Калорії за день').value).toBe('470');
-
+    fireEvent.change(textbox('Вага (за бажанням)'), { target: { value: '65,1' } });
     fireEvent.change(textbox('Нотатки'), { target: { value: 'Легко' } });
+    mocks.commits.length = 0;
     fireEvent.click(saveButton());
 
+    expect(mocks.commits).toEqual([
+      [
+        {
+          kind: 'day.meta',
+          date: TODAY,
+          value: { trained: true, types: ['Кардіо', 'Пілатес'], notes: 'Легко' },
+        },
+        { kind: 'weight.put', date: TODAY, kg: 65.1 },
+      ],
+    ]);
     expect(data().days[TODAY]).toEqual({
-      food: 'Вівсянка\nБорщ (300 г) — 420 ккал',
-      kcal: 470,
+      food: '',
+      kcal: null,
       trained: true,
       types: ['Кардіо', 'Пілатес'],
       notes: 'Легко',
-      photos: ['photo_bbbbbbbbbbbbbbbb'],
     });
     expect(useUiStore.getState().sheet).toBeNull();
     expect(useUiStore.getState().toast?.text).toBe('Збережено');
   });
 
-  it('an estimate replaces the meal she typed instead of repeating it', () => {
+  it('nothing changed: «Зберегти» writes nothing and still closes', () => {
     renderHost();
-    act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.change(textbox('Що я їла'), { target: { value: 'борщ' } });
-    fireEvent.click(screen.getByRole('button', { name: 'test-estimate-typed' }));
-    expect(textbox('Що я їла').value).toBe('Борщ (300 г) — 420 ккал');
-  });
-
-  it('records «Часті страви» usage only together with the saved day', () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.click(screen.getByRole('button', { name: 'test-add-food' }));
-    expect(data().foods).toEqual([]);
-    expect(mocks.commits).toEqual([]);
-
+    act(() => ui.openSheet('2026-10-09', 'day'));
     fireEvent.click(saveButton());
-    expect(mocks.commits).toHaveLength(1);
-    expect(mocks.commits[0]?.map((op) => op.kind)).toEqual(['day.put', 'food.use']);
-    expect(mocks.commits[0]?.[1]).toEqual({ kind: 'food.use', date: TODAY, value: BORSCHT });
-    expect(data().foods).toMatchObject([{ name: 'Борщ', count: 1, lastUsed: TODAY }]);
-  });
-
-  it('a discarded draft records no dish usage', async () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.click(screen.getByRole('button', { name: 'test-add-food' }));
-    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    await answer('Закрити');
+    expect(mocks.commits).toEqual([[]]);
     expect(useUiStore.getState().sheet).toBeNull();
-    expect(mocks.commits).toEqual([]);
-    expect(data().foods).toEqual([]);
-    expect(data().days[TODAY]).toBeUndefined();
-  });
-
-  it('an estimate waiting in FoodAssist counts as unsaved work', async () => {
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.click(screen.getByRole('button', { name: 'test-estimate-pending' }));
-    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    expect(discardDialog()).toBeTruthy();
-    await answer('Залишитись');
-    expect(useUiStore.getState().sheet).not.toBeNull();
-
-    // ‹ asks too; once she agrees, the next day starts clean (the old report does not carry over).
-    fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
-    expect(screen.getByText(DISCARD_ON_NAVIGATE_CONFIRM.body ?? '')).toBeTruthy();
-    await answer('Перейти');
-    expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
-    expect(discardDialog()).toBeNull();
-    expect(useUiStore.getState().sheet).toBeNull();
+    expect(data().days['2026-10-09']).toEqual({
+      food: 'Омлет',
+      kcal: 1500,
+      trained: false,
+      types: [],
+      notes: '',
+    });
   });
 
   it('Escape in the new-type input cancels it without closing the sheet', () => {
@@ -730,24 +641,18 @@ describe('day record', () => {
     expect((saveButton() as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(textbox(/^Талія/), { target: { value: '71' } });
-    fireEvent.change(textbox('Калорії за день'), { target: { value: '25 000' } });
-    expect(textbox('Калорії за день').value).toBe('25000');
-    expect(screen.getByText(FIELD_ERRORS.kcal)).toBeTruthy();
-    fireEvent.change(textbox('Калорії за день'), { target: { value: '1600' } });
-
     expect((saveButton() as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(saveButton());
     expect(data().weights.at(-1)).toEqual({ date: TODAY, kg: 64.8 });
     expect(data().measures.at(-1)).toEqual({ date: TODAY, chest: null, waist: 71, hips: null });
-    expect(data().days[TODAY]?.kcal).toBe(1600);
+    expect(data().days[TODAY]).toBeUndefined();
   });
 
-  it('caps the free text at the server limit and blocks an over-long text that got in anyway', () => {
+  it('caps the notes at the server limit and blocks an over-long text that got in anyway', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'day'));
-    expect(textbox('Що я їла').maxLength).toBe(5000);
     expect(textbox('Нотатки').maxLength).toBe(5000);
-    // `maxLength` stops typing, not a value set from code (e.g. an appended estimate line).
+    // `maxLength` stops typing, not a value set from code.
     fireEvent.change(textbox('Нотатки'), { target: { value: 'а'.repeat(5040) } });
     expect(screen.getByText(FIELD_ERRORS.text)).toBeTruthy();
     expect(textbox('Нотатки').getAttribute('aria-invalid')).toBe('true');
@@ -757,22 +662,23 @@ describe('day record', () => {
   it('when the store refuses the save, the sheet stays open with the draft and says so', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.change(textbox('Калорії за день'), { target: { value: '1500' } });
-    fireEvent.click(screen.getByRole('button', { name: 'test-add-bad-photo' }));
+    fireEvent.change(textbox('Нотатки'), { target: { value: 'Легко' } });
+    mocks.refuseNext = true;
     fireEvent.click(saveButton());
 
     expect(useUiStore.getState().sheet).not.toBeNull();
     expect(useUiStore.getState().toast?.text).not.toBe('Збережено');
     expect(screen.getByText(SAVE_FAILED)).toBeTruthy();
-    expect(textbox('Калорії за день').value).toBe('1920');
+    expect(saveButton().getAttribute('aria-describedby')).toBe(screen.getByText(SAVE_FAILED).id);
+    expect(textbox('Нотатки').value).toBe('Легко');
     expect(data().days[TODAY]).toBeUndefined();
 
-    // Editing hides the message; without the bad photo it saves.
-    fireEvent.click(screen.getByRole('button', { name: 'remove bad id!' }));
+    // Editing hides the message; then it saves.
+    fireEvent.change(textbox('Нотатки'), { target: { value: 'Легко!' } });
     expect(screen.queryByText(SAVE_FAILED)).toBeNull();
     fireEvent.click(saveButton());
     expect(useUiStore.getState().sheet).toBeNull();
-    expect(data().days[TODAY]?.kcal).toBe(1920);
+    expect(data().days[TODAY]?.notes).toBe('Легко!');
   });
 
   it('navigates days, re-initialising the draft; › is disabled at today', () => {
@@ -782,9 +688,11 @@ describe('day record', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
     expect(screen.getByText('9 жовтня 2026')).toBeTruthy();
     expect(screen.getByText('пʼятниця')).toBeTruthy();
-    expect(textbox('Що я їла').value).toBe('Омлет');
+    expect(within(mealList()).getByRole('button', { name: /^Їжа за день: омлет/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Не було' }).getAttribute('aria-pressed')).toBe('true');
-    expect((screen.getByRole('button', { name: 'Наступний день' }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole('button', { name: 'Наступний день' }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   it('asks in the app’s own dialog before throwing away unsaved changes (close and day navigation)', async () => {
@@ -807,7 +715,7 @@ describe('day record', () => {
     expect(textbox('Нотатки').value).toBe('Сон 8 год');
 
     fireEvent.click(screen.getByRole('button', { name: 'Попередній день' }));
-    expect(screen.getByText('Перейти до іншого дня без збереження?')).toBeTruthy();
+    expect(screen.getByText(DISCARD_ON_NAVIGATE_CONFIRM.body ?? '')).toBeTruthy();
     await answer('Залишитись');
     expect(screen.getByText('10 жовтня 2026')).toBeTruthy();
 
@@ -816,17 +724,6 @@ describe('day record', () => {
     expect(useUiStore.getState().sheet).toBeNull();
     expect(data().days[TODAY]).toBeUndefined();
     expect(native).not.toHaveBeenCalled();
-  });
-
-  it('removes an attached photo', () => {
-    const seeded = seed();
-    seeded.days[TODAY] = { food: 'Салат', kcal: 300, trained: null, types: [], notes: '', photos: ['photo_aaaaaaaaaaaaaaaa'] };
-    setData(seeded);
-    renderHost();
-    act(() => ui.openSheet(TODAY, 'day'));
-    fireEvent.click(screen.getByRole('button', { name: 'remove photo_aaaaaaaaaaaaaaaa' }));
-    fireEvent.click(saveButton());
-    expect(data().days[TODAY]).toEqual({ food: 'Салат', kcal: 300, trained: null, types: [], notes: '' });
   });
 });
 
@@ -845,9 +742,7 @@ describe('two devices', () => {
     expect(textbox('Нотатки').value).toBe('Легко');
     fireEvent.click(saveButton());
 
-    expect(mocks.commits).toEqual([
-      [{ kind: 'day.put', date: TODAY, value: { food: '', kcal: null, trained: null, types: [], notes: 'Легко' } }],
-    ]);
+    expect(mocks.commits).toEqual([[{ kind: 'day.meta', date: TODAY, value: { notes: 'Легко' } }]]);
     expect(data().weights.at(-1)).toEqual({ date: TODAY, kg: 65.1 });
     expect(data().measures.at(-1)).toEqual({ date: TODAY, chest: 89.5, waist: 69.5, hips: 97.5 });
   });
@@ -856,9 +751,14 @@ describe('two devices', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'day'));
     expect(textbox('Вага (за бажанням)').value).toBe('');
-    refresh([...PHONE_WEIGH_IN, { kind: 'day.put', date: TODAY, value: { food: 'Омлет', kcal: 400, trained: null, types: [], notes: '' } }]);
+    refresh([
+      ...PHONE_WEIGH_IN,
+      { kind: 'day.meta', date: TODAY, value: { trained: true } },
+      { kind: 'meal.put', date: TODAY, value: LUNCH },
+    ]);
     expect(textbox('Вага (за бажанням)').value).toBe('65,1');
-    expect(textbox('Що я їла').value).toBe('Омлет');
+    expect(screen.getByRole('button', { name: 'Було' }).getAttribute('aria-pressed')).toBe('true');
+    expect(within(mealList()).getByRole('button', { name: /^Обід/ })).toBeTruthy();
     // Still clean: closes without asking.
     fireEvent.click(within(dialog()).getByRole('button', { name: 'Закрити' }));
     expect(discardDialog()).toBeNull();
@@ -914,7 +814,9 @@ describe('setup sheet', () => {
     expect(screen.getByRole('dialog', { name: 'Перші кроки' })).toBeTruthy();
     expect(screen.queryByRole('dialog', { name: 'Налаштування' })).toBeNull();
     expect(screen.getByText(/Ці дані потрібні, щоб рахувати прогрес/)).toBeTruthy();
-    expect(screen.getByText(/Ціль і калорії можна змінити будь-коли в «Налаштуваннях» → «Цілі»/)).toBeTruthy();
+    expect(
+      screen.getByText(/Ціль і калорії можна змінити будь-коли в «Налаштуваннях» → «Цілі»/),
+    ).toBeTruthy();
     expect(screen.getByText(/вагу й заміри — на головній або в календарі/)).toBeTruthy();
 
     fireEvent.change(textbox('Поточна вага'), { target: { value: '72,4' } });

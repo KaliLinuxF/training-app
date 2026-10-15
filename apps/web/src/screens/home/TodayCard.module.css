@@ -10,7 +10,10 @@
   white-space: nowrap;
 }
 
-/* Sub prefixes of the Вага / Заміри rows: «✓ » done today (mint), «Пропущено · » missed (lavender). */
+/*
+ * Sub prefixes of the Вага / Заміри rows: «✓ » done today (mint), «Пропущено · » missed (lavender).
+ * .toneAcc also marks an over-goal number in the Їжа macro line («Б 95/90»), like the kcal over state: never red.
+ */
 .toneAcc {
   color: var(--accD);
 }

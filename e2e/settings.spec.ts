@@ -1,8 +1,41 @@
 import type { Locator, Page } from '@playwright/test';
+import { DEFAULT_MEAL_TYPES, type MacroGoals } from '../packages/shared/src/index';
+import { MEALS_TODAY } from './fixtures/data';
 import { SETTINGS_SLUGS, type App, type SettingsSection } from './support/app';
+import { TODAY } from './support/env';
+import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
 
 const SECTIONS = Object.keys(SETTINGS_SLUGS) as SettingsSection[];
+
+const DEFAULT_TYPES = [...DEFAULT_MEAL_TYPES];
+
+/** «Мої прийоми їжі» (Налаштування → Прийоми їжі): her list, the edit fields and buttons, the add form. */
+function mealTypesCard(app: App) {
+  const card = app.region('Мої прийоми їжі');
+  return {
+    card,
+    /** The names in view mode (one list item each). */
+    items: card.getByRole('list', { name: 'Типи, які можна вибрати для прийому їжі' }).getByRole('listitem'),
+    edit: card.getByRole('button', { name: 'Змінити', exact: true }),
+    done: card.getByRole('button', { name: 'Готово', exact: true }),
+    field: (name: string) => card.getByRole('textbox', { name: `Назва: ${name}`, exact: true }),
+    up: (name: string) => card.getByRole('button', { name: `Вище: ${name}`, exact: true }),
+    down: (name: string) => card.getByRole('button', { name: `Нижче: ${name}`, exact: true }),
+    remove: (name: string) => card.getByRole('button', { name: `Видалити «${name}»`, exact: true }),
+    input: card.getByRole('textbox', { name: 'Новий тип прийому їжі', exact: true }),
+    add: card.getByRole('button', { name: 'Додати', exact: true }),
+    restore: card.getByRole('button', { name: 'Повернути стандартні', exact: true }),
+    status: card.getByRole('status'),
+  };
+}
+
+const MEAL_NOTE_DEFAULTS =
+  'Тип нового прийому підказується за часом: 08:00 — Сніданок · 13:00 — Обід · 16:30 — Перекус · 19:00 — Вечеря. ' +
+  'Його завжди можна змінити. Перейменування не змінює вже записані прийоми.';
+
+/** The note under the card (generated from the meal editor's own preselection). */
+const mealNote = (page: Page) => page.getByText(/^(Тип нового прийому підказується|Без типів новий прийом)/);
 
 /** The «Вийти» row (only touched while no dialog is open: the logout dialog has its own «Вийти»). */
 const logoutRow = (page: Page) => page.getByRole('button', { name: 'Вийти', exact: true });
@@ -69,6 +102,7 @@ test.describe('settings list', () => {
     await expect(app.settingsRow('Нагадування')).toContainText('3 увімк.');
     await expect(app.settingsRow('Цілі')).toContainText('60 кг · 1 700 ккал');
     await expect(app.settingsRow('Типи тренувань')).toContainText('7 типів');
+    await expect(app.settingsRow('Прийоми їжі')).toContainText('4 типи');
     await expect(app.settingsRow('Вигляд')).toContainText('Авто');
     await expect(app.settingsRow('Дані і копія')).toContainText('Синхронізовано');
     await expect(logoutRow(app.page)).toBeVisible();
@@ -256,6 +290,43 @@ test.describe('settings on desktop', () => {
     expect(await background(app.settingsRow('Цілі'))).not.toBe(
       await background(app.settingsRow('Нагадування')),
     );
+  });
+
+  test('«Прийоми їжі» opens in the pane; a change shows in the row next to it at once', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'desktop', 'desktop shell only');
+    await app.goto('/settings');
+    await app.settingsRow('Прийоми їжі').click();
+    await expect(page).toHaveURL(/\/settings\/meals$/);
+    await expect(app.settingsRow('Прийоми їжі')).toHaveAttribute('aria-current', 'page');
+    const pane = app.region('Прийоми їжі');
+    await expect(pane.getByRole('heading', { level: 2, name: 'Прийоми їжі' })).toBeVisible();
+    await expect(pane.getByRole('region', { name: 'Мої прийоми їжі' })).toBeVisible();
+    await expect(mealNote(page)).toHaveText(MEAL_NOTE_DEFAULTS);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1);
+
+    const [list, detail] = [
+      await box(page.getByRole('navigation', { name: 'Розділи налаштувань' }), 'list'),
+      await box(pane, 'pane'),
+    ];
+    expect(list.x + list.width).toBeLessThanOrEqual(detail.x);
+
+    const t = mealTypesCard(app);
+    await t.input.fill('Після тренування');
+    await t.input.press('Enter');
+    await expect(app.settingsRow('Прийоми їжі')).toContainText('5 типів');
+    await t.edit.click();
+    // Edit rows fit the pane: ✕ inside the card.
+    const card = await box(t.card, 'card');
+    const x = await box(t.remove('Після тренування'), '✕');
+    expect(x.x + x.width).toBeLessThanOrEqual(card.x + card.width);
+
+    // «Цілі» shows the macro goals under the steppers, titled below the pane's <h2>.
+    await app.settingsRow('Цілі').click();
+    const macros = app.region('Цілі: білки, жири, вуглеводи');
+    await expect(macros.getByRole('heading', { level: 3, name: 'Б · Ж · В на день' })).toBeVisible();
   });
 
   test('a deep link to a section selects its row next to it', async ({ app }, info) => {
@@ -471,6 +542,243 @@ test.describe('reminders & settings', () => {
   });
 });
 
+test.describe('meal types («Прийоми їжі»)', () => {
+  const storedTypes = (server: ServerApi) => async () => (await server.getData()).settings.mealTypes;
+
+  test('her list: add, rename, move, delete and restore; every change reaches the server', async ({
+    app,
+    page,
+    server,
+  }) => {
+    await app.goto('/');
+    await app.openSettings('Прийоми їжі');
+    const t = mealTypesCard(app);
+    const stored = storedTypes(server);
+
+    // View mode: her names only, calm — no fields, no ✕ / ↑ / ↓, nothing to restore.
+    await expect(t.items).toHaveText(DEFAULT_TYPES);
+    await expect(t.card.getByRole('textbox', { name: /^Назва/ })).toHaveCount(0);
+    await expect(t.card.getByRole('button', { name: /^(Видалити|Вище|Нижче)/ })).toHaveCount(0);
+    await expect(t.restore).toHaveCount(0);
+    await expect(t.edit).toHaveAttribute('aria-pressed', 'false');
+
+    // Adding works in view mode too.
+    await expect(t.add).toBeDisabled();
+    await t.input.fill('Після тренування');
+    await t.add.click();
+    await expect(t.items).toHaveText([...DEFAULT_TYPES, 'Після тренування']);
+    await expect(t.input).toHaveValue('');
+    await expect.poll(stored).toEqual([...DEFAULT_TYPES, 'Після тренування']);
+
+    // A duplicate in another case is refused inline.
+    await t.input.fill('обід');
+    await t.input.press('Enter');
+    await expect(t.card.getByRole('alert')).toHaveText('Такий тип уже є');
+    await expect(t.input).toHaveAttribute('aria-invalid', 'true');
+    await t.input.fill('');
+    await expect(t.card.getByRole('alert')).toHaveCount(0);
+
+    // «Змінити» → every row is a field with ↑ ↓ ✕.
+    await t.edit.click();
+    await expect(t.done).toHaveAttribute('aria-pressed', 'true');
+    await expect(t.field('Сніданок')).toHaveValue('Сніданок');
+
+    // Rename with Enter: the field keeps the focus, the row follows the new name.
+    await t.field('Перекус').fill('Перекуси');
+    await t.field('Перекус').press('Enter');
+    await expect(t.field('Перекуси')).toBeFocused();
+    await expect(t.status).toHaveText('Перекус → Перекуси');
+    await expect.poll(stored).toEqual(['Сніданок', 'Обід', 'Вечеря', 'Перекуси', 'Після тренування']);
+
+    // Move up twice: the focus stays on the moved row's ↑. The ends are aria-disabled, never disabled.
+    await t.up('Після тренування').click();
+    await expect(t.up('Після тренування')).toBeFocused();
+    await t.up('Після тренування').click();
+    await expect(t.up('Після тренування')).toBeFocused();
+    await expect(t.status).toHaveText('Після тренування — вище');
+    await expect.poll(stored).toEqual(['Сніданок', 'Обід', 'Після тренування', 'Вечеря', 'Перекуси']);
+    await expect(t.up('Сніданок')).toHaveAttribute('aria-disabled', 'true');
+    await expect(t.down('Перекуси')).toHaveAttribute('aria-disabled', 'true');
+    // Not natively disabled: it keeps the keyboard focus, and a press does nothing. (Playwright's click waits
+    // for an aria-disabled button to become enabled, so the keyboard presses it.)
+    await expect(t.down('Перекуси')).not.toHaveAttribute('disabled');
+    await t.down('Перекуси').focus();
+    await page.keyboard.press('Enter');
+    await expect(t.down('Перекуси')).toBeFocused();
+    await expect.poll(stored).toEqual(['Сніданок', 'Обід', 'Після тренування', 'Вечеря', 'Перекуси']);
+
+    // ✕ asks nothing (past meals keep their label); the focus moves to the next row's ✕.
+    await t.remove('Обід').click();
+    await expect(t.remove('Після тренування')).toBeFocused();
+    await expect(t.status).toHaveText('Обід видалено');
+    await expect.poll(stored).toEqual(['Сніданок', 'Після тренування', 'Вечеря', 'Перекуси']);
+
+    // Two defaults are missing now (Перекус was renamed): they come back at the end.
+    await t.restore.click();
+    await expect
+      .poll(stored)
+      .toEqual(['Сніданок', 'Після тренування', 'Вечеря', 'Перекуси', 'Обід', 'Перекус']);
+    await expect(t.restore).toHaveCount(0);
+    await expect(t.input).toBeFocused();
+
+    await t.done.click();
+    const final = ['Сніданок', 'Після тренування', 'Вечеря', 'Перекуси', 'Обід', 'Перекус'];
+    await expect(t.items).toHaveText(final);
+    await app.reload();
+    await expect(t.items).toHaveText(final);
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Прийоми їжі')).toContainText('6 типів');
+
+    // The meal editor offers her own types.
+    const sheet = await app.newMeal();
+    await expect(app.mealType(sheet, 'Після тренування')).toBeVisible();
+    await expect(app.mealType(sheet, 'Перекуси')).toBeVisible();
+  });
+
+  test('Escape in a name field puts the stored name back; a blur saves', async ({ app, page, server }) => {
+    await app.gotoSettings('Прийоми їжі');
+    const t = mealTypesCard(app);
+    await t.edit.click();
+    await t.field('Обід').fill('Ланч');
+    await page.keyboard.press('Escape');
+    await expect(t.field('Обід')).toHaveValue('Обід');
+    await expect(t.field('Обід')).toBeFocused();
+
+    await t.field('Обід').fill('Ланч');
+    await page.keyboard.press('Tab');
+    await expect(t.field('Ланч')).toHaveValue('Ланч');
+    await expect.poll(storedTypes(server)).toEqual(['Сніданок', 'Ланч', 'Вечеря', 'Перекус']);
+    await expect(t.status).toHaveText('Обід → Ланч');
+  });
+
+  test('the note says which type a new meal starts with, for her own list', async ({ app, page }) => {
+    await app.gotoSettings('Прийоми їжі');
+    await expect(mealNote(page)).toHaveText(MEAL_NOTE_DEFAULTS);
+    // toHaveText folds NBSPs into spaces; the raw text keeps each «08:00 — Сніданок» together with NBSPs, so on
+    // the phone a line wraps only after «·» and never starts with «—».
+    const raw = (await mealNote(page).textContent()) ?? '';
+    const nb = String.fromCharCode(0xa0); // NBSP
+    expect(raw).toContain(`08:00${nb}—${nb}Сніданок${nb}· 13:00${nb}—${nb}Обід${nb}· `);
+    expect(raw).not.toMatch(/ —|— | ·/);
+
+    // Without a snack type, 16:30 keeps the lunch: that time is left out.
+    const t = mealTypesCard(app);
+    await t.edit.click();
+    await t.remove('Перекус').click();
+    await expect(mealNote(page)).toHaveText(
+      'Тип нового прийому підказується за часом: 08:00 — Сніданок · 13:00 — Обід · 19:00 — Вечеря. ' +
+        'Його завжди можна змінити. Перейменування не змінює вже записані прийоми.',
+    );
+
+    // An empty list is allowed: new meals have no type then.
+    for (const name of ['Сніданок', 'Обід', 'Вечеря']) await t.remove(name).click();
+    await expect(t.card.getByRole('list')).toHaveCount(0);
+    await expect(mealNote(page)).toHaveText(
+      'Без типів новий прийом буде без назви. Перейменування не змінює вже записані прийоми.',
+    );
+    await expect(t.input).toBeFocused();
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Прийоми їжі')).toContainText('Немає типів');
+  });
+
+  test.describe('with meals already logged', () => {
+    test.use({ seed: 'meals' });
+
+    test('renaming or deleting a type leaves the logged meals with their own label', async ({
+      app,
+      server,
+    }) => {
+      const loggedTypes = async () => (await server.getData()).days[TODAY]?.meals?.map((m) => m.type);
+      expect(MEALS_TODAY.map((m) => m.type)).toEqual(['Сніданок', 'Перекус']);
+      const before = (await server.getData()).days[TODAY];
+
+      await app.gotoSettings('Прийоми їжі');
+      const t = mealTypesCard(app);
+      await t.edit.click();
+      await t.field('Сніданок').fill('Ранок');
+      await t.field('Сніданок').press('Enter');
+      await expect.poll(storedTypes(server)).toEqual(['Ранок', 'Обід', 'Вечеря', 'Перекус']);
+      await t.remove('Перекус').click();
+      await expect.poll(storedTypes(server)).toEqual(['Ранок', 'Обід', 'Вечеря']);
+
+      // The day itself is untouched: same meals, same labels, same derived text.
+      expect(await loggedTypes()).toEqual(['Сніданок', 'Перекус']);
+      expect((await server.getData()).days[TODAY]).toEqual(before);
+
+      // …and the day's list still names them as she logged them.
+      await app.go('Головна');
+      const day = await app.openFoodDay();
+      await expect(app.mealRow(day, 'Сніданок')).toBeVisible();
+      await expect(app.mealRow(day, 'Перекус')).toBeVisible();
+    });
+  });
+});
+
+test.describe('macro goals («Б · Ж · В на день»)', () => {
+  test('set on Enter and on blur, cleared with an empty field, a wrong number refused', async ({
+    app,
+    server,
+  }) => {
+    await app.goto('/');
+    await app.openSettings('Цілі');
+    const card = app.region('Цілі: білки, жири, вуглеводи');
+    await expect(card.getByRole('heading', { name: 'Б · Ж · В на день' })).toBeVisible();
+    await expect(card).toContainText('Порожнє поле — без цілі.');
+    const goal = (what: string) =>
+      card.getByRole('textbox', { name: `Ціль: ${what}, г на день`, exact: true });
+    const [protein, fat, carbs] = [goal('білки'), goal('жири'), goal('вуглеводи')];
+    for (const f of [protein, fat, carbs]) {
+      await expect(f).toHaveValue('');
+      await expect(f).toHaveAttribute('placeholder', '—');
+      await expect(f).toHaveAttribute('inputmode', 'numeric');
+    }
+    const stored = async (): Promise<MacroGoals> => (await server.getData()).settings.macroGoals;
+
+    await protein.fill('90');
+    await protein.press('Enter');
+    await expect(protein).toBeFocused();
+    await expect.poll(stored).toEqual({ protein: 90, fat: null, carbs: null });
+
+    // A tap on the next field saves the one she left.
+    await fat.fill('60');
+    await carbs.click();
+    await expect.poll(stored).toEqual({ protein: 90, fat: 60, carbs: null });
+
+    for (const wrong of ['0', '1001', '12,5']) {
+      await carbs.fill(wrong);
+      await carbs.press('Enter');
+      await expect(card.getByRole('alert'), wrong).toHaveText('Від 1 до 1 000 г');
+      await expect(carbs).toHaveAttribute('aria-invalid', 'true');
+    }
+    await carbs.fill('');
+    await expect(card.getByRole('alert')).toHaveCount(0);
+
+    await protein.fill('');
+    await protein.press('Enter');
+    await expect.poll(stored).toEqual({ protein: null, fat: 60, carbs: null });
+
+    await app.reload();
+    await expect(fat).toHaveValue('60');
+    await expect(protein).toHaveValue('');
+    await expect(carbs).toHaveValue('');
+    // The «Цілі» row keeps its weight · kcal summary.
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Цілі')).toContainText('60 кг · 1 700 ккал');
+  });
+
+  test.describe('with goals set', () => {
+    test.use({ seed: 'meals' });
+
+    test('shows the stored goals', async ({ app }) => {
+      await app.gotoSettings('Цілі');
+      const card = app.region('Цілі: білки, жири, вуглеводи');
+      await expect(card.getByRole('textbox', { name: 'Ціль: білки, г на день' })).toHaveValue('90');
+      await expect(card.getByRole('textbox', { name: 'Ціль: жири, г на день' })).toHaveValue('60');
+      await expect(card.getByRole('textbox', { name: 'Ціль: вуглеводи, г на день' })).toHaveValue('');
+    });
+  });
+});
+
 test.describe('settings layout', () => {
   /** Right edge of the card's content box (inside the 18px padding and the 1px border). */
   const innerRight = async (card: Locator) => {
@@ -515,6 +823,38 @@ test.describe('settings layout', () => {
     expect(await title.evaluate(lines)).toBe(1);
     await panel.getByRole('button', { name: 'Як?' }).click();
     await expect(app.sheet('Встановлення на iPhone')).toBeVisible();
+  });
+
+  test('on a 320px phone the meal type rows and the macro goal fields stay inside their cards', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone widths');
+    await page.setViewportSize({ width: 320, height: 700 });
+    await app.gotoSettings('Прийоми їжі');
+    const t = mealTypesCard(app);
+    await t.edit.click();
+    await expectNoSideScroll(page, '320px meal types');
+    const right = await innerRight(t.card);
+    for (const name of DEFAULT_TYPES) {
+      const x = await box(t.remove(name), `✕ ${name} @320px`);
+      expect(x.x + x.width, `✕ ${name} @320px`).toBeLessThanOrEqual(right + 0.5);
+      // Every control keeps its 44px target.
+      expect(x.height).toBeGreaterThanOrEqual(44);
+      expect((await box(t.up(name), `↑ ${name}`)).width).toBeGreaterThanOrEqual(44);
+      // The field is narrow there but still a usable field (it scrolls a long name).
+      expect((await box(t.field(name), `field ${name}`)).width).toBeGreaterThanOrEqual(80);
+    }
+
+    await app.gotoSettings('Цілі');
+    await expectNoSideScroll(page, '320px goals');
+    const macros = app.region('Цілі: білки, жири, вуглеводи');
+    const macrosRight = await innerRight(macros);
+    for (const what of ['білки', 'жири', 'вуглеводи']) {
+      const f = await box(macros.getByRole('textbox', { name: `Ціль: ${what}, г на день` }), what);
+      expect(f.x + f.width, `${what} @320px`).toBeLessThanOrEqual(macrosRight + 0.5);
+      expect(f.height).toBeGreaterThanOrEqual(44);
+    }
   });
 
   test('on her iPhone (390px) the panel keeps the prototype row: title on one line, «Як?» beside it', async ({

@@ -25,17 +25,30 @@ export interface SaveFooterProps {
   label: string;
   onSave: () => void;
   disabled: boolean;
-  /** Message above the button (e.g. `SAVE_FAILED`). */
+  /** Message above the button (e.g. `SAVE_FAILED`), announced. */
   error?: string;
+  /** Why the button waits («Опиши, що їла, або додай калорії чи фото»): a muted line above it; the error wins. */
+  hint?: string;
 }
 
-/** Sheet footer: full-width «Зберегти» / «Почати» (lg) with an optional inline error above it. */
-export function SaveFooter({ label, onSave, disabled, error }: SaveFooterProps) {
+/**
+ * Sheet footer: full-width «Зберегти» / «Почати» (lg) with an optional inline error — or, without one, a hint —
+ * above it; the line describes the button (`aria-describedby`).
+ */
+export function SaveFooter({ label, onSave, disabled, error, hint }: SaveFooterProps) {
   const errId = useId();
+  const hintId = useId();
+  const showHint = !error && !!hint;
+  const describedBy = error ? errId : showHint ? hintId : undefined;
   return (
     <div className={s.footer}>
       <FieldError id={errId} message={error} />
-      <Button size="lg" fullWidth onClick={onSave} disabled={disabled} aria-describedby={error ? errId : undefined}>
+      {showHint && (
+        <span id={hintId} className={s.hint}>
+          {hint}
+        </span>
+      )}
+      <Button size="lg" fullWidth onClick={onSave} disabled={disabled} aria-describedby={describedBy}>
         {label}
       </Button>
     </div>

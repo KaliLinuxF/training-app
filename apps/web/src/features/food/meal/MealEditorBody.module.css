@@ -1,0 +1,442 @@
+/*
+ * Meal editor «Прийом їжі» inside the kit <Sheet> body (padding 4px 18px 18px). The top block —
+ * type chips, AI row, «Що я їла» — is packed at 12px so the text ends ≈ 326px below the sheet top,
+ * above the iPhone keyboard (docs/meals-macros.md §7.3); the rest is optional and scrolls at 18px.
+ * Every field is 16px+ (iOS zooms smaller ones) and every target 44px+.
+ */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+.top {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dateLine {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+/* ---- type chips: one row scrolling sideways on touch (wraps with a mouse, below) ---- */
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The scrolling chips, then «+ Свій» at the end of the line: it never scrolls out of sight, and a chip
+   cut by the row's edge before it shows there is more to scroll. */
+.typeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/*
+ * From the sheet's left edge (the body's 18px side padding moves inside the row) to «+ Свій»; 4px above
+ * and below leave room for the focus ring (2px + 2px offset), which the scrolling row would clip. The
+ * edges fade over the paddings only (a chip at rest, and its ring, are never faded); a fling stops at a
+ * chip's start, so the left edge shows whole chips, not a fragment of a word.
+ */
+.chipsScroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: -4px 0 -4px -18px;
+  padding: 4px 20px 4px 18px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 18px 20px;
+  scrollbar-width: none;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    var(--ink) 14px,
+    var(--ink) calc(100% - 16px),
+    transparent
+  );
+}
+
+.chipsScroll::-webkit-scrollbar {
+  display: none;
+}
+
+.chips {
+  flex-wrap: nowrap;
+  width: max-content;
+}
+
+.chip {
+  flex: none;
+  white-space: nowrap;
+  scroll-snap-align: start;
+}
+
+/* «+ Свій»: the chip pill, dashed to read as an action. */
+.addType {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1.5px dashed var(--line3);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.addType:active {
+  transform: scale(0.98);
+}
+
+.addType[aria-expanded='true'] {
+  border-style: solid;
+  border-color: var(--acc);
+  color: var(--accD);
+}
+
+.typeForm {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.typeInput {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1.5px solid var(--acc);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+  outline: none;
+}
+
+.typeInput:focus-visible {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.typeConfirm {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--solid);
+  color: var(--onSolid);
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.typeConfirm:active {
+  transform: scale(0.96);
+}
+
+.note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+/* «Ще не пораховано: яблуко» — one line. */
+.tail {
+  margin: -4px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.positions {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* The block takes no space while it has nothing to show. */
+.positions:empty {
+  display: none;
+}
+
+/* ---- manual kcal / Б · Ж · В ---- */
+.manual {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--muted);
+}
+
+.suffixed {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.kcalInput,
+.macroInput {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.kcalInput {
+  height: 54px;
+  padding: 0 60px 0 14px;
+}
+
+.macroInput {
+  height: 48px;
+  padding: 0 28px 0 12px;
+}
+
+.kcalInput:focus,
+.macroInput:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+/* The border above shows focus instead of the global ring. */
+.kcalInput:focus-visible,
+.macroInput:focus-visible {
+  outline: none;
+}
+
+.kcalInput[aria-invalid='true'],
+.macroInput[aria-invalid='true'] {
+  border-color: var(--accD);
+}
+
+.suffix {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 15px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.macroInput + .suffix {
+  right: 12px;
+}
+
+.macroInputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.macroField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.macroField .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openMacros {
+  align-self: flex-start;
+  color: var(--accD);
+  font-weight: 600;
+}
+
+.error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--accD);
+}
+
+.hint {
+  margin: -10px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* ---- the day ---- */
+.day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.budget {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums;
+}
+
+.over {
+  color: var(--accD);
+}
+
+.showDay {
+  color: var(--accD);
+  font-weight: 600;
+}
+
+/* ---- time: one compact row ---- */
+.timeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+
+.timeLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.time {
+  min-width: 104px;
+}
+
+.clearTime {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.clearTime:active {
+  background: var(--line2);
+}
+
+.addTime {
+  color: var(--accD);
+  font-weight: 600;
+}
+
+.legacy {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--r14);
+  background: var(--accT);
+  color: var(--ink2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* «Видалити прийом»: the item editor's «Видалити позицію» pattern — on its own under a divider, an
+   outline button in the app's alert colour, not one more text link under «+ Час». */
+.danger {
+  margin-top: 6px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.remove {
+  color: var(--accD);
+}
+
+@media (hover: hover) {
+  .addType:hover {
+    border-color: var(--line3);
+    color: var(--ink);
+  }
+
+  .clearTime:hover {
+    background: var(--line2);
+  }
+}
+
+/*
+ * Mouse / trackpad (desktop modal): a vertical wheel cannot scroll a row with a hidden scrollbar,
+ * so the chips past the edge would be unreachable. Wrap them onto more lines instead.
+ */
+@media (hover: hover) and (pointer: fine) {
+  /* «+ Свій» stays next to the first line of chips. */
+  .typeRow {
+    align-items: flex-start;
+  }
+
+  .chipsScroll {
+    margin: -4px;
+    padding: 4px;
+    overflow-x: visible;
+    mask-image: none;
+  }
+
+  .chips {
+    flex-wrap: wrap;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .addType,
+  .typeConfirm {
+    transition: none;
+  }
+}

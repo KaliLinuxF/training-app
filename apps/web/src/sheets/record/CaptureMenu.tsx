@@ -8,7 +8,10 @@ export interface CaptureMenuProps {
   rows: CaptureMenuRow[];
   /** «13 жовтня · вівторок» when the menu is for another day than today. */
   dateLine: string | null;
-  /** Swaps the same sheet to that form (`'day'` = the full «Запис дня»). */
+  /**
+   * Swaps the same sheet to that form (`'meal'` = a new meal, `'day'` = the full «Запис дня»). The host opens
+   * `'meal'` inside the tap (`flushSync`), so «Що я їла» takes focus and the iPhone keyboard comes up.
+   */
   onPick: (mode: RecordMode) => void;
 }
 

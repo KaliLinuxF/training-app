@@ -1,11 +1,13 @@
 /**
  * Home «Головна» (redesign A «Чек-лист дня»): one phone screen — header, at most one compact banner, the compact
  * hero, the «Сьогодні» list (Їжа · Тренування with the inline ✓ / ✕ · Вага · Заміри) and the week row.
- * Demo seed: Wednesday 14 October 2026, 10:00 Kyiv; today has food text only (no kcal, no workout mark).
+ * Demo seed: Wednesday 14 October 2026, 10:00 Kyiv; today has food text only (a legacy day: no kcal, no workout
+ * mark). 'meals' seed: today is two meals (460 ккал, Б 12 · Ж 9 · В 63, the apple without macros) with macro goals
+ * Б 90 · Ж 60 (docs/meals-macros.md §7.7).
  */
 import type { Locator, Page } from '@playwright/test';
 import type { AppData } from '../packages/shared/src/index';
-import { demo } from './fixtures/data';
+import { demo, meals, MEALS_GOALS, MEALS_TODAY } from './fixtures/data';
 import type { App, HomeRow } from './support/app';
 import { TODAY } from './support/env';
 import type { ServerApi } from './support/server';
@@ -28,11 +30,75 @@ async function boxOf(locator: Locator, what: string): Promise<Box> {
   return box;
 }
 
-/** Imports the demo data changed by `change` (replaces everything on the server). */
-async function seedDemo(server: ServerApi, change: (data: AppData) => void): Promise<void> {
-  const data = demo();
+/** Imports `base()` changed by `change` (replaces everything on the server). */
+async function seedWith(
+  server: ServerApi,
+  base: () => AppData,
+  change: (data: AppData) => void,
+): Promise<void> {
+  const data = base();
   change(data);
   await server.importData(data);
+}
+
+/** Imports the demo data changed by `change`. */
+const seedDemo = (server: ServerApi, change: (data: AppData) => void): Promise<void> =>
+  seedWith(server, demo, change);
+
+/** No-break space (U+00A0): the macro line glues each part, «г» and «прийоми» to their number with it. */
+const NB = String.fromCharCode(0xa0);
+
+/** The «Їжа» row's macro line «Б 12/90 · Ж 9/60 · В 63 г» (the element that holds the whole line). */
+const foodMacros = (app: App): Locator => app.homeRow('Їжа').getByText(/^Б\s\S/);
+
+/**
+ * On how many lines each phrase of `locator`'s text is laid out (0 = not found). The phrase may span several text
+ * nodes (the macro line keeps over-goal numbers in their own spans).
+ */
+async function phraseLines(locator: Locator, phrases: readonly string[]): Promise<Record<string, number>> {
+  return locator.evaluate((el, list) => {
+    const nodes: Text[] = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node instanceof Text) nodes.push(node);
+    }
+    const full = nodes.map((n) => n.data).join('');
+    /** The text node and offset of a character offset into `full` (a range end may sit at a node's end). */
+    const pointAt = (offset: number, isEnd: boolean): [Text, number] | null => {
+      let rest = offset;
+      for (const node of nodes) {
+        if (isEnd ? rest <= node.data.length : rest < node.data.length) return [node, rest];
+        rest -= node.data.length;
+      }
+      return null;
+    };
+    const out: Record<string, number> = {};
+    for (const phrase of list) {
+      const at = full.indexOf(phrase);
+      const start = at < 0 ? null : pointAt(at, false);
+      const end = at < 0 ? null : pointAt(at + phrase.length, true);
+      if (!start || !end) {
+        out[phrase] = 0;
+        continue;
+      }
+      const range = document.createRange();
+      range.setStart(start[0], start[1]);
+      range.setEnd(end[0], end[1]);
+      const tops: number[] = [];
+      for (const rect of range.getClientRects()) {
+        if (rect.width >= 1 && !tops.some((top) => Math.abs(top - rect.top) < 4)) tops.push(rect.top);
+      }
+      out[phrase] = tops.length;
+    }
+    return out;
+  }, phrases);
+}
+
+/** `meals()` with the macro goals cleared: the line gets the meal count «· 2 прийоми». */
+function mealsWithoutGoals(): AppData {
+  const data = meals();
+  data.settings.macroGoals = { protein: null, fat: null, carbs: null };
+  return data;
 }
 
 /** Today's demo day record (food text only), for tests that change it. */
@@ -151,6 +217,27 @@ test.describe('home checklist', () => {
     await expect(app.sheet('Запис дня')).toContainText('середа · сьогодні');
   });
 
+  test('with nothing logged today the «Їжа» row opens a new meal: «Сніданок» at 10:00, «Що я їла» focused', async ({
+    app,
+    server,
+  }) => {
+    await seedDemo(server, (data) => {
+      delete data.days[TODAY];
+    });
+    await app.goto('/');
+    await expect(app.homeRow('Їжа')).toHaveAccessibleName(
+      'Їжа: ще нічого не записано. Ціль 1 700 ккал на день',
+    );
+    await expect(app.homeRow('Їжа')).toContainText('— / 1 700 ккал');
+
+    await app.homeRow('Їжа').click();
+    const editor = app.sheet('Прийом їжі');
+    await expect(editor).toBeVisible();
+    await expect(app.sheet('Їжа')).toHaveCount(0);
+    await expect(app.mealType(editor, 'Сніданок')).toHaveAttribute('aria-pressed', 'true');
+    await expect(editor.getByRole('textbox', { name: 'Що я їла' })).toBeFocused();
+  });
+
   test('the inline ✓ / ✕ save at once with a toast; a repeat press does nothing; it survives a reload', async ({
     app,
     page,
@@ -265,6 +352,96 @@ test.describe('home checklist', () => {
   });
 });
 
+test.describe('home «Їжа» row on a day logged as meals', () => {
+  test.use({ seed: 'meals' });
+
+  const NAME_WITH_GOALS =
+    'Їжа: 460 з 1 700 ккал, залишилось 1 240. Білки 12 з 90 г, жири 9 з 60 г, вуглеводи 63 г ' +
+    '(не для всіх прийомів). 2 прийоми їжі';
+
+  test('shows the day kcal and «Б · Ж · В» against her goals; the row opens the day’s list', async ({
+    app,
+  }) => {
+    expect(MEALS_GOALS).toEqual({ protein: 90, fat: 60, carbs: null });
+    await app.goto('/');
+    const row = app.homeRow('Їжа');
+    await expect(row).toContainText('460 / 1 700 ккал');
+    await expect(foodMacros(app)).toHaveText('Б 12/90 · Ж 9/60 · В 63 г');
+    // With a goal the count makes room for «/90»; the name still says it (and that the apple has no macros).
+    await expect(row).not.toContainText('прийоми');
+    await expect(row).not.toContainText('Калорії не вказані');
+    await expect(row).toHaveAccessibleName(NAME_WITH_GOALS);
+
+    const list = await app.openFoodDay();
+    await expect(list).toBeVisible();
+  });
+
+  test('without macro goals the meal count joins the line', async ({ app, server }) => {
+    await server.importData(mealsWithoutGoals());
+    await app.goto('/');
+    await expect(foodMacros(app)).toHaveText('Б 12 · Ж 9 · В 63 г · 2 прийоми');
+    await expect(app.homeRow('Їжа')).toHaveAccessibleName(
+      'Їжа: 460 з 1 700 ккал, залишилось 1 240. Білки 12 г, жири 9 г, вуглеводи 63 г (не для всіх прийомів). ' +
+        '2 прийоми їжі',
+    );
+  });
+
+  test('✓ «Було» marks the workout and keeps every meal of today', async ({ app, server }) => {
+    await app.goto('/');
+    await app.trainingToggle('Було').click();
+    await expect(app.toast('Відмічено: тренування було')).toBeVisible();
+    await expect.poll(async () => (await server.getData()).days[TODAY]?.trained).toBe(true);
+    const stored = (await server.getData()).days[TODAY];
+    expect(stored?.meals).toEqual(MEALS_TODAY);
+    expect(stored?.kcal).toBe(460);
+    await expect(foodMacros(app)).toHaveText('Б 12/90 · Ж 9/60 · В 63 г');
+    await expect(app.homeRow('Тренування')).toContainText('Було · додай тип');
+  });
+
+  for (const [width, height] of [
+    [375, 667],
+    [320, 640],
+  ] as const) {
+    test(`at ${width}×${height} the macro line wraps only after «·» and no row title wraps`, async ({
+      app,
+      page,
+      server,
+    }, info) => {
+      test.skip(info.project.name !== 'iphone', 'phone layout only');
+      await page.setViewportSize({ width, height });
+      for (const [what, data, phrases] of [
+        [
+          'no goals',
+          mealsWithoutGoals(),
+          [`Б${NB}12${NB}·`, `Ж${NB}9${NB}·`, `В${NB}63${NB}г${NB}·`, `2${NB}прийоми`],
+        ],
+        ['goals', meals(), [`Б${NB}12/90${NB}·`, `Ж${NB}9/60${NB}·`, `В${NB}63${NB}г`]],
+      ] as const) {
+        await server.importData(data);
+        await app.goto('/');
+        await fontsReady(page);
+        const line = foodMacros(app);
+        await expect(line).toBeVisible();
+        // A part never splits: no line starts with «г», «прийоми», a number or «·».
+        const lines = await phraseLines(line, phrases);
+        for (const phrase of phrases) {
+          expect(lines[phrase], `«${phrase}» on one line (${what} @${width})`).toBe(1);
+        }
+        // The kit clamps the sub to 2 lines: nothing is cut off.
+        expect(
+          await line.evaluate((el) => el.scrollHeight - el.clientHeight),
+          `macro line cut off (${what} @${width})`,
+        ).toBeLessThanOrEqual(1);
+        for (const name of ROWS) {
+          expect(await rowTitle(app, name).evaluate(titleBroken), `«${name}» title (${what} @${width})`).toBe(
+            false,
+          );
+        }
+      }
+    });
+  }
+});
+
 test.describe('home fits one iPhone screen', () => {
   /** The floating tab bar's top edge (phone shell). */
   const tabBarTop = async (app: App): Promise<number> => (await boxOf(app.nav, 'tab bar')).y;
@@ -289,19 +466,24 @@ test.describe('home fits one iPhone screen', () => {
     await expectWeekAboveTabBar(app, 'demo @390×763');
   });
 
-  test('worst case at 390×763: decimal measurements today and a workout with two types', async ({
+  test('worst case at 390×763: today’s meals with the macro line, decimal measurements, two workout types', async ({
     app,
     page,
     server,
   }, info) => {
     test.skip(info.project.name !== 'iphone', 'phone layout only');
-    await seedDemo(server, (data) => {
+    // One combination of every row at its tallest: Їжа with value + macro sub + meter, the 2-line «Заміри» sub, a
+    // workout with two types (docs/meals-macros.md §7.7 one-screen budget).
+    await seedWith(server, meals, (data) => {
       data.measures.push({ date: TODAY, chest: 92.5, waist: 74.5, hips: 100.5 });
       Object.assign(todayEntry(data), { trained: true, types: ['Верх тіла', 'Низ тіла'] });
     });
     await page.setViewportSize(INSTALLED);
     await app.goto('/');
     await page.getByRole('button', { name: 'Сховати' }).click();
+    await expect(page.getByText(INSTALL_TITLE)).toHaveCount(0);
+    await expect(app.homeRow('Їжа')).toContainText('460 / 1 700 ккал');
+    await expect(foodMacros(app)).toHaveText('Б 12/90 · Ж 9/60 · В 63 г');
     await expect(app.homeRow('Заміри')).toContainText('✓ Сьогодні — Груди 92,5 · Талія 74,5 · Стегна 100,5');
     await expect(app.homeRow('Тренування')).toContainText('Верх тіла, Низ тіла');
     await expectWeekAboveTabBar(app, 'worst case @390×763');

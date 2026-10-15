@@ -97,7 +97,7 @@ afterEach(() => {
 });
 
 describe('SettingsScreen — the list (phone)', () => {
-  it('shows the header, the five sections with their summaries, «Вийти» and the caption', async () => {
+  it('shows the header, the six sections with their summaries, «Вийти» and the caption', async () => {
     await renderReady('/settings', 'enabled');
     const h1 = screen.getByRole('heading', { level: 1, name: 'Налаштування' });
     const navEl = screen.getByRole('navigation', { name: 'Розділи налаштувань' });
@@ -109,6 +109,7 @@ describe('SettingsScreen — the list (phone)', () => {
       '/settings/reminders',
       '/settings/goals',
       '/settings/workouts',
+      '/settings/meals',
       '/settings/appearance',
       '/settings/data',
     ]);
@@ -116,6 +117,7 @@ describe('SettingsScreen — the list (phone)', () => {
       'Нагадування 3 увімк.',
       'Цілі 60 кг · 1 700 ккал',
       'Типи тренувань 7 типів',
+      'Прийоми їжі 4 типи',
       'Вигляд Авто',
       'Дані і копія Синхронізовано',
     ]);
@@ -124,7 +126,7 @@ describe('SettingsScreen — the list (phone)', () => {
       within(navEl)
         .getAllByRole('list')
         .map((ul) => within(ul).getAllByRole('link').length),
-    ).toEqual([3, 2]);
+    ).toEqual([4, 2]);
     for (const link of links) expect(link.getAttribute('aria-current')).toBeNull();
 
     const logout = screen.getByRole('button', { name: 'Вийти' });
@@ -176,6 +178,8 @@ describe('SettingsScreen — the list (phone)', () => {
           goal: 58.5,
           kcalGoal: 1650,
           customTypes: ['Йога'],
+          mealTypes: ['Сніданок', 'Обід', 'Вечеря', 'Перекус', 'Після тренування'],
+          macroGoals: { protein: 90, fat: null, carbs: null },
           rem: { ...sampleData().settings.rem, measure: { ...sampleData().settings.rem.measure, on: false } },
         },
       }),
@@ -183,9 +187,14 @@ describe('SettingsScreen — the list (phone)', () => {
     localStorage.setItem('legko.theme', 'dark');
     await renderReady('/settings', 'enabled');
     expect(plain(row('Нагадування').textContent)).toBe('Нагадування 2 увімк.');
+    // Macro goals stay out of the «Цілі» summary.
     expect(plain(row('Цілі').textContent)).toBe('Цілі 58,5 кг · 1 650 ккал');
     expect(plain(row('Типи тренувань').textContent)).toBe('Типи тренувань 8 типів');
+    expect(plain(row('Прийоми їжі').textContent)).toBe('Прийоми їжі 5 типів');
     expect(plain(row('Вигляд').textContent)).toBe('Вигляд Темна');
+
+    act(() => dataActions.updateSettings((st) => ({ ...st, mealTypes: [] })));
+    expect(plain(row('Прийоми їжі').textContent)).toBe('Прийоми їжі Немає типів');
 
     patchSync({ pending: 3 });
     expect(plain(row('Дані і копія').textContent)).toBe('Дані і копія Очікує: 3');
@@ -359,6 +368,31 @@ describe('SettingsScreen — desktop (list + detail)', () => {
     expect(other.closest('[aria-current]')).toBeNull();
   });
 
+  it('shows her meal types in the pane at /settings/meals', async () => {
+    const { memory } = await renderReady('/settings');
+    fireEvent.click(row('Прийоми їжі'));
+    expect(memory.history).toEqual(['/settings', '/settings/meals']);
+    expect(row('Прийоми їжі').getAttribute('aria-current')).toBe('page');
+    const pane = region('Прийоми їжі');
+    expect(pane.getByRole('heading', { level: 2, name: 'Прийоми їжі' })).toBeTruthy();
+    const card = within(pane.getByRole('region', { name: 'Мої прийоми їжі' }));
+    expect(
+      card.getByRole('list', { name: 'Типи, які можна вибрати для прийому їжі' }).querySelectorAll('li')
+        .length,
+    ).toBe(4);
+    expect(pane.getByText(/^Тип нового прийому підказується за часом: 08:00 — Сніданок/)).toBeTruthy();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('puts the macro goals card under «Мої цілі», titled one level below the pane', async () => {
+    await renderReady('/settings/goals');
+    const pane = region('Цілі');
+    const macros = pane.getByRole('region', { name: 'Цілі: білки, жири, вуглеводи' });
+    expect(within(macros).getByRole('heading', { level: 3, name: 'Б · Ж · В на день' })).toBeTruthy();
+    const goals = pane.getByRole('region', { name: 'Мої цілі' });
+    expect(goals.compareDocumentPosition(macros) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('names the «Вигляд» pane once: the card inside it is no second region «Вигляд»', async () => {
     await renderReady('/settings/appearance');
     expect(screen.getAllByRole('region', { name: 'Вигляд' })).toHaveLength(1);
@@ -517,6 +551,52 @@ describe('Цілі (/settings/goals)', () => {
     expect(goals.getByText('60,5 кг')).toBeTruthy();
     fireEvent.click(goals.getByRole('button', { name: 'Зменшити калорії на день' }));
     expect(settings().kcalGoal).toBe(1650);
+  });
+
+  it('sets a macro goal below the steppers; the card title sits under the page <h1>', async () => {
+    await renderReady('/settings/goals');
+    const macros = region('Цілі: білки, жири, вуглеводи');
+    expect(macros.getByRole('heading', { level: 2, name: 'Б · Ж · В на день' })).toBeTruthy();
+    const protein = macros.getByRole('textbox', { name: 'Ціль: білки, г на день' });
+    fireEvent.focus(protein);
+    fireEvent.change(protein, { target: { value: '90' } });
+    fireEvent.blur(protein);
+    expect(settings().macroGoals).toEqual({ protein: 90, fat: null, carbs: null });
+    // The «Цілі» row keeps its weight · kcal summary.
+    expect(settings().goal).toBe(60);
+  });
+});
+
+describe('Прийоми їжі (/settings/meals)', () => {
+  it('opens from its row and lists her types with the note under them', async () => {
+    const { memory } = await renderReady('/settings');
+    fireEvent.click(row('Прийоми їжі'));
+    expect(memory.history).toEqual(['/settings', '/settings/meals']);
+    expect(screen.getByRole('heading', { level: 1, name: 'Прийоми їжі' })).toBeTruthy();
+    const card = region('Мої прийоми їжі');
+    // Headless card: the page title names the section.
+    expect(card.queryByRole('heading')).toBeNull();
+    const list = card.getByRole('list', { name: 'Типи, які можна вибрати для прийому їжі' });
+    expect([...list.querySelectorAll('li')].map((li) => li.textContent)).toEqual([
+      'Сніданок',
+      'Обід',
+      'Вечеря',
+      'Перекус',
+    ]);
+    expect(
+      screen.getByText(
+        'Тип нового прийому підказується за часом: 08:00 — Сніданок · 13:00 — Обід · 16:30 — Перекус · ' +
+          '19:00 — Вечеря. Його завжди можна змінити. Перейменування не змінює вже записані прийоми.',
+      ),
+    ).toBeTruthy();
+
+    // Back on the list, the row counts what she has now.
+    const input = card.getByRole('textbox', { name: 'Новий тип прийому їжі' });
+    fireEvent.change(input, { target: { value: 'Після тренування' } });
+    fireEvent.click(card.getByRole('button', { name: 'Додати' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Назад: Налаштування' }));
+    expect(plain(row('Прийоми їжі').textContent)).toBe('Прийоми їжі 5 типів');
+    expect(document.activeElement).toBe(row('Прийоми їжі'));
   });
 });
 

@@ -1,4 +1,4 @@
-/* Result card: kit <Card> (card, 1px line, r24, padding 18) with the rows below. */
+/* Positions card «Позиції»: kit <Card> (card, 1px line, r24, padding 18) with the rows below. */
 .card {
   animation: estimate-in 220ms var(--ease-out);
 }
@@ -201,16 +201,6 @@
   cursor: progress;
 }
 
-/* «Додати» waits for «Рахую…» (aria-disabled, so focus stays on it): the kit's disabled look. */
-.buttons .primary[aria-disabled='true'] {
-  opacity: 0.45;
-  cursor: progress;
-}
-
-.buttons .primary[aria-disabled='true']:active {
-  transform: none;
-}
-
 /* Why the last recalculation failed (same look as the block's own error line). */
 .error {
   margin: 0;
@@ -219,13 +209,31 @@
   color: var(--accD);
 }
 
+/* «Разом 370 ккал», then «Б 27 · Ж 11 · В 36 г» right under the number. */
 .total {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.totalLine {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
+}
+
+.totalMacros {
+  align-self: flex-end;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ink2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .totalLabel {
@@ -258,19 +266,12 @@
   color: var(--muted);
 }
 
-.buttons {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.primary {
-  flex: 1;
-}
-
-.cancel {
-  flex-shrink: 0;
-  margin-right: 2px;
+/* «Прибрати ці позиції»: a quiet text button, the undo of the last estimate. */
+.undo {
+  align-self: flex-start;
+  margin: -6px 0 -4px;
+  color: var(--accD);
+  font-weight: 600;
 }
 
 /* Loading */
@@ -358,6 +359,19 @@
   from {
     opacity: 0;
     transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .loading {
+    animation: none;
+  }
+
+  .thumbSkeleton,
+  .bar,
+  .spark {
+    animation: none;
   }
 }
 

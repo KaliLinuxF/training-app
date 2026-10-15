@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { PhotoStrip } from '@/features/food';
 import type { SheetMode } from '@/store/ui';
 import { Button, ListGroup, ListRow, Pill, TrainingToggle, type IconName, type ListIconTone } from '@/ui';
@@ -26,6 +27,7 @@ const ROW_ICON: Readonly<Record<DayRowKey, { icon: IconName; tone: ListIconTone 
 /**
  * The selected day as a check-list (redesign A §4.6): one row per thing to record, each opening its short sheet;
  * Тренування has the inline ✓ / ✕; «Редагувати день» opens the full «Запис дня». The region is named by the date.
+ * Їжа lists a day's meals one line each and opens the day's «Їжа»; empty, its «Додати» opens a new meal.
  */
 export function DayCard({ detail, onOpen, onTrained, reveal }: DayCardProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -83,19 +85,25 @@ function DayRow({ row, photos, onOpen, onTrained, className }: DayRowProps) {
   if (row.filled) value = row.value;
   else if (row.action) value = <span className={s.action}>{row.action}</span>;
 
+  // A new meal focuses «Що я їла» on open: rendered inside the tap so the iPhone keyboard comes up with it.
+  const open = () => {
+    if (row.mode === 'meal') flushSync(() => onOpen(row.mode));
+    else onOpen(row.mode);
+  };
+
   return (
     <ListRow
       className={className}
       icon={icon}
       iconTone={tone}
       title={row.title}
-      sub={row.text}
+      sub={row.lines ? <SubLines lines={row.lines} /> : row.text}
       subWrap
       value={value}
       valueTone={row.valueTone}
       aria-label={row.label}
       describeSub={row.describe}
-      onClick={() => onOpen(row.mode)}
+      onClick={open}
       // Every row opens its sheet (a dialog); the ✓ / ✕ beside the Тренування row save at once and do not.
       aria-haspopup="dialog"
       chevron={training ? false : undefined}
@@ -113,6 +121,20 @@ function DayRow({ row, photos, onOpen, onTrained, className }: DayRowProps) {
       {row.key === 'food' && photos.length > 0 ? <PhotoStrip ids={photos} size="sm" /> : undefined}
     </ListRow>
   );
+}
+
+/**
+ * The Їжа sub of a day with meals: one block per line that never wraps (cut with «…»), so a line per meal stays a
+ * line at 390 and 320px. The spaces between the blocks render nothing but keep the row's description
+ * («Сніданок · 520 ккал · Тост з авокадо Обід · …») readable in every engine.
+ */
+function SubLines({ lines }: { lines: readonly string[] }) {
+  return lines.map((line, i) => (
+    <Fragment key={i}>
+      {i > 0 && ' '}
+      <span className={s.line}>{line}</span>
+    </Fragment>
+  ));
 }
 
 /**

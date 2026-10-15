@@ -1,5 +1,14 @@
 # Redesign A «Чек-лист дня» — integrated implementation plan
 
+> **Parts superseded by `docs/meals-macros.md`** (meals and Б · Ж · В, 2026-10-15). The layout, kit and every other
+> contract below still hold. What changed for food is marked inline with **Superseded (meals)**:
+> the `SheetMode` comment and union (§2.9: `'food'` is now the day's list of meals, new `'meal'` = a new meal
+> «Прийом їжі»), `store/dayMarks.ts` (§2.11: `setTrainedMark` sends a partial `day.meta`), who opens which sheet
+> (§3.1: «+» → «Їжа» → «Прийом їжі»; Home / calendar Їжа rows → the list, or the new-meal editor on an empty day),
+> the dialog names (§3.2: + «Прийом їжі», «Позиція», «Нова позиція»), the deep links (§3.3: `meal` not linkable), the
+> routes (§3.4: + `/settings/meals`), the e2e `SheetName` / `RECORD_SHEETS` (§3.5), the Home Їжа row (§4.2), the menu
+> rows and the short «Їжа» sheet (§4.3), the calendar Їжа row (§4.6) and the SPEC text of §7. SPEC.md is current.
+
 Owner decision (2026-10-09): variant **A «Чек-лист дня»**. Owner feedback: «зараз усе занадто нагромаджено, на
 телефоні дуже незручно». This plan merges the six area specs (Home, Capture «+», Settings, Progress, Calendar,
 Shell + kit) into one design with one kit, one set of contracts and strictly separated work packages.
@@ -274,6 +283,13 @@ export interface SheetPatch { trained?: boolean }
 
 `ui.openSheet` / `closeSheet` / `flash` / `confirm` unchanged.
 
+> **Superseded (meals, `docs/meals-macros.md` §6.1):** `'food'` is now «Їжа» = the day's list of meals (totals card
+> with kcal and Б · Ж · В, one row per meal, «+ Прийом їжі»; no food text, FoodAssist or kcal field), and
+> `SheetMode` gains `'meal'` = «Прийом їжі», a new meal for `date` (the menu's Їжа row swaps to it; Home / calendar
+> open it on a day with no food). New `ui.moveSheet(date)` keeps mode, key and patch (the new-meal ‹ ›). Union:
+> `'menu' | 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'setup' | 'install'`. Existing meals and
+> positions open in **stacked** sheets («Прийом їжі», «Позиція») rendered inside «Їжа» / «Запис дня», not as modes.
+
 ### 2.10 Ghost button hit area — `ui/controls/Button.module.css`
 
 `.ghost` is 35px tall (`padding: 8px 0`, 14px text) and `.ghost::after { inset: -4px -6px }` gave only **43px**
@@ -293,6 +309,10 @@ export function setTrainedMark(date: ISODate, trained: boolean): boolean;
 ```
 
 Moved from `screens/home/homeModel.ts` (home deletes its copy). Used by Home «Сьогодні» and the calendar day card.
+
+> **Superseded (meals, `docs/meals-macros.md` §6.1):** `setTrainedMark` writes `dataActions.setDayMeta(date,
+> { trained })` (a partial `day.meta`: never the food, types or notes on the wire); `markTrained` / `markNoTraining`
+> take no arguments and return `DayMeta`.
 
 ---
 
@@ -314,10 +334,19 @@ Moved from `screens/home/homeModel.ts` (home deletes its copy). Used by Home «�
 | Calendar «Редагувати день» / «Заповнити день» | full day | `'day'` |
 | Progress placeholders | «+ Записати вагу» / «+ Записати заміри» | `'weight'` / `'measure'` |
 
+> **Superseded (meals, `docs/meals-macros.md` §7.1):** the menu's Їжа row calls `flushSync(() => ui.openSheet(date,
+> 'meal'))` — «+» → «Їжа» → «Прийом їжі» (a new meal, type preselected, «Що я їла» focused: two taps to the
+> keyboard). The Home Їжа row and the calendar day's Їжа row open `'food'` (the day's list) on a day with food and
+> `'meal'` (with `flushSync`) on a day without. In «Їжа» and «Запис дня» a meal row or «+ Прийом їжі» opens the stacked
+> meal editor; a position opens «Позиція» above it.
+
 ### 3.2 Dialog accessible names (headings)
 
 New: «Що записати?», «Їжа», «Тренування», «Перші кроки». Kept: «Запис дня», «Контрольне зважування», «Заміри тіла»,
 «Встановлення на iPhone». Removed: setup «Налаштування».
+
+> **Superseded (meals, D20 of `docs/meals-macros.md`):** + «Прийом їжі» (the meal editor, new or existing, also the
+> menu's swap target), «Позиція» / «Нова позиція» (the item editor). «Їжа» is the day's list of meals.
 
 ### 3.3 Deep links (client parsing only; server `DEEP_LINKS` unchanged)
 
@@ -328,6 +357,7 @@ New: «Що записати?», «Їжа», «Тренування», «Пер�
 | `/?sheet=workout[&trained=1]`, `/?sheet=food` | «Тренування» (patch only with trained=1), «Їжа» |
 | `/?sheet=weight`, `/?sheet=measure` | unchanged |
 | `menu`, `setup`, `install`, unknown | not linkable, ignored and cleaned from the URL |
+| `meal` (**Superseded (meals)**: added) | not linkable either — a new meal opens only from a tap, with the keyboard; `food` opens the day's list |
 | `/progress?period=week\|month\|q\|all` | selects + stores the period, then removes the param (replace) |
 | `/calendar?date=YYYY-MM-DD` | unchanged |
 
@@ -336,7 +366,8 @@ New: «Що записати?», «Їжа», «Тренування», «Пер�
 `/` · `/calendar` · `/progress` · `/settings/:section?` (section ∈ reminders | goals | workouts | appearance | data;
 anything else → `<Redirect to="/settings" replace />`) · `/reminders` → `<Redirect to="/settings/reminders" replace />`
 (old bookmarks, old test notifications) · catch-all → `/`. Server test push url → `/settings/reminders`
-(`SETTINGS_REMINDERS_PATH` in `packages/shared/src/api.ts`).
+(`SETTINGS_REMINDERS_PATH` in `packages/shared/src/api.ts`). **Superseded (meals):** section also `meals`
+(«Прийоми їжі», her meal types — after «Типи тренувань» in the list).
 
 ### 3.5 e2e helpers (`e2e/support/app.ts`, kit package)
 
@@ -365,6 +396,13 @@ quickAction(label)                               // @deprecated → homeRow(labe
 
 The shims keep every existing spec **typechecking**; they do not keep old behaviour (D20). `settingsBack()` exists only
 on the phone (the desktop pane has no back link): tests that use it are gated to the `iphone` project.
+
+> **Superseded (meals, `docs/meals-macros.md` §6.4):** `SheetName` += `'Прийом їжі' | 'Позиція' | 'Нова позиція'`;
+> `RECORD_SHEETS['Їжа'] = 'Прийом їжі'` (so `record('Їжа')` returns the new-meal editor, also as `newMeal()`);
+> `SettingsSection` += `'Прийоми їжі'` (slug `meals`); new `mealList(sheet)` (region «Прийоми їжі», in «Їжа» and in
+> «Запис дня»), `mealRow(sheet, title)`, `addMealButton(sheet)` («Додати прийом їжі»), `mealType(sheet, label)` (chip in
+> group «Тип прийому їжі»), `openFoodDay()` (Home Їжа → «Їжа»; needs food today), `saveMeal(sheet)`. See
+> `e2e/README.md`.
 
 ---
 
@@ -440,6 +478,10 @@ Rows and states (all copy formatted in `homeModel.ts`):
   калорії не вказані. Ціль 1 700 ккал на день» · ok «1 240 / 1 700 ккал» · reached number `--acc2D`, full mint
   meter · over «1 820» `--accD` + full lavender meter. `aria-label` `Їжа: ${view.label}`; empty «Їжа: ще нічого не
   записано. Ціль 1 700 ккал на день».
+  **Superseded (meals, `docs/meals-macros.md` §7.7):** with kcal the row gets the sub «Б 68 · Ж 41 · В 132 г ·
+  3 прийоми» (with goals «Б 68/90 · Ж 41/60 · В 132 г», an over number `--accD`; NBSP so it wraps only after «·»),
+  above the meter (kit order title / sub / meter); the empty state opens the new-meal editor `'meal'`, every other
+  state the day's list `'food'`.
 - **Тренування** (`icon workout`, `acc`) → `'workout'`; `chevron={false}`; `trailing = <TrainingToggle size="sm"
   aria-label="Тренування сьогодні">`. Sub: null «Ще не відмічено» (muted) · planned today (onboarded, reminder on,
   weekday in days, null) «За планом о 18:00» `--accD` · true + types «Кардіо, Прес» (default `--ink2`) · true no
@@ -523,6 +565,13 @@ shows only for a day other than today. The new «drag the menu down closes it wi
  │ [            Зберегти            ] │
  └────────────────────────────────────┘
 ```
+
+> **Superseded (meals, `docs/meals-macros.md` §7.2, §7.3, §7.6):** the menu's Їжа row has the sub «Новий прийом
+> їжі» and swaps the dialog to the new-meal editor «Прийом їжі» (type chips, the AI row above «Що я їла», photos,
+> positions or «Калорії» + «+ Б · Ж · В», «Часті страви», «За день: …», «Усі прийоми за день →», time, footer
+> «Зберегти»). The short sheet «Їжа» sketched on the left is replaced by the day's list: totals card «Підсумок дня»
+> (kcal against the goal, Білки / Жири / Вуглеводи against her goals), region «Прийоми їжі» with one row per meal,
+> footer «+ Прийом їжі». No food textarea, FoodAssist or «Калорії за день» in any day sheet any more.
 
 - Їжа: only food text (no visible label), PhotoStrip md, `<FoodAssist>` (public props only), `KcalField` with goal.
 - Тренування: `TrainingToggle lg` (group «Тренування»), Field «Тип» → TypePicker, notes folded as ghost «+ Нотатка
@@ -639,6 +688,10 @@ shows only for a day other than today. The new «drag the menu down closes it wi
 - The Тренування row has no «Відмітити» action word any more: the inline toggle replaces it (the calendar never selects
   a future day, `resolveSelected`). Label «Тренування: було, Низ тіла, Прес» / «Тренування: не було» /
   «Тренування: не відмічено»; the row button opens `'workout'` for the date.
+- **Superseded (meals, `docs/meals-macros.md` §7.8):** on a meal day the Їжа row's sub is one line per meal
+  («Сніданок · 520 ккал · Тост з авокадо», never wrapped: ellipsis) and then the day's «Б 114 · Ж 62 · В 181 г»;
+  label «Їжа: 1 740 ккал, 3 прийоми». A filled row opens the day's list `'food'`; an empty one («Додати») the new-meal
+  editor `'meal'`. Legacy days keep the text as above.
 
 ---
 
@@ -722,6 +775,9 @@ Per-package scope (full self-contained briefs are in the orchestration output):
 ---
 
 ## 7. SPEC.md update (applied by `e2e-visual`)
+
+> **Superseded (meals):** applied in its time; the food parts of this text (the «Їжа» sheet, `SheetMode`, routes)
+> were updated again with `docs/meals-macros.md` §10 — `docs/SPEC.md` is the current text.
 
 **§2 Layout, replace the Mobile/Desktop bullets' affected parts with:**
 

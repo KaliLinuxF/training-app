@@ -1,100 +1,23 @@
 /**
- * Form blocks of the record sheet. The full «Запис дня» shows them all; the short sheets show one
- * action's blocks («Їжа»: food + kcal; «Тренування»: workout + folded notes).
+ * Form blocks of the record sheet. The full «Запис дня» shows the workout and the notes (its food is the meal list,
+ * `FoodDayPanel`, each meal saving on its own); «Тренування» shows the workout and the folded notes.
  */
-import { LIMITS, type AppData, type ISODate } from '@legko/shared';
+import { LIMITS } from '@legko/shared';
 import { useId, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { FoodAssist, PhotoStrip, type FoodAdd } from '@/features/food';
 import { Button, Field, TextArea, TrainingToggle } from '@/ui';
-import { FieldError, KcalField } from '../fields/fields';
-import { applyFoodAdd, removePhoto, type RecordDraft, type RecordErrors, type RecordMode } from './model';
+import { FieldError } from '../fields/fields';
+import type { RecordDraft, RecordErrors, RecordMode } from './model';
 import { TypePicker } from './TypePicker';
 import s from './blocks.module.css';
 
-/** Food text grows up to this many rows before it scrolls (estimate lines make it long). */
-const FOOD_MAX_ROWS = 8;
 const NOTES_MAX_ROWS = 6;
 
-/** Name of the food text (a visible label in «Запис дня», `aria-label` in «Їжа»). */
-export const FOOD_LABEL = 'Що я їла';
 export const NOTES_LABEL = 'Нотатки';
 /** The folded notes in «Тренування». */
 export const ADD_NOTE_LABEL = '+ Нотатка до дня';
 
 type SetDraft = (patch: Partial<RecordDraft>) => void;
-type UpdateDraft = (change: (draft: RecordDraft) => RecordDraft) => void;
-
-export interface FoodBlockProps {
-  mode: RecordMode;
-  draft: RecordDraft;
-  errors: RecordErrors;
-  set: SetDraft;
-  update: UpdateDraft;
-  /** FoodAssist reports an estimate on screen / text in its composer (unsaved work). */
-  onFoodPending: (pending: boolean) => void;
-  /** `SheetState.key`: FoodAssist starts afresh for every opened sheet. */
-  sheetKey: number;
-  date: ISODate;
-  data: AppData;
-}
-
-/**
- * «Що я їла» + photos + FoodAssist (estimate, «Часті страви»), then «Калорії за день» with the goal.
- * In «Їжа» the text has no visible label: the sheet heading says it.
- */
-export function FoodBlock({
-  mode,
-  draft,
-  errors,
-  set,
-  update,
-  onFoodPending,
-  sheetKey,
-  date,
-  data,
-}: FoodBlockProps) {
-  const errId = useId();
-  const labelled = mode === 'day';
-  const content = (
-    <>
-      <TextArea
-        rows={3}
-        autoGrowMaxRows={FOOD_MAX_ROWS}
-        maxLength={LIMITS.text}
-        name="food"
-        placeholder="Сніданок, обід, вечеря, перекуси…"
-        value={draft.food}
-        onChange={(food) => set({ food })}
-        aria-label={labelled ? undefined : FOOD_LABEL}
-        aria-invalid={errors.food ? true : undefined}
-        aria-errormessage={errors.food ? errId : undefined}
-      />
-      <FieldError id={errId} message={errors.food} />
-      <PhotoStrip ids={draft.photos} size="md" onRemove={(id) => update((d) => removePhoto(d, id))} />
-      <FoodAssist
-        key={sheetKey}
-        date={date}
-        foodText={draft.food}
-        onAdd={(add: FoodAdd) => update((d) => applyFoodAdd(d, add))}
-        onPendingChange={onFoodPending}
-      />
-    </>
-  );
-  return (
-    <>
-      {labelled ? <Field label={FOOD_LABEL}>{content}</Field> : <div className={s.stack}>{content}</div>}
-      <KcalField
-        label="Калорії за день"
-        name="kcal"
-        value={draft.kcal}
-        onChange={(kcal) => set({ kcal })}
-        error={errors.kcal}
-        goal={data.settings.kcalGoal}
-      />
-    </>
-  );
-}
 
 export interface WorkoutBlockProps {
   mode: RecordMode;

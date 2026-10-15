@@ -6,6 +6,7 @@ import type { ISODate } from '@legko/shared';
 import { text } from '../db/rows';
 import type { Database } from '../db/sqlite';
 import { transaction } from '../db/tx';
+import { silentLogger, type Logger } from '../logger';
 
 /** Decoded size limits (the client downscales to ≤ 1280 px / ≤ 320 px JPEGs, far below these). */
 export const PHOTO_MAX_BYTES = 2 * 1024 * 1024;
@@ -52,8 +53,9 @@ export interface PhotoStore {
   /** File contents, or null when there is no such photo. `id` must already be validated. */
   read(id: string, variant: PhotoVariant): Promise<Uint8Array<ArrayBuffer> | null>;
   /**
-   * Deletes photos (rows and files) that no day references and that are older than the grace
-   * period, plus stray files without a row (interrupted saves). Returns the removed ids/files.
+   * Deletes photos (rows and files) that no day and no meal references and that are older than the grace
+   * period, plus stray files without a row (interrupted saves). Returns the removed ids/files. Deletes
+   * nothing (and warns) while a day's meal data is unreadable.
    */
   collectGarbage(now: number): { photos: string[]; strayFiles: string[] };
 }
@@ -80,15 +82,32 @@ function candidateIds(stem: string): string[] {
   return stem.endsWith('_t') ? [stem, stem.slice(0, -2)] : [stem];
 }
 
-export function createPhotoStore(db: Database, dir: string, now: () => number = Date.now): PhotoStore {
+export function createPhotoStore(
+  db: Database,
+  dir: string,
+  now: () => number = Date.now,
+  logger: Logger = silentLogger,
+): PhotoStore {
   const q = {
     insert: db.prepare(
       'INSERT INTO photos (id, date, created_at, bytes, thumb_bytes) VALUES (?, ?, ?, ?, ?)',
     ),
     exists: db.prepare('SELECT 1 AS found FROM photos WHERE id = ?'),
+    // A meal list SQLite cannot read: its photos would look unreferenced.
+    corruptMeals: db.prepare(
+      'SELECT 1 AS found FROM days WHERE meals IS NOT NULL AND NOT json_valid(meals) LIMIT 1',
+    ),
+    // Referenced = in a day's (derived) photo list or in any meal's photos. `json_each` throws on malformed
+    // JSON, hence the json_valid guard (the run is skipped anyway while such a row exists).
     unreferencedBefore: db.prepare(
       `SELECT id FROM photos p WHERE p.created_at < ?
-         AND NOT EXISTS (SELECT 1 FROM days d, json_each(d.photos) j WHERE j.value = p.id)`,
+         AND NOT EXISTS (SELECT 1 FROM days d, json_each(d.photos) j WHERE j.value = p.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM days d,
+             json_each(CASE WHEN json_valid(d.meals) THEN d.meals ELSE '[]' END) m,
+             json_each(m.value, '$.photos') j
+           WHERE j.value = p.id
+         )`,
     ),
     delete: db.prepare('DELETE FROM photos WHERE id = ?'),
   };
@@ -139,11 +158,23 @@ export function createPhotoStore(db: Database, dir: string, now: () => number = 
 
     collectGarbage(at) {
       const cutoff = at - PHOTO_GC_GRACE_MS;
+      let skipped = false;
       const photos = transaction(db, () => {
+        if (q.corruptMeals.get() !== undefined) {
+          skipped = true;
+          return [];
+        }
         const ids = q.unreferencedBefore.all(cutoff).map((row) => text(row, 'id'));
         for (const id of ids) q.delete.run(id);
         return ids;
       });
+      if (skipped) {
+        // Until that row is rewritten, any photo could be one of its meals': delete nothing at all.
+        logger.warn(
+          'photo gc: skipped, a day has unreadable meal data (the photos it may reference are kept)',
+        );
+        return { photos: [], strayFiles: [] };
+      }
       for (const id of photos) {
         rmSync(fileOf(id, 'full'), { force: true });
         rmSync(fileOf(id, 'thumb'), { force: true });

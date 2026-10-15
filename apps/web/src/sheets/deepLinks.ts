@@ -2,22 +2,27 @@
  * Sheet deep links, opened for today (plan §3.3). Push notifications use `DEEP_LINKS` in
  * @legko/shared, which stay as they are: `/?sheet=day&trained=1` (the workout push, a legacy alias
  * of «Тренування» with ✓), `/?sheet=weight`, `/?sheet=measure`. The app also understands
- * `/?sheet=day` (the full «Запис дня»), `/?sheet=food` and `/?sheet=workout[&trained=1]`.
- * The menu, setup and install sheets are not linkable.
+ * `/?sheet=day` (the full «Запис дня»), `/?sheet=food` (the day's meal list «Їжа») and
+ * `/?sheet=workout[&trained=1]`. The menu, the new-meal editor («Прийом їжі» opens from a tap, with the
+ * keyboard), setup and install sheets are not linkable: such links are ignored and cleaned.
  */
 import type { SheetPatch } from '@/store/ui';
 import type { RecordMode } from './record/model';
 
 const SHEET_PARAM = 'sheet';
 const TRAINED_PARAM = 'trained';
-const LINK_MODES: readonly RecordMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
+
+/** The record sheets a link may open. */
+export type LinkMode = Exclude<RecordMode, 'meal'>;
+
+const LINK_MODES: readonly LinkMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
 
 export interface SheetDeepLink {
-  mode: RecordMode;
+  mode: LinkMode;
   patch?: SheetPatch;
 }
 
-const isLinkMode = (v: string | null): v is RecordMode => LINK_MODES.some((m) => m === v);
+const isLinkMode = (v: string | null): v is LinkMode => LINK_MODES.some((m) => m === v);
 
 /** `search` with or without the leading «?». Unknown sheets are ignored (`null`). */
 export function parseSheetDeepLink(search: string): SheetDeepLink | null {

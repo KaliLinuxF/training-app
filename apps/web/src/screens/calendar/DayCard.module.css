@@ -17,6 +17,19 @@
   color: var(--accD);
 }
 
+/*
+ * One meal (or the «Б · Ж · В» line) of the Їжа row: never wraps, a long one ends in «…». At 390px the sub is only
+ * ≈ 242px wide, so a wrapped «Сніданок · 520 ккал · Тост з авокадо» would leave a word alone on a second line. The
+ * whole lines stay audible as the row's description, and the full text is one tap away in «Їжа».
+ */
+.line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* A newly selected day's rows fade in (killed by the global reduced-motion rule). */
 .fade {
   animation: day-in 160ms var(--ease-out);

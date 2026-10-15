@@ -15,6 +15,14 @@
   line-height: 1.4;
 }
 
+/* Why «Зберегти» waits: 13 --muted, centred like the error. */
+.hint {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+}
+
 /* Prototype line 488: three measurement tiles in a row. */
 .measureGrid {
   display: grid;

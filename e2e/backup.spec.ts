@@ -1,9 +1,13 @@
 import { readFile } from 'node:fs/promises';
-import type { Page } from '@playwright/test';
-import type { AppData } from '../packages/shared/src/index';
-import { onboarded } from './fixtures/data';
+import type { Download, Page } from '@playwright/test';
+import { addDays, DEFAULT_MEAL_TYPES, type AppData } from '../packages/shared/src/index';
+import { demo, MEALS_GOALS, MEALS_TODAY, onboarded } from './fixtures/data';
+import type { App } from './support/app';
 import { TODAY } from './support/env';
 import { expect, test } from './support/test';
+
+/** 13 October: a day of the demo seed logged as three typed meals (the first with an AI position). */
+const YESTERDAY = addDays(TODAY, -1);
 
 const backupInput = (page: Page) => page.locator('input[type="file"][accept="application/json,.json"]');
 
@@ -44,6 +48,36 @@ const file = (data: unknown, name = 'legko-backup.json') => ({
   buffer: Buffer.from(typeof data === 'string' ? data : JSON.stringify(data)),
 });
 
+/** The backup the download link saves, parsed. */
+async function downloaded(page: Page): Promise<AppData> {
+  const download: Promise<Download> = page.waitForEvent('download');
+  await page.getByRole('link', { name: 'Завантажити резервну копію' }).click();
+  return JSON.parse(await readFile(await (await download).path(), 'utf8')) as AppData;
+}
+
+/** «Відновити з копії» with `data`, confirmed in the app's own dialog; waits for «Дані відновлено». */
+async function restore(app: App, data: unknown): Promise<void> {
+  await backupInput(app.page).setInputFiles(file(data));
+  await app.page
+    .getByRole('alertdialog', { name: 'Відновити з резервної копії?' })
+    .getByRole('button', { name: 'Відновити', exact: true })
+    .click();
+  await expect(app.toast('Дані відновлено')).toBeVisible();
+}
+
+/**
+ * A backup file made before meals and macros existed: no `mealTypes` / `macroGoals` in the settings, dishes without
+ * macros, days with one food text.
+ */
+function oldFormatBackup(): Record<string, unknown> {
+  const { mealTypes: _types, macroGoals: _goals, ...settings } = backup().settings;
+  return {
+    ...backup(),
+    settings,
+    foods: [{ name: 'Борщ', portion: '300 г', kcal: 180, count: 3, lastUsed: '2026-10-01' }],
+  };
+}
+
 interface SharedFile {
   name: string;
   type: string;
@@ -74,6 +108,22 @@ test.describe('backup', () => {
     expect(data.measures.at(-1)).toEqual({ date: '2026-10-12', chest: 90, waist: 70, hips: 98 });
     expect(data.foods.map((f) => f.name)).toContain('Кава з молоком');
     expect(data.settings).toMatchObject({ goal: 60.5, kcalGoal: 1700, onboarded: true });
+
+    // Meals and macros are in the copy: every day exactly as seeded (the days before today as typed meals, today
+    // and older days as legacy food text), her meal types, the macro goals and the dishes' macros.
+    expect(data.days).toEqual(demo().days);
+    expect(data.days[TODAY]?.meals).toBeUndefined();
+    expect(data.days[YESTERDAY]?.meals?.map((m) => m.type)).toEqual(['Сніданок', 'Обід', 'Вечеря']);
+    expect(data.days[YESTERDAY]?.meals?.[0]?.items).toHaveLength(1);
+    expect(data.settings.mealTypes).toEqual([...DEFAULT_MEAL_TYPES]);
+    expect(data.settings.macroGoals).toEqual({ protein: null, fat: null, carbs: null });
+    expect(data.foods.find((f) => f.name === 'Вівсянка з бананом')).toMatchObject({
+      protein: 9,
+      fat: 6,
+      carbs: 58,
+    });
+    // A dish without known macros has no macro keys at all (never null).
+    expect(data.foods.find((f) => f.name === 'Яблуко')).not.toHaveProperty('protein');
   });
 
   test('the installed iPhone app saves the copy through the share sheet, never a download that traps it', async ({
@@ -196,6 +246,89 @@ test.describe('backup', () => {
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
     expect(native).toEqual([]);
     expect(Object.keys((await server.getData()).days)).toHaveLength(65);
+  });
+
+  test('a backup made before meals and macros restores, with the default meal types and no macro goals', async ({
+    app,
+    server,
+  }) => {
+    const old = oldFormatBackup();
+    expect(old.settings).not.toHaveProperty('mealTypes');
+    expect(old.settings).not.toHaveProperty('macroGoals');
+    await app.gotoSettings('Дані і копія');
+    await restore(app, old);
+
+    const stored = await server.getData();
+    expect(stored.settings.mealTypes).toEqual([...DEFAULT_MEAL_TYPES]);
+    expect(stored.settings.macroGoals).toEqual({ protein: null, fat: null, carbs: null });
+    expect(stored.settings.goal).toBe(70);
+    // The days stay legacy days, exactly as in the file; the dish keeps no macros.
+    expect(stored.days).toEqual(backup().days);
+    expect(stored.foods).toEqual(old.foods);
+
+    await app.openSettings('Прийоми їжі');
+    await expect(
+      app
+        .region('Мої прийоми їжі')
+        .getByRole('list', { name: 'Типи, які можна вибрати для прийому їжі' })
+        .getByRole('listitem'),
+    ).toHaveText([...DEFAULT_MEAL_TYPES]);
+    await app.openSettings('Цілі');
+    const macros = app.region('Цілі: білки, жири, вуглеводи');
+    for (const what of ['білки', 'жири', 'вуглеводи']) {
+      await expect(macros.getByRole('textbox', { name: `Ціль: ${what}, г на день` })).toHaveValue('');
+    }
+    await app.go('Налаштування');
+    await expect(app.settingsRow('Прийоми їжі')).toContainText('4 типи');
+
+    // The restored day still reads as one food text.
+    await app.goto('/calendar?date=2026-10-01');
+    await expect(app.region('1 жовтня 2026')).toContainText('Імпортований день');
+  });
+
+  test.describe('with meals and macro goals', () => {
+    test.use({ seed: 'meals' });
+
+    test('the copy carries the meals, her meal types, the macro goals and dish macros, and brings them back', async ({
+      app,
+      page,
+      server,
+    }) => {
+      // Her own list of types first.
+      const seeded = await server.getData();
+      const mealTypes = ['Сніданок', 'Після тренування', 'Вечеря'];
+      await server.importData({ ...seeded, settings: { ...seeded.settings, mealTypes } });
+
+      await app.gotoSettings('Дані і копія');
+      await expect(app.region('Дані')).toContainText('Усе синхронізовано');
+      const copy = await downloaded(page);
+      expect(copy.days[TODAY]?.meals).toEqual(MEALS_TODAY);
+      expect(copy.days[TODAY]?.meals?.map((m) => m.type)).toEqual(['Сніданок', 'Перекус']);
+      // The derived day fields are in the copy too (old clients and old servers read them).
+      expect(copy.days[TODAY]?.kcal).toBe(460);
+      expect(copy.days[YESTERDAY]?.meals).toHaveLength(3);
+      expect(copy.settings.mealTypes).toEqual(mealTypes);
+      expect(copy.settings.macroGoals).toEqual(MEALS_GOALS);
+      expect(copy.foods.find((f) => f.name === 'Кава з молоком')).toMatchObject({
+        protein: 3,
+        fat: 3,
+        carbs: 5,
+      });
+      expect(copy).toEqual(await server.exportData());
+
+      // A fresh account, then the copy: everything comes back as it was.
+      await server.importData(onboarded());
+      await app.reload();
+      await restore(app, copy);
+      expect(await server.getData()).toEqual(copy);
+
+      await app.go('Налаштування');
+      await expect(app.settingsRow('Прийоми їжі')).toContainText('3 типи');
+      await app.go('Головна');
+      const day = await app.openFoodDay();
+      await expect(app.mealRow(day, 'Сніданок')).toBeVisible();
+      await expect(app.mealRow(day, 'Перекус')).toBeVisible();
+    });
   });
 });
 

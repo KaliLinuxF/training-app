@@ -1,15 +1,22 @@
 import {
   foodKey,
+  isDayOp,
   isEmptyDay,
   isEmptyMeasure,
+  MACRO_KEYS,
+  mealSchema,
+  mergeSettingsPut,
   normalizeDay,
   normalizeSettings,
+  reduceDay,
   settingsSchema,
   useFood,
   type AppData,
   type DayEntry,
+  type DayOp,
   type FoodItem,
   type ISODate,
+  type Meal,
   type MeasureEntry,
   type MeasureValues,
   type Op,
@@ -17,17 +24,22 @@ import {
   type Settings,
   type WeightEntry,
 } from '@legko/shared';
+import { z } from 'zod';
 import { silentLogger, type Logger } from '../logger';
 import { canonicalTimeZone } from '../timezone';
 import { getKv, KV, setKv } from './kv';
-import { num, numOrNull, text } from './rows';
+import { num, numOrNull, text, textOrNull } from './rows';
 import type { Database, Row } from './sqlite';
 import { transaction } from './tx';
 
 /**
- * Persistence of `AppData`. Writes follow `applyOp()` from `@legko/shared` exactly:
- * days are normalised (`normalizeDay`), an empty day or an empty measurement is a delete,
- * puts are upserts keyed by date, and «Часті страви» go through `useFood()` / `foodKey()`.
+ * Persistence of `AppData`. Writes follow `applyOp()` from `@legko/shared` exactly: every day op is
+ * `reduceDay(readDay(date), op)` (the same pure reducer the client runs), an empty day or an empty
+ * measurement is a delete, puts are upserts keyed by date, `settings.put` goes through `mergeSettingsPut()`
+ * and «Часті страви» through `useFood()` / `foodKey()`.
+ *
+ * A day with meals keeps its derived food / kcal / photos in the usual columns (old builds, the photo GC,
+ * reminders read them) and the meals as JSON in `days.meals` (NULL = a legacy day).
  */
 export interface DataRepo {
   read(): AppData;
@@ -59,7 +71,20 @@ function parseStringArray(row: Row, column: string): string[] {
   return parsed.filter((t): t is string => typeof t === 'string');
 }
 
-function dayFromRow(row: Row): DayEntry {
+const storedMealsSchema = z.array(mealSchema);
+
+/** `days.meals` → the meals, `[]` for a legacy day (NULL), or null when the JSON is unusable. */
+function parseMeals(raw: string | null): Meal[] | null {
+  if (raw === null) return [];
+  try {
+    const parsed = storedMealsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function dayFromRow(row: Row, logger: Logger): DayEntry {
   const day: DayEntry = {
     food: text(row, 'food'),
     kcal: numOrNull(row, 'kcal'),
@@ -67,9 +92,19 @@ function dayFromRow(row: Row): DayEntry {
     types: parseStringArray(row, 'types'),
     notes: text(row, 'notes'),
   };
-  // Same shape as normalizeDay(): `photos` only when there are some.
+  // Same shape as normalizeDay(): `photos` only when there are some, `meals` only when non-empty.
   const photos = parseStringArray(row, 'photos');
   if (photos.length) day.photos = photos;
+  const meals = parseMeals(textOrNull(row, 'meals'));
+  if (meals === null) {
+    // The derived columns still hold the food text, kcal and photos: serve it as a legacy day (the next
+    // meal op converts it again). Never log the content.
+    logger.warn(
+      `days.meals of ${text(row, 'date')} is not valid meal data: serving the day without its meals`,
+    );
+  } else if (meals.length) {
+    day.meals = meals;
+  }
   return day;
 }
 
@@ -80,13 +115,21 @@ const measureFromRow = (row: Row): MeasureEntry => ({
   hips: numOrNull(row, 'hips'),
 });
 
-const foodFromRow = (row: Row): FoodItem => ({
-  name: text(row, 'name'),
-  portion: text(row, 'portion'),
-  kcal: num(row, 'kcal'),
-  count: num(row, 'count'),
-  lastUsed: text(row, 'last_used'),
-});
+function foodFromRow(row: Row): FoodItem {
+  const food: FoodItem = {
+    name: text(row, 'name'),
+    portion: text(row, 'portion'),
+    kcal: num(row, 'kcal'),
+    count: num(row, 'count'),
+    lastUsed: text(row, 'last_used'),
+  };
+  // NULL = unknown: the key is omitted, as in useFood().
+  for (const key of MACRO_KEYS) {
+    const v = numOrNull(row, key);
+    if (v !== null) food[key] = v;
+  }
+  return food;
+}
 
 export function createDataRepo(
   db: Database,
@@ -94,15 +137,25 @@ export function createDataRepo(
   logger: Logger = silentLogger,
 ): DataRepo {
   const q = {
-    allDays: db.prepare('SELECT date, food, kcal, trained, types, notes, photos FROM days ORDER BY date'),
+    allDays: db.prepare(
+      'SELECT date, food, kcal, trained, types, notes, photos, meals FROM days ORDER BY date',
+    ),
+    getDay: db.prepare(
+      'SELECT date, food, kcal, trained, types, notes, photos, meals FROM days WHERE date = ?',
+    ),
     allWeights: db.prepare('SELECT date, kg FROM weights ORDER BY date'),
     allMeasures: db.prepare('SELECT date, chest, waist, hips FROM measures ORDER BY date'),
     // `position` keeps the array order of AppData.foods, so reads equal what applyOp() produces.
-    allFoods: db.prepare('SELECT name, portion, kcal, count, last_used FROM foods ORDER BY position'),
+    allFoods: db.prepare(
+      'SELECT name, portion, kcal, count, last_used, protein, fat, carbs FROM foods ORDER BY position',
+    ),
+    // `meals` is in the update list too: a legacy write must clear a stale meal list.
     putDay: db.prepare(
-      `INSERT INTO days (date, food, kcal, trained, types, notes, photos, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO days (date, food, kcal, trained, types, notes, photos, meals, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (date) DO UPDATE SET food = excluded.food, kcal = excluded.kcal, trained = excluded.trained,
-         types = excluded.types, notes = excluded.notes, photos = excluded.photos, updated_at = excluded.updated_at`,
+         types = excluded.types, notes = excluded.notes, photos = excluded.photos, meals = excluded.meals,
+         updated_at = excluded.updated_at`,
     ),
     deleteDay: db.prepare('DELETE FROM days WHERE date = ?'),
     putWeight: db.prepare(
@@ -117,7 +170,8 @@ export function createDataRepo(
     ),
     deleteMeasure: db.prepare('DELETE FROM measures WHERE date = ?'),
     insertFood: db.prepare(
-      'INSERT INTO foods (key, position, name, portion, kcal, count, last_used) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      `INSERT INTO foods (key, position, name, portion, kcal, count, last_used, protein, fat, carbs)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ),
     hasWeight: db.prepare('SELECT 1 AS found FROM weights WHERE date = ?'),
     hasMeasure: db.prepare('SELECT 1 AS found FROM measures WHERE date = ?'),
@@ -148,16 +202,28 @@ export function createDataRepo(
   function writeFoods(foods: readonly FoodItem[]): void {
     db.exec('DELETE FROM foods');
     foods.forEach((f, position) =>
-      q.insertFood.run(foodKey(f.name), position, f.name, f.portion, f.kcal, f.count, f.lastUsed),
+      q.insertFood.run(
+        foodKey(f.name),
+        position,
+        f.name,
+        f.portion,
+        f.kcal,
+        f.count,
+        f.lastUsed,
+        f.protein ?? null,
+        f.fat ?? null,
+        f.carbs ?? null,
+      ),
     );
   }
 
-  function putDay(date: ISODate, value: DayEntry, at: number): void {
-    const entry = normalizeDay(value);
-    if (isEmptyDay(entry)) {
-      q.deleteDay.run(date);
-      return;
-    }
+  function readDay(date: ISODate): DayEntry | undefined {
+    const row = q.getDay.get(date);
+    return row ? dayFromRow(row, logger) : undefined;
+  }
+
+  /** Stores an already normalised, non-empty day: the derived columns and the meals (NULL for a legacy day). */
+  function writeDay(date: ISODate, entry: DayEntry, at: number): void {
     q.putDay.run(
       date,
       entry.food,
@@ -166,8 +232,16 @@ export function createDataRepo(
       JSON.stringify(entry.types),
       entry.notes,
       JSON.stringify(entry.photos ?? []),
+      entry.meals?.length ? JSON.stringify(entry.meals) : null,
       at,
     );
+  }
+
+  /** One day op through the shared reducer, on the stored day. */
+  function applyDayOp(op: DayOp, at: number): void {
+    const next = reduceDay(readDay(op.date), op);
+    if (next) writeDay(op.date, next, at);
+    else q.deleteDay.run(op.date);
   }
 
   function putMeasure(date: ISODate, value: MeasureValues, at: number): void {
@@ -175,15 +249,10 @@ export function createDataRepo(
     else q.putMeasure.run(date, value.chest, value.waist, value.hips, at);
   }
 
-  type RowOp = Exclude<Op, { kind: 'food.use' | 'food.delete' }>;
+  type RowOp = Exclude<Op, DayOp | { kind: 'food.use' | 'food.delete' }>;
 
   function applyRowOp(op: RowOp, at: number): void {
     switch (op.kind) {
-      case 'day.put':
-        return putDay(op.date, op.value, at);
-      case 'day.delete':
-        q.deleteDay.run(op.date);
-        return;
       case 'weight.put':
         q.putWeight.run(op.date, op.kg, at);
         return;
@@ -196,14 +265,15 @@ export function createDataRepo(
         q.deleteMeasure.run(op.date);
         return;
       case 'settings.put':
-        return writeSettings(op.value);
+        // An absent mealTypes / macroGoals (old clients) keeps the stored value.
+        return writeSettings(mergeSettingsPut(readSettings(), op.value));
     }
   }
 
   return {
     read(): AppData {
       const days: Record<ISODate, DayEntry> = {};
-      for (const row of q.allDays.all()) days[text(row, 'date')] = dayFromRow(row);
+      for (const row of q.allDays.all()) days[text(row, 'date')] = dayFromRow(row, logger);
       const weights: WeightEntry[] = q.allWeights
         .all()
         .map((row) => ({ date: text(row, 'date'), kg: num(row, 'kg') }));
@@ -224,6 +294,8 @@ export function createDataRepo(
           } else if (op.kind === 'food.delete') {
             const key = foodKey(op.name);
             foods = (foods ?? readFoods()).filter((f) => foodKey(f.name) !== key);
+          } else if (isDayOp(op)) {
+            applyDayOp(op, at);
           } else {
             applyRowOp(op, at);
           }
@@ -236,7 +308,11 @@ export function createDataRepo(
       const at = now();
       transaction(db, () => {
         db.exec('DELETE FROM days; DELETE FROM weights; DELETE FROM measures;');
-        for (const [date, entry] of Object.entries(data.days)) putDay(date, entry, at);
+        // Re-normalised: the derived fields of days with meals are recomputed; `meals: []` is a legacy day.
+        for (const [date, entry] of Object.entries(data.days)) {
+          const day = normalizeDay(entry);
+          if (!isEmptyDay(day)) writeDay(date, day, at);
+        }
         for (const w of data.weights) q.putWeight.run(w.date, w.kg, at);
         for (const m of data.measures) putMeasure(m.date, m, at);
         writeFoods(data.foods);

@@ -1,4 +1,4 @@
-import { addDays, type Op } from '@legko/shared';
+import { addDays, LEGACY_MEAL_ID, mealIdSchema, type DayEntry, type Meal, type Op } from '@legko/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ApiModule from '../lib/api';
 import { ApiError } from '../lib/api';
@@ -10,6 +10,7 @@ import {
   flushNow,
   getAppData,
   hasDeviceCache,
+  newMealId,
   onUnauthorized,
   refreshFromServer,
   resetLocal,
@@ -624,5 +625,138 @@ describe('resetLocal', () => {
     expect(mocks.idb.delMany).toHaveBeenCalledWith([CACHE_KEYS.data, CACHE_KEYS.outbox]);
     expect(idb.store.size).toBe(0);
     expect(await hasDeviceCache()).toBe(false);
+  });
+});
+
+describe('meals: saveMeal / deleteMeal / setDayMeta', () => {
+  const meal = (patch: Partial<Meal> = {}): Meal => ({
+    id: 'breakfast001',
+    type: 'Сніданок',
+    time: '08:30',
+    text: 'Тост з тунцем',
+    kcal: 420,
+    protein: 27,
+    fat: 11,
+    carbs: 36,
+    ...patch,
+  });
+  const outbox = async (): Promise<Op[]> => {
+    await flushCacheWrites();
+    return ((idb.store.get(CACHE_KEYS.outbox) ?? []) as { op: Op }[]).map((item) => item.op);
+  };
+
+  it('saveMeal applies optimistically, converts a legacy day and queues meal.put + food.use', async () => {
+    useDataStore.setState({
+      data: sampleData({
+        days: { [TODAY]: { food: 'Борщ', kcal: 500, trained: null, types: [], notes: '' } },
+      }),
+    });
+    const uses = [{ name: 'Тост', portion: '2 шт', kcal: 310, protein: 24 }];
+    expect(dataActions.saveMeal(TODAY, meal(), uses)).toBe(true);
+    expect(getAppData().days[TODAY]).toMatchObject({ food: 'Сніданок: Тост з тунцем\nБорщ', kcal: 920 });
+    expect(getAppData().days[TODAY]?.meals?.map((m) => m.id)).toEqual(['breakfast001', LEGACY_MEAL_ID]);
+    expect(getAppData().foods).toMatchObject([{ name: 'Тост', count: 1, protein: 24 }]);
+    expect(await outbox()).toEqual([
+      { kind: 'meal.put', date: TODAY, value: meal() },
+      { kind: 'food.use', date: TODAY, value: uses[0] },
+    ]);
+    expect(sync().pending).toBe(2);
+  });
+
+  it('leaves out an invalid dish use instead of blocking the meal', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const uses = [
+      { name: '  ', portion: '', kcal: 100 },
+      { name: 'Кава', portion: '', kcal: 40, fat: 0.3 },
+      { name: 'Чай', portion: '', kcal: 2 },
+    ];
+    expect(dataActions.saveMeal(TODAY, meal(), uses)).toBe(true);
+    expect((await outbox()).map((op) => op.kind)).toEqual(['meal.put', 'food.use']);
+    expect(getAppData().foods.map((f) => f.name)).toEqual(['Чай']);
+    expect(sync().error).toBeNull();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('returns false and queues nothing for the 21st meal of a day; an existing meal can still be saved', async () => {
+    for (let i = 0; i < 20; i++)
+      expect(dataActions.saveMeal(TODAY, meal({ id: `meal${i}`, time: null }))).toBe(true);
+    const before = getAppData();
+    const queuedBefore = (await outbox()).length;
+    expect(
+      dataActions.saveMeal(TODAY, meal({ id: 'meal20' }), [{ name: 'Тост', portion: '', kcal: 1 }]),
+    ).toBe(false);
+    expect(getAppData()).toBe(before);
+    expect(await outbox()).toHaveLength(queuedBefore);
+    expect(sync().error).toBeNull();
+    expect(dataActions.saveMeal(TODAY, meal({ id: 'meal3', time: null, text: 'Омлет' }))).toBe(true);
+    expect(getAppData().days[TODAY]?.meals?.[3]?.text).toBe('Омлет');
+  });
+
+  it('returns false for an invalid meal (and says so); an empty meal deletes it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(dataActions.saveMeal(TODAY, meal({ protein: 12.3 }))).toBe(false);
+    expect(sync().error).toBe(SYNC_ERRORS.invalidLocal);
+    expect(warn).toHaveBeenCalled();
+    expect(getAppData().days).toEqual({});
+
+    expect(dataActions.saveMeal(TODAY, meal())).toBe(true);
+    expect(
+      dataActions.saveMeal(TODAY, meal({ text: '', kcal: null, protein: null, fat: null, carbs: null })),
+    ).toBe(true);
+    expect(getAppData().days).toEqual({});
+  });
+
+  it('deleteMeal queues meal.delete and removes the meal at once', async () => {
+    dataActions.saveMeal(TODAY, meal());
+    dataActions.saveMeal(
+      TODAY,
+      meal({ id: 'lunch0000001', type: 'Обід', time: '13:00', text: 'Суп', kcal: 200 }),
+    );
+    expect(dataActions.deleteMeal(TODAY, 'breakfast001')).toBe(true);
+    expect(getAppData().days[TODAY]).toMatchObject({ food: 'Обід: Суп', kcal: 200 });
+    expect((await outbox()).at(-1)).toEqual({ kind: 'meal.delete', date: TODAY, id: 'breakfast001' });
+  });
+
+  it('setDayMeta sends only the keys given and keeps the meals', async () => {
+    dataActions.saveMeal(TODAY, meal());
+    expect(dataActions.setDayMeta(TODAY, { notes: 'Сон 8 год', types: undefined })).toBe(true);
+    expect(dataActions.setDayMeta(TODAY, { trained: true, types: ['Кардіо'] })).toBe(true);
+    expect(getAppData().days[TODAY]).toMatchObject({ trained: true, types: ['Кардіо'], notes: 'Сон 8 год' });
+    expect(getAppData().days[TODAY]?.meals).toEqual([meal()]);
+    const ops = await outbox();
+    expect(ops.slice(1)).toEqual([
+      { kind: 'day.meta', date: TODAY, value: { notes: 'Сон 8 год' } },
+      { kind: 'day.meta', date: TODAY, value: { trained: true, types: ['Кардіо'] } },
+    ]);
+    expect(Object.keys((ops[1] as { value: object }).value)).toEqual(['notes']);
+  });
+
+  it('the deprecated saveDay strips meals: the day.put op is legacy-shaped', async () => {
+    dataActions.saveMeal(TODAY, meal());
+    const stored = getAppData().days[TODAY];
+    expect(dataActions.saveDay(TODAY, { ...(stored as DayEntry), trained: true })).toBe(true);
+    const put = (await outbox()).at(-1);
+    expect(put).toMatchObject({ kind: 'day.put' });
+    expect(put && 'value' in put ? put.value : {}).not.toHaveProperty('meals');
+    // Rule L keeps the meals locally as the server does.
+    expect(getAppData().days[TODAY]?.meals).toEqual([meal()]);
+  });
+
+  it('newMealId: 12 characters a meal id may have, different every time', () => {
+    const ids = new Set(Array.from({ length: 300 }, newMealId));
+    expect(ids.size).toBe(300);
+    for (const id of ids) {
+      expect(id).toMatch(/^[A-Za-z0-9_-]{12}$/);
+      expect(mealIdSchema.safeParse(id).success).toBe(true);
+    }
+  });
+
+  it('newMealId works without Web Crypto', () => {
+    vi.stubGlobal('crypto', undefined);
+    try {
+      expect(newMealId()).toMatch(/^[A-Za-z0-9_-]{12}$/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

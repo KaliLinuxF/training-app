@@ -5,7 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { todayISO, type AppData } from '@legko/shared';
 import { useDataStore } from '@/store/data';
 import { useUiStore } from '@/store/ui';
+import { toneClass } from '@/ui/tone';
 import { NOT_ENOUGH_DATA, RECORD_MEASURE, RECORD_WEIGHT } from './ChartPlaceholder';
+import { MACROS_LABEL, NO_MACROS_IN_PERIOD } from './model';
 import { NO_KCAL_HISTORY, NO_KCAL_IN_PERIOD, SHOW_MORE } from './NutritionCard';
 import barStyles from './PeriodBar.module.css';
 import { PERIOD_STORAGE_KEY } from './period';
@@ -249,9 +251,80 @@ describe('ProgressView — cards', () => {
     renderView();
     const nutrition = region('Харчування');
     expect(text(nutrition)).toContain('ціль 1 700 ккал');
-    const terms = [...nutrition.querySelectorAll('dt')].map((dt) => dt.textContent);
+    const kcal = nutrition.querySelector('dl')!;
+    expect(kcal.getAttribute('aria-label')).toBeNull();
+    const terms = [...kcal.querySelectorAll('dt')].map((dt) => dt.textContent);
     expect(terms).toEqual(['Сер. цього тижня', 'Сер. цього місяця']);
-    expect([...nutrition.querySelectorAll('dd')].map((dd) => text(dd))).toEqual(['1 650ккал', '1 625ккал']);
+    expect([...kcal.querySelectorAll('dd')].map((dd) => text(dd))).toEqual(['1 650ккал', '1 625ккал']);
+    expect(text(nutrition)).not.toContain('Період');
+  });
+});
+
+describe('ProgressView — «Б · Ж · В»', () => {
+  const macroStrip = () => within(region('Харчування')).getByLabelText(MACROS_LABEL);
+  const cells = (strip: HTMLElement) =>
+    [...strip.querySelectorAll('dt')].map((dt) => [text(dt), text(dt.nextElementSibling!)]);
+
+  it('shows the period average per day under the kcal averages, before the chart', () => {
+    renderView();
+    const nutrition = region('Харчування');
+    const strip = macroStrip();
+    expect(strip.tagName).toBe('DL');
+    expect(cells(strip)).toEqual([
+      ['Білки', '99г'],
+      ['Жири', '59г'],
+      ['Вуглеводи', '194г'],
+    ]);
+    const caption = within(nutrition).getByText(/середнє за день/);
+    expect(caption.tagName).toBe('P');
+    expect(text(caption)).toBe('Б · Ж · В — середнє за день · цього тижня');
+    // kcal strip → caption → Б · Ж · В strip → chart.
+    const [kcal] = nutrition.querySelectorAll('dl');
+    const chart = within(nutrition).getByRole('img', { name: /^Калорії/ });
+    const follows = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(kcal!, caption)).toBe(true);
+    expect(follows(caption, strip)).toBe(true);
+    expect(follows(strip, chart)).toBe(true);
+    expect(within(nutrition).queryByText(NO_MACROS_IN_PERIOD)).toBeNull();
+  });
+
+  it('names the goals in the labels and draws an average above its goal lavender', () => {
+    const data = progressData();
+    data.settings.macroGoals = { protein: 90, fat: 60, carbs: null };
+    renderView(data);
+    const strip = macroStrip();
+    expect(cells(strip)).toEqual([
+      ['Білки · ціль 90 г', '99г'],
+      ['Жири · ціль 60 г', '59г'],
+      ['Вуглеводи', '194г'],
+    ]);
+    const values = [...strip.querySelectorAll('dd')];
+    expect(values[0]?.classList.contains(toneClass('acc')!)).toBe(true);
+    expect(values[1]?.classList.contains(toneClass('ink')!)).toBe(true);
+    expect(values[2]?.classList.contains(toneClass('ink')!)).toBe(true);
+  });
+
+  it('the caption follows the period', () => {
+    renderView();
+    fireEvent.click(radio('Весь час'));
+    expect(text(within(region('Харчування')).getByText(/середнє за день/))).toBe(
+      'Б · Ж · В — середнє за день · за весь час',
+    );
+    fireEvent.click(radio('Місяць'));
+    expect(text(within(region('Харчування')).getByText(/середнє за день/))).toBe(
+      'Б · Ж · В — середнє за день · за 30 днів',
+    );
+  });
+
+  it('says so instead of the strip when the period has no complete day', () => {
+    renderView(freshData());
+    const nutrition = region('Харчування');
+    expect(within(nutrition).getByText(NO_MACROS_IN_PERIOD)).toBeTruthy();
+    expect(within(nutrition).queryByLabelText(MACROS_LABEL)).toBeNull();
+    expect(text(within(nutrition).getByText(/середнє за день/))).toBe(
+      'Б · Ж · В — середнє за день · цього тижня',
+    );
+    expect(nutrition.querySelectorAll('dl')).toHaveLength(1);
   });
 });
 

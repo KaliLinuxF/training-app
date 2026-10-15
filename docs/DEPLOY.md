@@ -40,6 +40,8 @@ Files on the server:
   data/                            owner uid 1000 (the container's `node` user)
     legko.db  legko.db-wal  legko.db-shm
     backups/legko-YYYY-MM-DD.db    daily, newest 30 kept
+    backups/legko-pre-v3-YYYY-MM-DD.db       written once, right before the schema v3 (meals) migration; never pruned
+    backups/legko-pre-down-v3-YYYY-MM-DD.db  written by `cli.js downgrade-schema` (rollback); never pruned
     photos/<id>.jpg  <id>_t.jpg    food photo diary (full + thumbnail)
   deploys.log                      one line per deploy / rollback (UTC)
 ```
@@ -134,8 +136,10 @@ For scripting, `set-password --stdin` reads the password from one line of stdin 
   (`Europe/Kyiv`) whatever time zone the app is set to, so changing the zone cannot reset it. The counter is in the
   database (survives restarts). Over the limit → «Ліміт підрахунків на сьогодні вичерпано» until midnight Kyiv time.
 - **Photos** arrive with the estimate (downscaled JPEG + thumbnail, made on the phone) and are stored in
-  `data/photos/` before the model is called. Photos that no day references 24 h later are deleted daily at ~03:40
-  Kyiv time (log line `photo gc: …`).
+  `data/photos/` before the model is called. Photos that no day and no meal references 24 h later are deleted daily
+  at ~03:40 Kyiv time (log line `photo gc: …`; the run is skipped while a day's meal data is unreadable).
+- **Б · Ж · В**: every estimate and «✨ Перерахувати» also returns protein / fat / carbs per position (grams, 0.5 g
+  steps, 0–1 000, checked on the server); one model call each, as before — the budget is unchanged.
 - **Logs** never contain the description, the photo or the key. A failed estimate logs one line such as
   `food estimate failed: HTTP 529 overloaded_error: …`, `request timed out` or `refusal (category: …)`; a rejected
   key logs `Anthropic key rejected (HTTP 401): check ANTHROPIC_API_KEY` once, and estimates answer 503 until the key
@@ -176,6 +180,57 @@ Retags `training-app:previous` as `latest`, recreates the app and waits for it t
 commit and deploy). If the bad release already migrated the database (`PRAGMA user_version`), the old code may not
 understand it: restore the backup taken before the deploy (see below). For risky releases make a manual backup first.
 
+### Rollback after the meals release (schema v3)
+
+The release with meals and Б · Ж · В («Прийоми їжі та БЖУ», `docs/meals-macros.md`) migrates the database to schema
+**v3** on its first start: it adds `days.meals` (the meal list of a day, `NULL` = a day from before meals) and
+`foods.protein` / `foods.fat` / `foods.carbs`. Nothing existing is rewritten, and every day keeps its food text, kcal
+and photos in the old columns (for a day with meals they are derived from the meals). Just before migrating, the
+app saves `data/backups/legko-pre-v3-<deploy day>.db` (log line `database schema v2 → v3: saved … first`).
+
+**`deploy/deploy.sh rollback` alone fails on a v3 database:** the previous build refuses a schema newer than its own
+(`Database schema v3 is newer than this build (v2)`), crashes on start and never gets healthy. Downgrade the schema
+with the **new** image first — while `training-app:latest` is still the new one — then roll back:
+
+```bash
+ssh deploy@64.176.75.160
+cd /opt/training-app
+docker compose stop app
+docker compose run --rm --no-deps app node /app/server/cli.js downgrade-schema
+exit
+deploy/deploy.sh rollback          # from your machine
+```
+
+1. `docker compose stop app` — nothing may write to the database meanwhile (Caddy keeps answering 502 for a minute).
+2. `downgrade-schema` (the image has no `ENTRYPOINT`, so the command replaces its `CMD`; it uses `DATA_DIR=/data`):
+   refuses unless the database is at v3 (then nothing is changed); saves
+   `backups/legko-pre-down-v3-<Kyiv date>.db`; then, in one transaction, drops `days.meals` and the three `foods`
+   macro columns and sets `user_version` to 2. It prints what it saved and dropped. Every day keeps its food text
+   (the «Сніданок: …» lines of its meals), its kcal and its first 12 photos; lost are only the meal structure
+   (types, times, positions) and all protein / fat / carbs values.
+3. `deploy/deploy.sh rollback` — the previous build starts on the v2 database and gets healthy.
+
+Good to know:
+
+- **Fallback** (the downgrade failed, or something looks wrong): stop the app and restore
+  `backups/legko-pre-v3-<deploy day>.db` over `legko.db` exactly as in [Restore from a backup file](#restore-from-a-backup-file)
+  (delete `legko.db-wal` / `-shm` too), then `deploy/deploy.sh rollback`. This **loses everything logged after the
+  deploy** (meals, weigh-ins, workouts…), so prefer the downgrade.
+- **Never lower `user_version` by hand** (e.g. `PRAGMA user_version = 2` without dropping the columns): the old build
+  would run, but the next upgrade's `ADD COLUMN meals` fails, and a stale `meals` JSON left in a row would later
+  override food logged meanwhile. Only `downgrade-schema` does both steps together.
+- **Phones still on the new version** keep unsent changes in their outbox. The old server answers new kinds of
+  changes (`meal.put`, `meal.delete`, `day.meta`) with `invalid_op`, and the app drops each one with «Сервер відхилив
+  одну зміну — її не збережено»: a meal she logged offline right before the rollback must be typed again. Ask her to
+  open the app once while online before you roll back; after the rollback the installed app reloads itself into
+  the old version the next time it comes to the foreground.
+- **Upgrading again** later simply re-runs the v3 migration (a new `legko-pre-v3-…` snapshot first): every day then
+  starts as a day without meals (one block «Їжа за день», kcal and photos intact), and dishes without macros.
+- A day whose `days.meals` cannot be read (hand-edited or corrupt JSON) is served as a day without meals (log
+  `days.meals of <date> is not valid meal data …`), and the daily photo clean-up **pauses** while such a row exists
+  (log `photo gc: skipped, a day has unreadable meal data …`) so no photo of that day is deleted. Saving any meal of
+  that day in the app rewrites the row and ends both warnings.
+
 ## Logs and status
 
 ```bash
@@ -187,6 +242,10 @@ deploy/deploy.sh status               # containers + health, latest/previous ver
 
 Logs are Docker `json-file`, rotated at 10 MB × 3 files per container. Caddy writes no access log; the app logs
 one line per request (method, path, status, ms) and never bodies or cookies.
+
+Log lines of the meals release worth knowing: `database schema v2 → v3: saved legko-pre-v3-… first` (once, on the
+first start), `days.meals of <date> is not valid meal data …` and `photo gc: skipped, a day has unreadable meal
+data …` (see [Rollback after the meals release](#rollback-after-the-meals-release-schema-v3)).
 
 ## Limits and abuse protection
 
@@ -286,6 +345,8 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 | Symptom                            | Look at                                                                  |
 | ---------------------------------- | ------------------------------------------------------------------------ |
 | deploy fails at "not healthy"      | the printed app logs; `deploy/deploy.sh rollback`, fix, deploy again     |
+| rollback: "schema v3 is newer"     | run `downgrade-schema` first (Rollback after the meals release)          |
+| `photo gc: skipped …` every night  | a day with unreadable `days.meals`: open and save that day's meal        |
 | site answers 502                   | `deploy/deploy.sh status`, `deploy/deploy.sh logs`                       |
 | "data is not writable by uid 1000" | run the printed `chown` as root once                                     |
 | certificate / HTTPS errors         | `deploy/deploy.sh logs caddy`; DNS A record; ports 80/443 open in ufw    |

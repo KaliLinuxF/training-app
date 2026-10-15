@@ -2,7 +2,7 @@
  * Direct access to the e2e server's HTTP API (outside the browser): log in, replace all data,
  * read what actually reached the server.
  */
-import { expect, type APIRequestContext, type BrowserContext } from '@playwright/test';
+import { expect, type APIRequestContext, type APIResponse, type BrowserContext } from '@playwright/test';
 import type { AppData } from '../../packages/shared/src/index';
 import { BASE_URL, PASSWORD } from './env';
 
@@ -40,6 +40,21 @@ export class ServerApi {
   /** What the server currently stores (`GET /api/data`). */
   async getData(): Promise<AppData> {
     const res = await this.request.get(`${BASE_URL}/api/data`);
+    expect(res.status()).toBe(200);
+    return (await res.json()) as AppData;
+  }
+
+  /**
+   * Sends raw ops (`POST /api/ops` with the mutation headers), e.g. the exact shapes an old client sends.
+   * Returns the response unchecked: the caller asserts the status (200, or 400 `invalid_op` with an index).
+   */
+  sendOps(ops: unknown[]): Promise<APIResponse> {
+    return this.request.post(`${BASE_URL}/api/ops`, { data: { ops }, headers: MUTATION_HEADERS });
+  }
+
+  /** The backup file the app downloads (`GET /api/export`), parsed. */
+  async exportData(): Promise<AppData> {
+    const res = await this.request.get(`${BASE_URL}/api/export`);
     expect(res.status()).toBe(200);
     return (await res.json()) as AppData;
   }

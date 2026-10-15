@@ -5,6 +5,7 @@ import { ICON_PATHS } from '@/ui';
 import {
   DESKTOP_DEFAULT_SECTION,
   goalsSummary,
+  mealTypesSummary,
   notifBadge,
   parseSettingsSection,
   remindersSummary,
@@ -23,7 +24,7 @@ import { syncStatus, withReminder } from './model';
 /** `f0` groups thousands with a (narrow) no-break space, which `\s` matches; compare with plain spaces. */
 const plain = (text: string) => text.replace(/\s/g, ' ');
 
-const ALL: SettingsSectionId[] = ['reminders', 'goals', 'workouts', 'appearance', 'data'];
+const ALL: SettingsSectionId[] = ['reminders', 'goals', 'workouts', 'meals', 'appearance', 'data'];
 
 describe('sections & routes', () => {
   it('has one route, title and icon per section, in two groups', () => {
@@ -32,6 +33,7 @@ describe('sections & routes', () => {
       '/settings/reminders',
       '/settings/goals',
       '/settings/workouts',
+      '/settings/meals',
       '/settings/appearance',
       '/settings/data',
     ]);
@@ -39,6 +41,7 @@ describe('sections & routes', () => {
       reminders: 'Нагадування',
       goals: 'Цілі',
       workouts: 'Типи тренувань',
+      meals: 'Прийоми їжі',
       appearance: 'Вигляд',
       data: 'Дані і копія',
     });
@@ -46,14 +49,17 @@ describe('sections & routes', () => {
       reminders: { icon: 'bell', tone: 'acc' },
       goals: { icon: 'target', tone: 'acc2' },
       workouts: { icon: 'workout', tone: 'acc' },
+      meals: { icon: 'food', tone: 'acc2' },
       appearance: { icon: 'theme', tone: 'neutral' },
       data: { icon: 'data', tone: 'acc2' },
     });
     for (const id of ALL) expect(ICON_PATHS[SECTION_ICONS[id].icon]).toBeTruthy();
+    // «Прийоми їжі» joins what she plans with, right after «Типи тренувань».
     expect(SETTINGS_GROUPS).toEqual([
-      ['reminders', 'goals', 'workouts'],
+      ['reminders', 'goals', 'workouts', 'meals'],
       ['appearance', 'data'],
     ]);
+    expect(SETTINGS_GROUPS.flat()).toEqual(ALL);
     expect(DESKTOP_DEFAULT_SECTION).toBe('reminders');
   });
 
@@ -61,9 +67,12 @@ describe('sections & routes', () => {
     expect(parseSettingsSection(undefined)).toBeNull();
     expect(parseSettingsSection('')).toBeNull();
     for (const id of ALL) expect(parseSettingsSection(id)).toBe(id);
+    expect(parseSettingsSection('meals')).toBe('meals');
     expect(parseSettingsSection('foo')).toBe('invalid');
     expect(parseSettingsSection('Reminders')).toBe('invalid');
+    expect(parseSettingsSection('Meals')).toBe('invalid');
     expect(parseSettingsSection('types')).toBe('invalid');
+    expect(parseSettingsSection('food')).toBe('invalid');
   });
 });
 
@@ -93,6 +102,18 @@ describe('row summaries', () => {
     expect(typesSummary(own(15))).toBe('22 типи');
     expect(typesSummary(own(18))).toBe('25 типів');
     expect(typesSummary(own(LIMITS.customTypes))).toBe('37 типів');
+  });
+
+  it('counts her meal types with Ukrainian plurals, and says so when there are none', () => {
+    const own = (n: number) => Array.from({ length: n }, (_, i) => `Прийом ${i + 1}`);
+    expect(mealTypesSummary(defaultSettings().mealTypes)).toBe('4 типи');
+    expect(mealTypesSummary(['Сніданок'])).toBe('1 тип');
+    expect(mealTypesSummary(['Сніданок', 'Обід'])).toBe('2 типи');
+    expect(mealTypesSummary(own(5))).toBe('5 типів');
+    expect(mealTypesSummary(own(LIMITS.mealTypes))).toBe('12 типів');
+    // Duplicates in another case (older data) are not counted twice.
+    expect(mealTypesSummary(['Обід', 'обід', 'Вечеря'])).toBe('2 типи');
+    expect(mealTypesSummary([])).toBe('Немає типів');
   });
 
   it('names the theme', () => {

@@ -83,6 +83,14 @@ export const MIGRATIONS: readonly string[] = [
     thumb_bytes INTEGER NOT NULL
   ) STRICT;
   `,
+  // v3: meals and macros. Additive only: NULL meals = a legacy day, NULL macros = unknown.
+  // Reversed by `downgrade-schema` (db/downgrade.ts), which drops exactly these columns.
+  `
+  ALTER TABLE days ADD COLUMN meals TEXT;
+  ALTER TABLE foods ADD COLUMN protein REAL;
+  ALTER TABLE foods ADD COLUMN fat REAL;
+  ALTER TABLE foods ADD COLUMN carbs REAL;
+  `,
 ];
 
 export function schemaVersion(db: Database): number {

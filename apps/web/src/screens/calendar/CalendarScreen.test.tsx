@@ -1,15 +1,23 @@
-import { emptyData, type AppData, type DayEntry } from '@legko/shared';
+import { emptyData, normalizeDay, type AppData, type DayEntry, type Meal } from '@legko/shared';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { flushSync } from 'react-dom';
+import type * as ReactDomModule from 'react-dom';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { getAppData, resetLocal, useDataStore } from '@/store/data';
 import { fakeIdb } from '@/store/test-utils';
-import { useUiStore } from '@/store/ui';
+import { useUiStore, type SheetState } from '@/store/ui';
 import { installMatchMedia } from '@/ui/internal/testing';
 import { CalendarScreen } from './CalendarScreen';
+import s from './DayCard.module.css';
 
 vi.mock('@/lib/useToday', () => ({ useToday: () => '2026-10-10' }));
+// The real flushSync behind a spy: the new-meal editor must open inside the tap (iOS keyboard).
+vi.mock('react-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof ReactDomModule>();
+  return { ...actual, flushSync: vi.fn(actual.flushSync) };
+});
 // The photo strip belongs to the food feature; only check what the calendar hands it.
 vi.mock('@/features/food', () => ({
   PhotoStrip: ({ ids, size }: { ids: readonly string[]; size?: string }) => (
@@ -28,6 +36,39 @@ const day = (patch: Partial<DayEntry> = {}): DayEntry => ({
   notes: '',
   ...patch,
 });
+
+const OCT3_MEALS: Meal[] = [
+  {
+    id: 'oct3Lunch',
+    type: 'Обід',
+    time: '13:00',
+    text: 'Борщ, хліб',
+    kcal: 400,
+    protein: 14,
+    fat: 12,
+    carbs: 50,
+  },
+  {
+    id: 'oct3Breakfast',
+    type: 'Сніданок',
+    time: '08:30',
+    text: 'Сирники зі сметаною',
+    kcal: 420,
+    protein: 22,
+    fat: 22,
+    carbs: 33,
+    photos: ['ph3'],
+  },
+];
+const NB = ' ';
+/** The Їжа sub of 3 October, in time order: one line per meal, then the day's «Б · Ж · В». */
+const OCT3_LINES = [
+  `Сніданок · 420${NB}ккал · Сирники зі сметаною`,
+  `Обід · 400${NB}ккал · Борщ, хліб`,
+  `Б${NB}36${NB}· Ж${NB}34${NB}· В${NB}83${NB}г`,
+];
+/** As `getByText` sees it (its default normaliser turns every NO-BREAK SPACE into a space). */
+const shown = (text: string) => text.replaceAll(NB, ' ');
 
 function seed(): AppData {
   const data = emptyData();
@@ -49,6 +90,8 @@ function seed(): AppData {
     photos: ['ph1'],
     notes: 'Гарне самопочуття',
   });
+  // A day logged as meals (food, kcal and photos derived by the reducer).
+  data.days['2026-10-03'] = normalizeDay({ ...day(), meals: OCT3_MEALS });
   data.weights = [{ date: '2026-10-05', kg: 65.4 }];
   return data;
 }
@@ -393,6 +436,60 @@ describe('CalendarScreen', () => {
     expect(within(card).getAllByText('Додати')).toHaveLength(3);
     expect(within(card).getByText('Ще не відмічено')).toBeTruthy();
     expect(within(card).queryByRole('button', { name: /^Нотатки/ })).toBeNull();
+    expect(card.textContent).not.toContain('—');
+  });
+
+  it('an empty day’s Їжа «Додати» opens the new-meal editor for that date, inside the tap', async () => {
+    const { flushSync: realFlushSync } = await vi.importActual<typeof ReactDomModule>('react-dom');
+    const seen: (SheetState | null)[] = [];
+    vi.mocked(flushSync)
+      .mockClear()
+      .mockImplementationOnce(<R,>(fn: () => R): R => {
+        seen.push(sheet());
+        const result = realFlushSync(fn);
+        seen.push(sheet());
+        return result;
+      });
+    renderAt('/calendar?date=2026-10-04');
+    fireEvent.click(dayRow('Їжа'));
+    // Opened (and rendered) synchronously within the click, so «Що я їла» can take focus with the keyboard.
+    expect(flushSync).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toBeNull();
+    expect(seen[1]).toMatchObject({ date: '2026-10-04', mode: 'meal' });
+    expect(sheet()).toBe(seen[1]);
+
+    // A day with food opens the day's list «Їжа» the usual way (no forced sync render).
+    useUiStore.setState({ sheet: null });
+    cleanup();
+    renderAt('/calendar?date=2026-10-03');
+    fireEvent.click(dayRow('Їжа'));
+    expect(sheet()).toMatchObject({ date: '2026-10-03', mode: 'food' });
+    expect(flushSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('a day with meals: one unwrapped line per meal, then «Б · Ж · В»; the full lines describe the row', () => {
+    renderAt('/calendar?date=2026-10-03');
+    const card = dayCard();
+    const food = within(card).getByRole('button', {
+      name: `Їжа: 820 ккал, 2${NB}прийоми`,
+      description: OCT3_LINES.join(' '),
+    });
+    expect(food.getAttribute('aria-haspopup')).toBe('dialog');
+    const lines = OCT3_LINES.map((line) => within(food).getByText(shown(line)));
+    for (const line of lines) {
+      expect(line.tagName).toBe('SPAN');
+      expect(line.className).toBe(s.line);
+      expect(line.children).toHaveLength(0);
+    }
+    // Siblings in the one sub (in time order), which is what the row's description points at.
+    const sub = lines[0]?.parentElement;
+    expect(sub && lines.every((line) => line.parentElement === sub)).toBe(true);
+    expect(food.getAttribute('aria-describedby')).toBe(sub?.id);
+    expect(sub?.textContent).toBe(OCT3_LINES.join(' '));
+    // The derived day photos stay under the row, outside its button.
+    const photos = within(card).getByTestId('photos');
+    expect(photos.textContent).toBe('ph3:sm');
+    expect(food.contains(photos)).toBe(false);
     expect(card.textContent).not.toContain('—');
   });
 

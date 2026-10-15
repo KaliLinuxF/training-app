@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { DEFAULT_TIMEZONE, minutesOf, zonedNow, type HM, type ISODate } from '@legko/shared';
 import type { Database } from './db/sqlite';
 import { silentLogger, type Logger } from './logger';
@@ -15,15 +15,30 @@ export const backupFileName = (date: ISODate): string => `legko-${date}.db`;
 
 export const backupsDir = (dataDir: string): string => join(dataDir, 'backups');
 
-/** Consistent snapshot via `VACUUM INTO`; replaces an existing file for the same date atomically. */
-export function writeBackup(db: Database, dir: string, date: ISODate): string {
-  mkdirSync(dir, { recursive: true });
-  const target = join(dir, backupFileName(date));
-  const tmp = `${target}.tmp`;
+/**
+ * Snapshot taken by `openDatabase` right before it migrates an existing database to schema `target`
+ * (`legko-pre-v3-2026-10-15.db`). Not matched by the daily pattern, so `pruneBackups` never deletes it.
+ */
+export const preMigrationBackupName = (target: number, date: ISODate): string =>
+  `legko-pre-v${target}-${date}.db`;
+
+/** Snapshot taken by `downgrade-schema` before it lowers schema `from` (`legko-pre-down-v3-2026-10-15.db`). */
+export const preDowngradeBackupName = (from: number, date: ISODate): string =>
+  `legko-pre-down-v${from}-${date}.db`;
+
+/** Consistent snapshot of `db` into `file` via `VACUUM INTO` (tmp + rename: atomic, replaces an older file). */
+export function writeSnapshot(db: Database, file: string): string {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.tmp`;
   rmSync(tmp, { force: true });
   db.prepare('VACUUM INTO ?').run(tmp);
-  renameSync(tmp, target);
-  return target;
+  renameSync(tmp, file);
+  return file;
+}
+
+/** Consistent snapshot via `VACUUM INTO`; replaces an existing file for the same date atomically. */
+export function writeBackup(db: Database, dir: string, date: ISODate): string {
+  return writeSnapshot(db, join(dir, backupFileName(date)));
 }
 
 /** Deletes all but the newest `keep` backups (and stray temp files). Returns deleted file names. */

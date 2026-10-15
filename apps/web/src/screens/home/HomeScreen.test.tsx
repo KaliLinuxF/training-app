@@ -1,4 +1,4 @@
-import { type AppData, type DayEntry } from '@legko/shared';
+import { normalizeDay, type AppData, type DayEntry, type MacroGoals, type Meal } from '@legko/shared';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as PlatformModule from '@/lib/platform';
@@ -6,10 +6,11 @@ import { dataActions, getAppData, resetLocal, useDataStore } from '@/store/data'
 import { NO_TRAINING_TOAST, TRAINED_TOAST } from '@/store/dayMarks';
 import { initialSyncState } from '@/store/state';
 import { fakeIdb, sampleData } from '@/store/test-utils';
-import { useUiStore } from '@/store/ui';
+import { useSheet, useUiStore } from '@/store/ui';
 import { cssRules, cssValue, readCss } from '@/ui/internal/cssSource';
 import { HomeScreen } from './HomeScreen';
 import { INSTALL_HINT_KEY } from './installHint';
+import todayStyles from './TodayCard.module.css';
 
 const mocks = vi.hoisted(() => ({
   isIOS: vi.fn(() => false),
@@ -34,6 +35,54 @@ const day = (patch: Partial<DayEntry> = {}): DayEntry => ({
   types: [],
   notes: '',
   ...patch,
+});
+
+/** No-break space (U+00A0). */
+const NB = String.fromCharCode(0xa0);
+
+const meal = (id: string, patch: Partial<Meal> = {}): Meal => ({
+  id,
+  type: 'Сніданок',
+  time: null,
+  text: 'Страва',
+  kcal: null,
+  protein: null,
+  fat: null,
+  carbs: null,
+  ...patch,
+});
+
+/** 1 240 ккал, Б 68 · Ж 41 · В 132 in three complete meals. */
+const threeMeals = (): DayEntry =>
+  normalizeDay({
+    ...day(),
+    meals: [
+      meal('m1', { time: '08:30', text: 'Тост з тунцем', kcal: 400, protein: 20, fat: 15, carbs: 50 }),
+      meal('m2', { type: 'Обід', time: '13:00', text: 'Борщ', kcal: 600, protein: 40, fat: 20, carbs: 60 }),
+      meal('m3', { type: 'Вечеря', time: '19:00', text: 'Салат', kcal: 240, protein: 8, fat: 6, carbs: 22 }),
+    ],
+  });
+
+/** Breakfast with two positions (380 ккал, Б 12 · Ж 9 · В 63) and an apple with kcal only: 460 ккал, partial. */
+const twoMealsPartial = (): DayEntry =>
+  normalizeDay({
+    ...day(),
+    meals: [
+      meal('e2eBreakfast', {
+        time: '08:15',
+        text: 'Вівсянка з бананом, кава з молоком',
+        items: [
+          { name: 'Вівсянка з бананом', portion: '250 г', kcal: 320, protein: 9, fat: 6, carbs: 58 },
+          { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, protein: 3, fat: 3, carbs: 5 },
+        ],
+      }),
+      meal('e2eSnack0001', { type: 'Перекус', time: '09:40', text: 'Яблуко', kcal: 80 }),
+    ],
+  });
+
+/** Settings with these macro goals (the rest as `sampleData`). */
+const goalsPatch = (macroGoals: MacroGoals): Partial<AppData> => ({
+  settings: { ...sampleData().settings, macroGoals },
 });
 
 /** Two weigh-ins (68,3 → 65,4, none today) and one measurement — the Monday rows are due. */
@@ -69,6 +118,14 @@ const item = (title: string) => {
   return li;
 };
 const nb = (text: string | null | undefined) => text?.replace(/\s/g, ' ');
+/** Starts like the «Їжа» macro line («Б 68 …») or the count line («2 прийоми»), NBSP-glued. */
+const FOOD_SUB_START = new RegExp(`^(Б${NB}|[0-9]+${NB}прийом)`);
+/** The «Їжа» row's macro / count line: the outermost span inside the row button that starts like one. */
+const foodSub = (): HTMLElement | undefined =>
+  [...row('Їжа').querySelectorAll<HTMLElement>('span')].find(
+    (el) =>
+      FOOD_SUB_START.test(el.textContent ?? '') && !FOOD_SUB_START.test(el.parentElement?.textContent ?? ''),
+  );
 
 beforeEach(async () => {
   const idb = fakeIdb();
@@ -159,6 +216,72 @@ describe('HomeScreen — rendering', () => {
     expect(nb(row('Їжа').getAttribute('aria-label'))).toMatch(/^Їжа: Перевищено ціль на 120 ккал/);
   });
 
+  it('a meal day: «Б 68 · Ж 41 · В 132 г · 3 прийоми» under the kcal, wrapping only after «·»', () => {
+    setData({ days: { [TODAY]: threeMeals() } });
+    render(<HomeScreen />);
+    expect(nb(item('Їжа').textContent)).toContain('1 240 / 1 700 ккал');
+    const sub = foodSub();
+    expect(sub?.textContent).toBe(`Б${NB}68${NB}· Ж${NB}41${NB}· В${NB}132${NB}г${NB}· 3${NB}прийоми`);
+    // Ordinary spaces only right after a «·»: «г» and «прийоми» never start a line.
+    expect(sub?.textContent?.split(' ')).toEqual([
+      `Б${NB}68${NB}·`,
+      `Ж${NB}41${NB}·`,
+      `В${NB}132${NB}г${NB}·`,
+      `3${NB}прийоми`,
+    ]);
+    // Default --ink2: no lavender wrapper, no over number.
+    expect(sub?.querySelector(`.${todayStyles.toneAcc}`)).toBeNull();
+    expect(sub?.parentElement?.tagName).toBe('BUTTON');
+    expect(nb(row('Їжа').getAttribute('aria-label'))).toBe(
+      'Їжа: 1 240 з 1 700 ккал, залишилось 460. Білки 68 г, жири 41 г, вуглеводи 132 г. 3 прийоми їжі',
+    );
+    // Still one button, no control inside it; the meter stays.
+    expect(row('Їжа').querySelectorAll('button, a, input')).toHaveLength(0);
+    const fill = row('Їжа').querySelector<HTMLElement>('[style*="width"]');
+    expect(parseFloat(fill?.style.width ?? '')).toBeCloseTo((1240 / 1700) * 100, 3);
+  });
+
+  it('with macro goals: «Б 12/90 · Ж 9/60 · В 63 г», no count; the name notes partial sums', () => {
+    setData({ ...goalsPatch({ protein: 90, fat: 60, carbs: null }), days: { [TODAY]: twoMealsPartial() } });
+    render(<HomeScreen />);
+    expect(nb(item('Їжа').textContent)).toContain('460 / 1 700 ккал');
+    const sub = foodSub();
+    expect(sub?.textContent).toBe(`Б${NB}12/90${NB}· Ж${NB}9/60${NB}· В${NB}63${NB}г`);
+    expect(sub?.textContent?.split(' ')).toHaveLength(3);
+    expect(nb(row('Їжа').getAttribute('aria-label'))).toBe(
+      'Їжа: 460 з 1 700 ккал, залишилось 1 240. Білки 12 з 90 г, жири 9 з 60 г, вуглеводи 63 г (не для всіх прийомів). 2 прийоми їжі',
+    );
+  });
+
+  it('an over-goal number is lavender, the rest of the line is not', () => {
+    setData({ ...goalsPatch({ protein: 60, fat: 60, carbs: null }), days: { [TODAY]: threeMeals() } });
+    render(<HomeScreen />);
+    const sub = foodSub();
+    expect(nb(sub?.textContent)).toBe('Б 68/60 · Ж 41/60 · В 132 г');
+    const toned = [...(sub?.querySelectorAll(`.${todayStyles.toneAcc}`) ?? [])];
+    expect(toned.map((el) => el.textContent)).toEqual(['68']);
+    expect(nb(row('Їжа').getAttribute('aria-label'))).toContain('Білки 68 з 60 г (більше цілі)');
+  });
+
+  it('a meal day without macros shows the count; a legacy day with kcal shows no sub', () => {
+    const noMacros = normalizeDay({
+      ...day(),
+      meals: [meal('m1', { kcal: 300, text: 'Каша' }), meal('m2', { type: 'Обід', kcal: 400, text: 'Суп' })],
+    });
+    setData({ days: { [TODAY]: noMacros } });
+    const { unmount } = render(<HomeScreen />);
+    expect(foodSub()?.textContent).toBe(`2${NB}прийоми`);
+    expect(nb(row('Їжа').getAttribute('aria-label'))).toBe(
+      'Їжа: 700 з 1 700 ккал, залишилось 1 000. 2 прийоми їжі',
+    );
+    unmount();
+
+    setData({ days: { [TODAY]: day({ food: 'Борщ', kcal: 900 }) } });
+    render(<HomeScreen />);
+    expect(foodSub()).toBeUndefined();
+    expect(nb(item('Їжа').textContent)).toBe('Їжа 900 / 1 700 ккал');
+  });
+
   it('shows the weekly rows: «Сьогодні» pill when due, the next date otherwise', () => {
     setData({ weights: WEIGHTS, measures: [{ date: '2026-10-05', chest: 90, waist: 70, hips: 98 }] });
     render(<HomeScreen />);
@@ -173,7 +296,6 @@ describe('HomeScreen — rendering', () => {
 
 describe('HomeScreen — opening sheets', () => {
   it.each([
-    ['Їжа', 'food'],
     ['Тренування', 'workout'],
     ['Вага', 'weight'],
     ['Заміри', 'measure'],
@@ -182,6 +304,47 @@ describe('HomeScreen — opening sheets', () => {
     render(<HomeScreen />);
     fireEvent.click(row(title));
     expect(sheet()).toEqual({ date: TODAY, mode, patch: undefined, key: expect.any(Number) });
+  });
+
+  it.each([
+    ['food text', day({ food: 'Борщ' })],
+    ['kcal on a legacy day', day({ food: 'Борщ', kcal: 900 })],
+    ['meals', threeMeals()],
+  ])('with food today (%s) the «Їжа» row opens the day’s list «Їжа»', (_, entry) => {
+    setData({ days: { [TODAY]: entry } });
+    render(<HomeScreen />);
+    fireEvent.click(row('Їжа'));
+    expect(sheet()).toEqual({ date: TODAY, mode: 'food', patch: undefined, key: expect.any(Number) });
+  });
+
+  it('with nothing logged today the «Їжа» row opens the new-meal editor inside the tap', () => {
+    // A stand-in for the new-meal editor: its «Що я їла» autoFocus must run before the tap's event ends, or
+    // iOS will not open the keyboard (the host renders it with flushSync).
+    function MealEditorProbe() {
+      const open = useSheet();
+      return open?.mode === 'meal' ? <textarea aria-label="Що я їла" autoFocus /> : null;
+    }
+    setData({ days: { [TODAY]: day({ trained: true, notes: 'Ок' }) } });
+    render(
+      <>
+        <HomeScreen />
+        <MealEditorProbe />
+      </>,
+    );
+    let focusedInTap = false;
+    // Runs after React's own click handler (root container), still inside the same event dispatch.
+    const probe = () => {
+      const text = screen.queryByRole('textbox', { name: 'Що я їла' });
+      focusedInTap = text !== null && document.activeElement === text;
+    };
+    document.addEventListener('click', probe);
+    try {
+      fireEvent.click(row('Їжа'));
+    } finally {
+      document.removeEventListener('click', probe);
+    }
+    expect(sheet()).toEqual({ date: TODAY, mode: 'meal', patch: undefined, key: expect.any(Number) });
+    expect(focusedInTap).toBe(true);
   });
 
   it('«Відкрити день →» opens the full day', () => {
@@ -240,9 +403,11 @@ describe('HomeScreen — inline ✓ / ✕', () => {
 
   it('pressing the already pressed option saves nothing and stays quiet', () => {
     setData({ days: { [TODAY]: day({ trained: false }) } });
+    const meta = vi.spyOn(dataActions, 'setDayMeta');
     const save = vi.spyOn(dataActions, 'saveDay');
     render(<HomeScreen />);
     fireEvent.click(toggle('Не було'));
+    expect(meta).not.toHaveBeenCalled();
     expect(save).not.toHaveBeenCalled();
     expect(toast()).toBeNull();
     expect(sheet()).toBeNull();
@@ -250,12 +415,24 @@ describe('HomeScreen — inline ✓ / ✕', () => {
 
   it('a refused save does not claim success', () => {
     setData();
-    const save = vi.spyOn(dataActions, 'saveDay').mockReturnValue(false);
+    const meta = vi.spyOn(dataActions, 'setDayMeta').mockReturnValue(false);
     render(<HomeScreen />);
     fireEvent.click(toggle('Було'));
-    expect(save).toHaveBeenCalledExactlyOnceWith(TODAY, day({ trained: true }));
+    // The mark only: never the food, the meals or the notes.
+    expect(meta).toHaveBeenCalledExactlyOnceWith(TODAY, { trained: true });
     expect(toast()).toBeNull();
     expect(sheet()).toBeNull();
+  });
+
+  it('«Було» on a meal day keeps every meal and the macro line', () => {
+    const entry = threeMeals();
+    setData({ days: { [TODAY]: entry } });
+    render(<HomeScreen />);
+    fireEvent.click(toggle('Було'));
+    expect(getAppData().days[TODAY]).toEqual({ ...entry, trained: true });
+    expect(getAppData().days[TODAY]?.meals).toEqual(entry.meals);
+    expect(toast()).toBe(TRAINED_TOAST);
+    expect(foodSub()?.textContent).toBe(`Б${NB}68${NB}· Ж${NB}41${NB}· В${NB}132${NB}г${NB}· 3${NB}прийоми`);
   });
 
   it('the toggle is a sibling of the row button (no button inside a button)', () => {

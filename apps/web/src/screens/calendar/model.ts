@@ -10,12 +10,16 @@ import {
   f1,
   fN,
   isValidISODate,
+  mealContent,
   ok,
   parse,
   type AppData,
+  type DayEntry,
   type ISODate,
+  type Meal,
   type MeasureValues,
 } from '@legko/shared';
+import { dayNutrition, macroLine, mealCountText, mealTitle, NBSP } from '@/lib/nutrition';
 import {
   calendarMonth,
   dayStatus,
@@ -135,7 +139,10 @@ const STATUS_TONE: Readonly<Record<DayStatus, StatusTone>> = {
 
 export type DayRowKey = 'food' | 'training' | 'weight' | 'measures' | 'notes';
 
-/** The sheet each row opens for the selected date (the notes row opens the full «Запис дня»). */
+/**
+ * The sheet each row opens for the selected date (the notes row opens the full «Запис дня»). An empty Їжа row
+ * («Додати») opens the new-meal editor `'meal'` instead of the day's meal list (meals doc D8).
+ */
 export const ROW_SHEET: Readonly<Record<DayRowKey, SheetMode>> = {
   food: 'food',
   training: 'workout',
@@ -155,15 +162,23 @@ export interface DayRowModel {
   value?: string;
   /** `acc` when the day's kcal is over the goal. */
   valueTone: 'ink' | 'acc';
-  /** Second line, shown in full: food text, workout types / «Не було» / «Ще не відмічено», measurements, notes. */
+  /**
+   * Second line, shown in full: food text, workout types / «Не було» / «Ще не відмічено», measurements, notes. On a
+   * day with meals it is `lines` joined by «\n» (the row's description).
+   */
   text?: string;
+  /**
+   * Їжа on a day with meals: one line per meal («Сніданок · 520 ккал · Тост з авокадо»), then the day's
+   * «Б · Ж · В» line when some macronutrient is known. Each is shown on one line, cut with an ellipsis.
+   */
+  lines?: string[];
   /** Shown instead of a value on an empty Їжа / Вага / Заміри row (never «—»). */
   action?: 'Додати';
   /** Тренування only: the day's mark for the inline ✓ / ✕ (`null` = not marked). */
   trained?: boolean | null;
-  /** The sheet the row opens (`ROW_SHEET`). */
+  /** The sheet the row opens (`ROW_SHEET`; an empty Їжа row opens the new-meal editor `'meal'`). */
   mode: SheetMode;
-  /** Short accessible name of the row button: «Їжа: 1 880 ккал», «Вага: додати». */
+  /** Short accessible name of the row button: «Їжа: 1 880 ккал», «Їжа: 1 740 ккал, 3 прийоми», «Вага: додати». */
   label: string;
   /** The text is long (food, notes): it becomes the row button's accessible description. */
   describe: boolean;
@@ -180,7 +195,7 @@ export interface DayDetail {
   statusTone: StatusTone;
   /** Їжа, Тренування, Вага, Заміри — plus Нотатки when the day has notes. */
   rows: DayRowModel[];
-  /** Food photo ids of the day (thumbnails under the Їжа row). */
+  /** Food photo ids of the day (thumbnails under the Їжа row; on a meal day the union derived from its meals). */
   photos: string[];
   /** «Редагувати день» when the day has a record, else «Заповнити день». */
   actionLabel: string;
@@ -194,15 +209,49 @@ const MEASURE_NAMES: readonly (readonly [keyof MeasureValues, string])[] = [
   ['hips', 'Стегна'],
 ];
 
-function foodRow(food: string, kcal: number | null, photos: number, goal: number): DayRowModel {
-  const text = food || undefined;
-  const filled = text !== undefined || kcal !== null || photos > 0;
-  const over = kcal !== null && kcal > goal;
-  const value = kcal !== null ? `${f0(kcal)} ккал` : undefined;
+/**
+ * One meal on one line: «Сніданок · 520 ккал · Тост з авокадо» (a NO-BREAK SPACE in «520 ккал»); « · … ккал» is
+ * left out without kcal, « · content» without content (meals doc §7.8).
+ */
+function mealLine(meal: Meal): string {
+  const parts = [mealTitle(meal)];
+  if (ok(meal.kcal)) parts.push(`${f0(meal.kcal)}${NBSP}ккал`);
+  const content = mealContent(meal);
+  if (content) parts.push(content);
+  return parts.join(' · ');
+}
+
+/**
+ * Їжа: the day's kcal against `goal`. A day logged before meals existed (legacy) shows its food text as it always
+ * did; a day with meals lists one line per meal plus the «Б · Ж · В» line. Empty → «Додати», which opens the
+ * new-meal editor; otherwise the row opens the day's meal list «Їжа».
+ */
+function foodRow(e: DayEntry | undefined, goal: number): DayRowModel {
+  const n = dayNutrition(e);
+  const filled = n.count > 0;
+  const over = n.kcal !== null && n.kcal > goal;
+  const value = n.kcal !== null ? `${f0(n.kcal)} ккал` : undefined;
+
+  let text: string | undefined;
+  let lines: string[] | undefined;
+  if (n.legacy) {
+    text = e?.food.trim() || undefined;
+  } else if (filled) {
+    lines = n.meals.map(mealLine);
+    const macros = macroLine(n.macros);
+    if (macros) lines.push(macros);
+    text = lines.join('\n');
+  }
+
   let label = 'Їжа: додати';
-  if (value) label = `Їжа: ${value}${over ? ', більше цілі' : ''}`;
-  else if (filled) label = 'Їжа: калорії не вказані';
-  return {
+  if (filled) {
+    const parts = [value ?? 'калорії не вказані'];
+    if (!n.legacy) parts.push(mealCountText(n.count));
+    if (over) parts.push('більше цілі');
+    label = `Їжа: ${parts.join(', ')}`;
+  }
+
+  const row: DayRowModel = {
     key: 'food',
     title: 'Їжа',
     filled,
@@ -210,10 +259,12 @@ function foodRow(food: string, kcal: number | null, photos: number, goal: number
     valueTone: over ? 'acc' : 'ink',
     text,
     action: filled ? undefined : ADD,
-    mode: ROW_SHEET.food,
+    mode: filled ? ROW_SHEET.food : 'meal',
     label,
     describe: text !== undefined,
   };
+  if (lines) row.lines = lines;
+  return row;
 }
 
 function trainingRow(trained: boolean | null, types: readonly string[]): DayRowModel {
@@ -290,8 +341,9 @@ function notesRow(notes: string): DayRowModel {
 }
 
 /**
- * The selected day as a check-list: Їжа (text, kcal against `settings.kcalGoal`, photos), Тренування (the mark and
- * its types), Вага, Заміри, and Нотатки only when there are notes. Empty Їжа / Вага / Заміри rows offer «Додати».
+ * The selected day as a check-list: Їжа (one line per meal — or a legacy day's text —, kcal against
+ * `settings.kcalGoal`, photos), Тренування (the mark and its types), Вага, Заміри, and Нотатки only when there are
+ * notes. Empty Їжа / Вага / Заміри rows offer «Додати».
  */
 export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): DayDetail {
   const e = data.days[date];
@@ -302,7 +354,7 @@ export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): Da
   const notes = e?.notes.trim() ?? '';
 
   const rows: DayRowModel[] = [
-    foodRow(e?.food.trim() ?? '', e && ok(e.kcal) ? e.kcal : null, photos.length, data.settings.kcalGoal),
+    foodRow(e, data.settings.kcalGoal),
     trainingRow(e?.trained ?? null, e?.trained === true ? e.types : []),
     weightRow(w && ok(w.kg) ? w.kg : null),
     measuresRow(m),

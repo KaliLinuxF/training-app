@@ -28,6 +28,9 @@ describe('sheet deep links', () => {
     expect(parseSheetDeepLink('')).toBeNull();
     expect(parseSheetDeepLink('date=2026-10-09')).toBeNull();
     expect(parseSheetDeepLink('sheet=menu')).toBeNull();
+    // A new meal opens from a tap (with the keyboard), never from a link; the day's list «Їжа» is linkable.
+    expect(parseSheetDeepLink('sheet=meal')).toBeNull();
+    expect(parseSheetDeepLink('?sheet=meal&trained=1')).toBeNull();
     expect(parseSheetDeepLink('sheet=setup')).toBeNull();
     expect(parseSheetDeepLink('sheet=install')).toBeNull();
     expect(parseSheetDeepLink('sheet=evil')).toBeNull();
@@ -39,6 +42,7 @@ describe('sheet deep links', () => {
   it('removes only its own params from the URL', () => {
     expect(urlWithoutDeepLink('/', 'sheet=day&trained=1')).toBe('/');
     expect(urlWithoutDeepLink('/', 'sheet=menu')).toBe('/');
+    expect(urlWithoutDeepLink('/', 'sheet=meal')).toBe('/');
     expect(urlWithoutDeepLink('/calendar', 'date=2026-10-09&sheet=weight')).toBe('/calendar?date=2026-10-09');
   });
 
@@ -46,6 +50,7 @@ describe('sheet deep links', () => {
     expect(hasDeepLinkParams('sheet=weight')).toBe(true);
     expect(hasDeepLinkParams('sheet=nope')).toBe(true);
     expect(hasDeepLinkParams('sheet=menu')).toBe(true);
+    expect(hasDeepLinkParams('sheet=meal')).toBe(true);
     expect(hasDeepLinkParams('date=2026-10-09')).toBe(false);
     expect(hasDeepLinkParams('')).toBe(false);
   });

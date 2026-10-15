@@ -1,33 +1,29 @@
 /**
- * The record sheet — the full «Запис дня» and the short «Їжа» / «Тренування» / «Контрольне
- * зважування» / «Заміри тіла» sheets: draft initialisation, validation and the draft → ops mapping.
- * Ports the prototype's `openSheet()` and `save()` (Tracker.dc.html), except that a save only
- * writes what she changed in the blocks the sheet shows (two devices, or two short sheets, must not
- * erase each other's records).
+ * The record sheet — the full «Запис дня», the day's meal list «Їжа», the new-meal editor «Прийом їжі» and the short
+ * «Тренування» / «Контрольне зважування» / «Заміри тіла» sheets: draft initialisation, validation and the
+ * draft → ops mapping. Ports the prototype's `openSheet()` and `save()` (Tracker.dc.html), except that a save only
+ * writes what she changed in the blocks the sheet shows (two devices, or two short sheets, must not erase each
+ * other's records). The food is never part of this draft: every meal saves on its own in the meal editor
+ * (docs/meals-macros.md D3, D15), so a day save sends at most one partial `day.meta` (never `day.put` / `day.delete`).
  */
 import {
-  isEmptyDay,
   isEmptyMeasure,
   LIMITS,
   normalizeTypeNames,
   num,
-  opSchema,
   str,
   WORKOUT_TYPES,
   type AppData,
-  type DayEntry,
-  type FoodUse,
+  type DayMeta,
   type ISODate,
   type MeasureKey,
   type MeasureValues,
   type Op,
 } from '@legko/shared';
-import { insertEstimate, type FoodAdd } from '@/features/food';
 import type { SheetMode, SheetPatch } from '@/store/ui';
 import { weightBefore } from '../helpers';
 import {
   FIELD_ERRORS,
-  kcalError,
   kgError,
   MEASURE_KEYS,
   measureError,
@@ -36,10 +32,10 @@ import {
   type MeasureTexts,
 } from '../validation';
 
-/** The sheets with a form: the full day and the four short ones. */
-export type RecordMode = Extract<SheetMode, 'day' | 'food' | 'workout' | 'weight' | 'measure'>;
+/** The sheets with content of their own: the full day, the day's meal list, the new meal and the short sheets. */
+export type RecordMode = Extract<SheetMode, 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure'>;
 
-const RECORD_MODES: readonly RecordMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
+const RECORD_MODES: readonly RecordMode[] = ['day', 'food', 'meal', 'workout', 'weight', 'measure'];
 
 export const isRecordMode = (mode: SheetMode): mode is RecordMode => RECORD_MODES.some((m) => m === mode);
 
@@ -54,6 +50,7 @@ export const MENU_HEADING = 'Що записати?';
 export const RECORD_HEADINGS: Readonly<Record<RecordMode, string>> = {
   day: 'Запис дня',
   food: 'Їжа',
+  meal: 'Прийом їжі',
   workout: 'Тренування',
   weight: 'Контрольне зважування',
   measure: 'Заміри тіла',
@@ -63,19 +60,31 @@ export const RECORD_HEADINGS: Readonly<Record<RecordMode, string>> = {
 export interface RecordSections {
   /** ✓ / ✕ and the workout types. */
   workout: boolean;
-  /** Food text, photos, FoodAssist and the day's kcal. */
+  /** The day's meals: totals and one row per meal (each opens the stacked meal editor). */
   food: boolean;
+  /** The new-meal editor «Прийом їжі» (its own draft and «Зберегти», `useMealEditor`). */
+  meal: boolean;
   notes: boolean;
   weight: boolean;
   measure: boolean;
 }
 
+const NONE: Readonly<RecordSections> = {
+  workout: false,
+  food: false,
+  meal: false,
+  notes: false,
+  weight: false,
+  measure: false,
+};
+
 const SECTIONS: Readonly<Record<RecordMode, Readonly<RecordSections>>> = {
-  day: { workout: true, food: true, notes: true, weight: true, measure: true },
-  food: { workout: false, food: true, notes: false, weight: false, measure: false },
-  workout: { workout: true, food: false, notes: true, weight: false, measure: false },
-  weight: { workout: false, food: false, notes: false, weight: true, measure: false },
-  measure: { workout: false, food: false, notes: false, weight: false, measure: true },
+  day: { ...NONE, workout: true, food: true, notes: true, weight: true, measure: true },
+  food: { ...NONE, food: true },
+  meal: { ...NONE, meal: true },
+  workout: { ...NONE, workout: true, notes: true },
+  weight: { ...NONE, weight: true },
+  measure: { ...NONE, measure: true },
 };
 
 /** Which blocks a mode shows (prototype `showDay` / `showWeight` / `showMeasure`, plus the short sheets). */
@@ -83,42 +92,37 @@ export function recordSections(mode: RecordMode): RecordSections {
   return { ...SECTIONS[mode] };
 }
 
-/** Everything the sheet edits, as raw input text where it is typed. */
+/** Everything the sheet edits, as raw input text where it is typed. The food is not here (meals save themselves). */
 export interface RecordDraft extends MeasureTexts {
-  food: string;
-  /** Digits only. */
-  kcal: string;
   trained: boolean | null;
   types: string[];
   notes: string;
-  photos: string[];
   /** «65,4» */
   weight: string;
-  /** «Часті страви» usage of the meals added in this sheet; recorded only when the day is saved. */
-  foodUses: FoodUse[];
 }
 
 /**
- * Port of `openSheet()`: the day entry, weigh-in and measurements of `date`; on a day without a
- * weigh-in the weight sheet offers the one before that day; then the patch (`trained: true` from the
- * workout push), only in a sheet that shows the workout.
+ * Port of `openSheet()`: the workout mark, types, notes, weigh-in and measurements of `date`; on a day without a
+ * weigh-in the weight sheet offers the one before that day; then the patch (`trained: true` from the workout push),
+ * only in a sheet that shows the workout.
  */
-export function initRecordDraft(data: AppData, date: ISODate, mode: RecordMode, patch?: SheetPatch): RecordDraft {
+export function initRecordDraft(
+  data: AppData,
+  date: ISODate,
+  mode: RecordMode,
+  patch?: SheetPatch,
+): RecordDraft {
   const e = data.days[date];
   const w = data.weights.find((x) => x.date === date);
   const m = data.measures.find((x) => x.date === date);
   const draft: RecordDraft = {
-    food: e?.food ?? '',
-    kcal: str(e?.kcal),
     trained: e?.trained ?? null,
     types: [...(e?.types ?? [])],
     notes: e?.notes ?? '',
-    photos: [...(e?.photos ?? [])],
     weight: w ? str(w.kg) : mode === 'weight' ? str(weightBefore(data, date)) : '',
     chest: str(m?.chest),
     waist: str(m?.waist),
     hips: str(m?.hips),
-    foodUses: [],
   };
   if (patch?.trained !== undefined && SECTIONS[mode].workout) draft.trained = patch.trained;
   return draft;
@@ -127,14 +131,11 @@ export function initRecordDraft(data: AppData, date: ISODate, mode: RecordMode, 
 const sameList = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
-type DayField = 'food' | 'kcal' | 'trained' | 'types' | 'notes' | 'photos';
-const DAY_FIELDS: readonly DayField[] = ['food', 'kcal', 'trained', 'types', 'notes', 'photos'];
+type DayField = 'trained' | 'types' | 'notes';
+const DAY_FIELDS: readonly DayField[] = ['trained', 'types', 'notes'];
 
 /** The block that edits each field of the day entry. */
-const DAY_FIELD_SECTION: Readonly<Record<DayField, 'workout' | 'food' | 'notes'>> = {
-  food: 'food',
-  kcal: 'food',
-  photos: 'food',
+const DAY_FIELD_SECTION: Readonly<Record<DayField, 'workout' | 'notes'>> = {
   trained: 'workout',
   types: 'workout',
   notes: 'notes',
@@ -151,16 +152,13 @@ export function isRecordDirty(baseline: RecordDraft, draft: RecordDraft): boolea
   return (
     DAY_FIELDS.some((k) => fieldChanged(baseline, draft, k)) ||
     fieldChanged(baseline, draft, 'weight') ||
-    MEASURE_KEYS.some((k) => fieldChanged(baseline, draft, k)) ||
-    baseline.foodUses.length !== draft.foodUses.length
+    MEASURE_KEYS.some((k) => fieldChanged(baseline, draft, k))
   );
 }
 
 export interface RecordErrors {
-  kcal?: string;
   weight?: string;
   measure: MeasureError;
-  food?: string;
   notes?: string;
   types?: string;
 }
@@ -169,45 +167,19 @@ export interface RecordErrors {
 export function validateRecord(draft: RecordDraft, mode: RecordMode): RecordErrors {
   const show = recordSections(mode);
   return {
-    kcal: show.food ? kcalError(draft.kcal) : undefined,
     weight: show.weight ? kgError(draft.weight) : undefined,
     measure: show.measure ? measureError(draft) : { message: undefined, invalid: [] },
-    food: show.food ? textError(draft.food) : undefined,
     notes: show.notes ? textError(draft.notes) : undefined,
     // Types are dropped unless trained, so only then do they count.
     types:
-      show.workout && draft.trained === true && draft.types.length > LIMITS.types ? FIELD_ERRORS.types : undefined,
+      show.workout && draft.trained === true && draft.types.length > LIMITS.types
+        ? FIELD_ERRORS.types
+        : undefined,
   };
 }
 
 export const hasRecordErrors = (e: RecordErrors): boolean =>
-  e.kcal !== undefined ||
-  e.weight !== undefined ||
-  e.measure.message !== undefined ||
-  e.food !== undefined ||
-  e.notes !== undefined ||
-  e.types !== undefined;
-
-/** The day entry the draft describes (`types` only when trained, photos only when there are some). */
-export function draftDayEntry(draft: Pick<RecordDraft, DayField>): DayEntry {
-  const entry: DayEntry = {
-    food: draft.food.trim(),
-    kcal: num(draft.kcal),
-    trained: draft.trained,
-    types: draft.trained === true ? [...draft.types] : [],
-    notes: draft.notes.trim(),
-  };
-  if (draft.photos.length) entry.photos = [...draft.photos];
-  return entry;
-}
-
-const sameDay = (a: DayEntry, b: DayEntry): boolean =>
-  a.food === b.food &&
-  a.kcal === b.kcal &&
-  a.trained === b.trained &&
-  sameList(a.types, b.types) &&
-  a.notes === b.notes &&
-  sameList(a.photos ?? [], b.photos ?? []);
+  e.weight !== undefined || e.measure.message !== undefined || e.notes !== undefined || e.types !== undefined;
 
 const sameMeasure = (a: MeasureValues, b: MeasureValues): boolean => MEASURE_KEYS.every((k) => a[k] === b[k]);
 
@@ -222,61 +194,70 @@ export interface RecordSave {
 }
 
 /**
- * Port of `save()`, written per field: whatever she changed in a block this sheet shows wins,
- * everything else keeps what is stored *now*, and a section is written only when the result
- * differs from the store. So a day saved on a stale device never deletes a weigh-in or
- * measurements recorded elsewhere, nor rewrites the day's other fields, and a short sheet («Їжа»,
- * «Тренування») never touches the fields it does not show. The weigh-in sheet always records its
- * value (the offered weight means «this is the weight of that day»).
+ * The partial `day.meta` of a save: only the fields she changed in the blocks this sheet shows, each taken from the
+ * draft (notes trimmed). Types go along only when she changed them and the day stays trained (✕ sends `{ trained }`
+ * and the reducer drops the types). `null` when nothing she changed differs from what is stored now.
  */
-export function recordOps({ baseline, draft, data, date, mode }: RecordSave): Op[] {
+export function dayMetaOf({ baseline, draft, data, date, mode }: RecordSave): DayMeta | null {
   const show = recordSections(mode);
-  // What is stored for the date right now, as input text (no pre-fill, no patch).
+  const mine = (k: DayField): boolean => show[DAY_FIELD_SECTION[k]] && fieldChanged(baseline, draft, k);
+  // What is stored for the date right now (it may have changed on another device since the sheet opened).
   const stored = initRecordDraft(data, date, 'day');
-  const changed = (k: DayField | 'weight' | MeasureKey): boolean => fieldChanged(baseline, draft, k);
-  const mine = (k: DayField): boolean => show[DAY_FIELD_SECTION[k]] && changed(k);
+  const meta: DayMeta = {};
+  if (mine('trained')) meta.trained = draft.trained;
+  const trained = meta.trained !== undefined ? meta.trained : stored.trained;
+  if (mine('types') && trained === true) meta.types = [...draft.types];
+  if (mine('notes')) meta.notes = draft.notes.trim();
+
+  const differs =
+    (meta.trained !== undefined && meta.trained !== stored.trained) ||
+    (meta.types !== undefined && !sameList(meta.types, stored.types)) ||
+    (meta.notes !== undefined && meta.notes !== stored.notes.trim());
+  return differs ? meta : null;
+}
+
+/**
+ * Port of `save()`, written per field: whatever she changed in a block this sheet shows wins, everything else keeps
+ * what is stored *now*, and a section is written only when the result differs from the store. So a day saved on a
+ * stale device never deletes a weigh-in or measurements recorded elsewhere, nor rewrites the day's other fields (its
+ * meals least of all: `day.meta` never touches the food), and a short sheet («Тренування») never touches the fields
+ * it does not show. The weigh-in sheet always records its value (the offered weight means «this is the weight of
+ * that day»). An all-empty day after the `day.meta` is deleted by the reducer.
+ */
+export function recordOps(save: RecordSave): Op[] {
+  const { baseline, draft, data, date, mode } = save;
+  const show = recordSections(mode);
+  const stored = initRecordDraft(data, date, 'day');
+  const changed = (k: 'weight' | MeasureKey): boolean => fieldChanged(baseline, draft, k);
   const ops: Op[] = [];
 
-  if (show.workout || show.food || show.notes) {
-    const merged: Pick<RecordDraft, DayField> = {
-      food: mine('food') ? draft.food : stored.food,
-      kcal: mine('kcal') ? draft.kcal : stored.kcal,
-      trained: mine('trained') ? draft.trained : stored.trained,
-      types: mine('types') ? draft.types : stored.types,
-      notes: mine('notes') ? draft.notes : stored.notes,
-      photos: mine('photos') ? draft.photos : stored.photos,
-    };
-    const value = draftDayEntry(merged);
-    if (!sameDay(value, draftDayEntry(stored))) {
-      ops.push(isEmptyDay(value) ? { kind: 'day.delete', date } : { kind: 'day.put', date, value });
-    }
+  if (show.workout || show.notes) {
+    const value = dayMetaOf(save);
+    if (value) ops.push({ kind: 'day.meta', date, value });
   }
 
   if (show.weight) {
     const storedKg = num(stored.weight);
     const kg = mode === 'weight' || changed('weight') ? num(draft.weight) : storedKg;
-    if (kg !== storedKg) ops.push(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
+    if (kg !== storedKg)
+      ops.push(kg == null ? { kind: 'weight.delete', date } : { kind: 'weight.put', date, kg });
   }
 
   if (show.measure) {
     const pick = (k: MeasureKey): number | null => num(changed(k) ? draft[k] : stored[k]);
     const value: MeasureValues = { chest: pick('chest'), waist: pick('waist'), hips: pick('hips') };
-    const before: MeasureValues = { chest: num(stored.chest), waist: num(stored.waist), hips: num(stored.hips) };
+    const before: MeasureValues = {
+      chest: num(stored.chest),
+      waist: num(stored.waist),
+      hips: num(stored.hips),
+    };
     if (!sameMeasure(value, before)) {
-      ops.push(isEmptyMeasure(value) ? { kind: 'measure.delete', date } : { kind: 'measure.put', date, value });
+      ops.push(
+        isEmptyMeasure(value) ? { kind: 'measure.delete', date } : { kind: 'measure.put', date, value },
+      );
     }
   }
   return ops;
-}
-
-/**
- * `food.use` for the meals added in this sheet, saved together with the day. A use the server
- * would refuse (e.g. an over-long dish name) is left out rather than blocking the whole save.
- */
-export function foodUseOps(draft: RecordDraft, date: ISODate): Op[] {
-  return draft.foodUses
-    .map((value): Op => ({ kind: 'food.use', date, value }))
-    .filter((op) => opSchema.safeParse(op).success);
 }
 
 // ---- workout types --------------------------------------------------------------------------
@@ -322,26 +303,3 @@ export function addCustomType(
     types: already || selected.length >= LIMITS.types ? [...selected] : [...selected, name],
   };
 }
-
-// ---- food assist ----------------------------------------------------------------------------
-
-/**
- * «Додати» from FoodAssist (an estimate or a «Часті страви» chip): the line replaces the meal
- * text it was estimated from (or is appended on a new line), the kcal are added, the photo is
- * attached (max 12 per day) and the dish usage waits for «Зберегти».
- */
-export function applyFoodAdd(draft: RecordDraft, add: FoodAdd): RecordDraft {
-  const line = add.line.trim();
-  const food = line ? insertEstimate(draft.food, line, add.consumed) : draft.food;
-  const kcal = String((num(draft.kcal) ?? 0) + Math.max(0, Math.round(add.kcal)));
-  const photos =
-    add.photoId && !draft.photos.includes(add.photoId) && draft.photos.length < LIMITS.photosPerDay
-      ? [...draft.photos, add.photoId]
-      : draft.photos;
-  return { ...draft, food, kcal, photos, foodUses: [...draft.foodUses, ...add.uses] };
-}
-
-export const removePhoto = (draft: RecordDraft, id: string): RecordDraft => ({
-  ...draft,
-  photos: draft.photos.filter((p) => p !== id),
-});

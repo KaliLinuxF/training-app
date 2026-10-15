@@ -3,20 +3,22 @@ import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { commit as commitOps, useAppData } from '@/store/data';
 import { cx } from '@/ui';
 import { focusFirst, neighbourControls } from './focus';
-import { buildFoodAdd, buildFrequentDishes, chipAddLabel } from './model';
-import type { FoodAdd } from './types';
+import { buildFrequentDishes, chipAddLabel } from './model';
 import s from './FrequentDishes.module.css';
 
 export interface FrequentDishesProps {
   /**
-   * A chip was tapped: one-item FoodAdd (appended line, `uses` = that dish). The sheet records
-   * the `food.use` when the day is saved — never here, so a discarded draft counts nothing.
+   * A chip was tapped: the dish (its portion, kcal and macros — null where it has none) becomes a
+   * position of the meal. Its `food.use` is recorded when the meal is saved — never here, so a
+   * discarded draft counts nothing.
    */
-  onAdd: (add: FoodAdd) => void;
+  onAdd: (dish: FoodEstimateItem) => void;
   /** Injected in tests; defaults to the app data store. */
   foods?: readonly FoodItem[];
   /** Commits `food.delete` («Змінити» → ✕); `false` = refused, nothing removed. */
   commit?: (...ops: Op[]) => boolean;
+  /** Id of the line that says why no dish can be added (30 positions): the chips are locked and described by it. */
+  lockedBy?: string;
 }
 
 /** Where focus goes after a dish is deleted (resolved once the list re-renders). */
@@ -28,10 +30,10 @@ interface AfterRemove {
 }
 
 /**
- * «Часті страви»: one-tap chips of the most used dishes («Вівсянка з бананом · 320»). Works offline.
- * «Змінити» switches the chips to delete mode (✕).
+ * «Часті страви»: one-tap chips of the most used dishes («Вівсянка з бананом · 320»), each adding a
+ * position to the meal. Works offline. «Змінити» switches the chips to delete mode (✕).
  */
-export function FrequentDishes({ onAdd, foods, commit = commitOps }: FrequentDishesProps) {
+export function FrequentDishes({ onAdd, foods, commit = commitOps, lockedBy }: FrequentDishesProps) {
   const appFoods = useAppData().foods;
   const source = foods ?? appFoods;
   const dishes = useMemo(() => buildFrequentDishes(source), [source]);
@@ -53,8 +55,6 @@ export function FrequentDishes({ onAdd, foods, commit = commitOps }: FrequentDis
   });
 
   if (!dishes.length) return null;
-
-  const add = (item: FoodEstimateItem) => onAdd(buildFoodAdd([item], null));
 
   const remove = (key: string, name: string, index: number) => {
     const fallback = blockRef.current ? neighbourControls(blockRef.current, 'before') : [];
@@ -98,7 +98,16 @@ export function FrequentDishes({ onAdd, foods, commit = commitOps }: FrequentDis
                 </span>
               </button>
             ) : (
-              <button type="button" className={s.chip} aria-label={chipAddLabel(d.item)} onClick={() => add(d.item)}>
+              <button
+                type="button"
+                className={s.chip}
+                aria-label={chipAddLabel(d.item)}
+                aria-disabled={lockedBy !== undefined || undefined}
+                aria-describedby={lockedBy}
+                onClick={() => {
+                  if (lockedBy === undefined) onAdd(d.item);
+                }}
+              >
                 <ChipText label={d.label} />
               </button>
             )}

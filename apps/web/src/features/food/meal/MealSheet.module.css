@@ -1,0 +1,18 @@
+/* Sticky footer of the stacked meal editor: why «Зберегти» waits (or failed), then the button. */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  text-align: center;
+}
+
+.error {
+  color: var(--accD);
+}

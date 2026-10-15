@@ -1,111 +1,185 @@
 import type { FoodEstimateResponse } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { needsRecalc, type RecalcRow } from './drafts';
-import { estimateReducer, IDLE, type EstimateAction, type EstimatePhase } from './estimate';
+import { emptyDraft, needsRecalc, toDrafts, type RecalcRow } from './drafts';
+import {
+  estimateIdOf,
+  estimateReducer,
+  initialPositions,
+  liveNotice,
+  type EstimateAction,
+  type PositionsState,
+} from './estimate';
 import { editorChanged, kcalSource, restorableName } from './itemEditorModel';
+
+const NO_MACROS = { protein: null, fat: null, carbs: null };
 
 const RES: FoodEstimateResponse = {
   photoId: 'ph_0123456789abcdef',
   items: [
-    { name: 'Борщ', portion: '300 г', kcal: 260 },
-    { name: 'Хліб', portion: '1 скибка', kcal: 80 },
+    { name: 'Борщ', portion: '300 г', kcal: 260, protein: 6, fat: 12, carbs: 25 },
+    { name: 'Хліб', portion: '1 скибка', kcal: 80, protein: 2.5, fat: 0.5, carbs: 15 },
   ],
   totalKcal: 340,
   comment: '  Приблизно.  ',
 };
 
-const start = (id: number, photo = false, consumed = '') => ({ type: 'start', id, photo, consumed }) as const;
+const start = (id: number, photo = false, counts: string | null = null): EstimateAction => ({
+  type: 'start',
+  id,
+  photo,
+  counts,
+});
 
-const run = (state: EstimatePhase, ...actions: EstimateAction[]): EstimatePhase =>
+const run = (state: PositionsState, ...actions: EstimateAction[]): PositionsState =>
   actions.reduce(estimateReducer, state);
 
-type Result = Extract<EstimatePhase, { kind: 'result' }>;
+/** The state as it is (kept so the cases read as before the meal editor). */
+const result = (state: PositionsState): PositionsState => state;
 
-function result(state: EstimatePhase): Result {
-  if (state.kind !== 'result') throw new Error(`expected a result, got ${state.kind}`);
-  return state;
-}
+/** A meal with two positions the model priced (ids i0, i1) and its remark. */
+const resolved = (): PositionsState => ({ ...initialPositions(toDrafts(RES.items)), comment: 'Приблизно.' });
 
-const resolved = () => result(run(IDLE, start(1, true), { type: 'resolve', id: 1, res: RES }));
-
-describe('estimateReducer', () => {
-  it('start → preview → result', () => {
-    let s: EstimatePhase = estimateReducer(IDLE, start(1, true));
-    expect(s).toEqual({ kind: 'loading', id: 1, photo: true, consumed: '', preview: null });
+describe('estimateReducer: estimates append to the positions', () => {
+  it('start → preview → the rows join the list, fresh, with the estimate’s id', () => {
+    let s = estimateReducer(initialPositions(), start(1, true));
+    expect(s.loading).toEqual({ id: 1, photo: true, preview: null, counts: null });
+    expect(liveNotice(s)).toEqual({ key: 'l1', text: 'Рахую калорії…' });
     s = estimateReducer(s, { type: 'preview', id: 1, preview: 'data:image/jpeg;base64,AA' });
-    s = estimateReducer(s, { type: 'resolve', id: 1, res: RES });
-    expect(s).toEqual({
-      kind: 'result',
-      id: 1,
-      photo: true,
-      consumed: '',
-      preview: 'data:image/jpeg;base64,AA',
-      photoId: 'ph_0123456789abcdef',
-      comment: 'Приблизно.',
-      drafts: [
-        {
-          id: 'i0',
-          name: 'Борщ',
-          portion: '300 г',
-          kcalText: '260',
-          base: { name: 'Борщ', portion: '300 г', kcal: 260 },
-          pinned: false,
-        },
-        {
-          id: 'i1',
-          name: 'Хліб',
-          portion: '1 скибка',
-          kcalText: '80',
-          base: { name: 'Хліб', portion: '1 скибка', kcal: 80 },
-          pinned: false,
-        },
-      ],
-      found: { count: 2, total: 340 },
-      recalc: { pending: null },
-      editor: null,
-    });
+    expect(s.loading?.preview).toBe('data:image/jpeg;base64,AA');
+    s = estimateReducer(s, { type: 'resolve', id: 1, res: RES, attached: true });
+    expect(s.loading).toBeNull();
+    expect(s.comment).toBe('Приблизно.');
+    expect(s.drafts.map((d) => [d.id, d.name, d.kcalText, d.proteinText, d.estimateId, d.fresh])).toEqual([
+      ['e1.0', 'Борщ', '260', '6', 'e1', true],
+      ['e1.1', 'Хліб', '80', '2,5', 'e1', true],
+    ]);
+    expect(s.drafts[0]?.base).toEqual(RES.items[0]);
+    // What the model found is announced once; it may be taken back with its photo.
+    expect(liveNotice(s)).toEqual({ key: 'r1', text: 'Знайдено 2 позиції, разом 340 ккал' });
+    expect(s.undo).toEqual({ estimateId: estimateIdOf(1), photoId: 'ph_0123456789abcdef' });
+    expect(s.estimatedPhoto).toBe('ph_0123456789abcdef');
+    expect(s.emptyResult).toBe(false);
   });
 
-  it('a text estimate keeps the «Що я їла» tail it will replace', () => {
-    const loading = estimateReducer(IDLE, start(3, false, 'борщ, хліб'));
-    const res = estimateReducer(loading, { type: 'resolve', id: 3, res: { ...RES, photoId: null } });
-    expect(res).toMatchObject({ kind: 'result', photo: false, consumed: 'борщ, хліб', photoId: null });
+  it('a second estimate appends after the rows she has, and replaces the remark', () => {
+    const first = run(resolved(), start(2), {
+      type: 'resolve',
+      id: 2,
+      res: { ...RES, photoId: null, comment: '' },
+    });
+    expect(first.drafts.map((d) => d.id)).toEqual(['i0', 'i1', 'e2.0', 'e2.1']);
+    expect(first.comment).toBe('');
+    // A text estimate attaches no photo and leaves the context photo alone.
+    expect(first.undo).toEqual({ estimateId: 'e2', photoId: null });
+    expect(first.estimatedPhoto).toBeNull();
+    const second = run(first, start(3), { type: 'resolve', id: 3, res: { ...RES, comment: 'Ще раз.' } });
+    expect(second.drafts).toHaveLength(6);
+    expect(second.comment).toBe('Ще раз.');
+    // Only the last estimate can be taken back; not attached (the meal was full) → no photo to take.
+    expect(second.undo).toEqual({ estimateId: 'e3', photoId: null });
+  });
+
+  it('at most 30 positions: what does not fit is left out, and the announcement says so', () => {
+    let full = initialPositions();
+    for (let i = 0; i < 29; i++) full = estimateReducer(full, { type: 'add', itemId: `a${i}` });
+    const s = run(full, start(4), { type: 'resolve', id: 4, res: RES });
+    expect(s.drafts).toHaveLength(30);
+    expect(s.drafts.at(-1)?.name).toBe('Борщ');
+    expect(liveNotice(s)?.text).toBe('Знайдено 1 позицію, разом 260 ккал. Не більше 30 позицій');
+  });
+
+  it('nothing found: the advice for what was sent, the empty card, nothing to take back', () => {
+    const none = { photoId: null, items: [], totalKcal: 0, comment: '' };
+    const s = run(initialPositions(), start(5), { type: 'resolve', id: 5, res: none });
+    expect(s.emptyResult).toBe(true);
+    expect(s.comment).toBe('Не вдалося знайти їжу в описі — спробуй сформулювати інакше.');
+    expect(s.undo).toBeNull();
+    expect(liveNotice(s)?.text).toBe('Нічого не знайдено');
+    const photo = run(initialPositions(), start(6, true), {
+      type: 'resolve',
+      id: 6,
+      res: { ...none, comment: ' Це стіл. ' },
+    });
+    expect(photo.comment).toBe('Це стіл.');
+    // The next estimate starts over.
+    expect(run(s, start(7)).emptyResult).toBe(false);
   });
 
   it('ignores answers of cancelled or replaced requests', () => {
-    const loading2 = estimateReducer(IDLE, start(2));
+    const loading2 = estimateReducer(initialPositions(), start(2));
     expect(estimateReducer(loading2, { type: 'resolve', id: 1, res: RES })).toBe(loading2);
     expect(estimateReducer(loading2, { type: 'fail', id: 1, message: 'x' })).toBe(loading2);
     expect(estimateReducer(loading2, { type: 'preview', id: 1, preview: 'x' })).toBe(loading2);
-    expect(estimateReducer(IDLE, { type: 'resolve', id: 2, res: RES })).toBe(IDLE);
+    const idle = initialPositions();
+    expect(estimateReducer(idle, { type: 'resolve', id: 2, res: RES })).toBe(idle);
   });
 
-  it('a failure goes back to idle and keeps the reason until the next attempt or reset', () => {
-    const failed = estimateReducer(estimateReducer(IDLE, start(2)), {
-      type: 'fail',
-      id: 2,
-      message: 'Немає зʼєднання',
-    });
-    expect(failed).toEqual({ kind: 'idle', error: 'Немає зʼєднання' });
-    expect(estimateReducer(failed, start(3))).toEqual({
-      kind: 'loading',
-      id: 3,
-      photo: false,
-      consumed: '',
-      preview: null,
-    });
-    expect(estimateReducer(failed, { type: 'reset' })).toBe(IDLE);
+  it('a failure keeps the rows and the reason until the next attempt or «Скасувати»', () => {
+    const failed = run(resolved(), start(2), { type: 'fail', id: 2, message: 'Немає зʼєднання' });
+    expect(failed.loading).toBeNull();
+    expect(failed.error).toBe('Немає зʼєднання');
+    expect(failed.drafts).toHaveLength(2);
+    expect(run(failed, start(3)).error).toBeUndefined();
+    expect(run(failed, { type: 'cancel' }).error).toBeUndefined();
+    // Nothing to cancel: the same state.
+    const plain = resolved();
+    expect(estimateReducer(plain, { type: 'cancel' })).toBe(plain);
   });
 
-  it('kcal edits are sanitised and pin the row; remove drops a row; what was found stays as announced', () => {
+  it('«Прибрати ці позиції» removes exactly that estimate’s rows; it ends once one of them is changed', () => {
+    const s = run(resolved(), start(2, true), { type: 'resolve', id: 2, res: RES, attached: true });
+    const undone = estimateReducer(s, { type: 'undo' });
+    expect(undone.drafts.map((d) => d.id)).toEqual(['i0', 'i1']);
+    expect(undone.undo).toBeNull();
+    expect(undone.comment).toBe('');
+    expect(liveNotice(undone)).toEqual({ key: 'ue2', text: 'Позиції прибрано' });
+    expect(estimateReducer(undone, { type: 'undo' })).toBe(undone);
+
+    // Edited (in the editor or in the list), removed, saved, or another estimate: no undo any more.
+    const editedInEditor = run(
+      s,
+      { type: 'openItem', itemId: 'e2.0' },
+      { type: 'editor', action: { type: 'amount', text: '200' } },
+      { type: 'saveItem' },
+    );
+    expect(editedInEditor.undo).toBeNull();
+    expect(run(s, { type: 'edit', itemId: 'e2.1', field: 'kcal', value: '90' }).undo).toBeNull();
+    expect(run(s, { type: 'remove', itemId: 'e2.1' }).undo).toBeNull();
+    expect(run(s, { type: 'saved' }).undo).toBeNull();
+    expect(run(s, start(3)).undo).toBeNull();
+    // Opening one and closing it unchanged, or changing a row of hers, keeps it.
+    expect(run(s, { type: 'openItem', itemId: 'e2.0' }, { type: 'saveItem' }).undo).toEqual(s.undo);
+    expect(run(s, { type: 'edit', itemId: 'i0', field: 'kcal', value: '1' }).undo).toEqual(s.undo);
+  });
+
+  it('a «Часті страви» dish joins as a fresh row with its numbers, announced', () => {
+    const dish = { name: 'Кава з молоком', portion: '1 чашка', kcal: 60, protein: 3, fat: 3, carbs: 5 };
+    const s = estimateReducer(resolved(), { type: 'dish', itemId: 'd1', dish });
+    expect(s.drafts[2]).toMatchObject({
+      id: 'd1',
+      name: 'Кава з молоком',
+      portion: '1 чашка',
+      kcalText: '60',
+      proteinText: '3',
+      pinned: true,
+      macrosPinned: true,
+      fromDish: true,
+      fresh: true,
+    });
+    expect(liveNotice(s)).toEqual({ key: 'ad1', text: 'Додано «Кава з молоком», 60 ккал' });
+    let full = initialPositions();
+    for (let i = 0; i < 30; i++) full = estimateReducer(full, { type: 'add', itemId: `a${i}` });
+    expect(estimateReducer(full, { type: 'dish', itemId: 'd2', dish })).toBe(full);
+  });
+
+  it('kcal edits are sanitised and pin the row; remove drops a row', () => {
     const edited = result(
       estimateReducer(resolved(), { type: 'edit', itemId: 'i1', field: 'kcal', value: '1 60 ккал' }),
     );
-    expect(edited.drafts[1]).toMatchObject({ kcalText: '160', pinned: true });
+    expect(edited.drafts[1]).toMatchObject({ kcalText: '160', pinned: true, proteinText: '5' });
     const removed = result(estimateReducer(edited, { type: 'remove', itemId: 'i0' }));
     expect(removed.drafts.map((d) => d.name)).toEqual(['Хліб']);
-    expect(removed.found).toEqual({ count: 2, total: 340 });
-    expect(estimateReducer(removed, { type: 'reset' })).toBe(IDLE);
+    expect(estimateReducer(removed, { type: 'remove', itemId: 'nope' })).toBe(removed);
   });
 
   it('a new amount rescales at once; a new name marks the row for recalculation', () => {
@@ -116,27 +190,20 @@ describe('estimateReducer', () => {
         { type: 'edit', itemId: 'i1', field: 'name', value: 'Хліб житній' },
       ),
     );
-    expect(s.drafts.map((d) => [d.name, d.portion, d.kcalText])).toEqual([
-      ['Борщ', '450 г', '390'],
-      ['Хліб житній', '1 скибка', '80'],
+    expect(s.drafts.map((d) => [d.name, d.portion, d.kcalText, d.proteinText])).toEqual([
+      ['Борщ', '450 г', '390', '9'],
+      ['Хліб житній', '1 скибка', '80', '2,5'],
     ]);
     // Bases are untouched until the model confirms.
-    expect(s.drafts[1]?.base).toEqual({ name: 'Хліб', portion: '1 скибка', kcal: 80 });
+    expect(s.drafts[1]?.base).toEqual(RES.items[1]);
   });
 
   it('«+ позиція» appends an empty row, up to 30', () => {
     const s = result(estimateReducer(resolved(), { type: 'add', itemId: 'n1' }));
-    expect(s.drafts[2]).toEqual({ id: 'n1', name: '', portion: '', kcalText: '', base: null, pinned: false });
-    let full: EstimatePhase = s;
+    expect(s.drafts[2]).toEqual(emptyDraft('n1'));
+    let full: PositionsState = s;
     for (let i = 2; i <= 40; i++) full = estimateReducer(full, { type: 'add', itemId: `n${i}` });
     expect(result(full).drafts).toHaveLength(30);
-  });
-
-  it('row edits outside a result are ignored', () => {
-    const loading = estimateReducer(IDLE, start(1));
-    expect(estimateReducer(loading, { type: 'add', itemId: 'n1' })).toBe(loading);
-    expect(estimateReducer(loading, { type: 'edit', itemId: 'i0', field: 'name', value: 'x' })).toBe(loading);
-    expect(estimateReducer(IDLE, { type: 'recalcStart', id: 2 })).toBe(IDLE);
   });
 });
 
@@ -147,7 +214,7 @@ describe('estimateReducer: recalculation', () => {
   ];
   const answer = (kcal: [number, number], comment = ''): FoodEstimateResponse => ({
     photoId: 'ph_0123456789abcdef',
-    items: rows.map((r, i) => ({ name: r.name, portion: r.portion, kcal: kcal[i] ?? 0 })),
+    items: rows.map((r, i) => ({ name: r.name, portion: r.portion, kcal: kcal[i] ?? 0, ...NO_MACROS })),
     totalKcal: kcal[0] + kcal[1],
     comment,
   });
@@ -167,11 +234,16 @@ describe('estimateReducer: recalculation', () => {
     );
     // Борщ was not changed: it keeps its number even though the model priced it differently.
     expect(done.drafts.map((d) => d.kcalText)).toEqual(['260', '170']);
-    expect(done.drafts[1]?.base).toEqual({ name: 'Хліб житній', portion: '2 скибки', kcal: 170 });
+    expect(done.drafts[1]?.base).toEqual({
+      name: 'Хліб житній',
+      portion: '2 скибки',
+      kcal: 170,
+      ...NO_MACROS,
+    });
     expect(done.recalc).toEqual({ pending: null, done: { id: 2, total: 430 } });
     // No remark this time: the first one stays.
     expect(done.comment).toBe('Приблизно.');
-    expect(done.found).toEqual({ count: 2, total: 340 });
+    expect(done.notice).toEqual({ key: 'd2', text: 'Перераховано: разом 430 ккал' });
   });
 
   it('a new remark from the model replaces the old one', () => {
@@ -202,25 +274,32 @@ describe('estimateReducer: recalculation', () => {
       pending,
     );
     expect(estimateReducer(pending, { type: 'recalcFail', id: 2, message: 'x' })).toBe(pending);
-    expect(estimateReducer(IDLE, { type: 'recalcResolve', id: 3, rows, res: answer([1, 2]) })).toBe(IDLE);
+    const idle = initialPositions();
+    expect(estimateReducer(idle, { type: 'recalcResolve', id: 3, rows, res: answer([1, 2]) })).toBe(idle);
     const done = run(pending, { type: 'recalcResolve', id: 3, rows, res: answer([1, 2]) });
     expect(estimateReducer(done, { type: 'recalcResolve', id: 3, rows, res: answer([5, 5]) })).toBe(done);
   });
 
   it('a photo the server no longer has is dropped for the running recalculation only', () => {
-    const pending = run(changed(), { type: 'recalcStart', id: 2 });
+    const PHOTO = 'ph_0123456789abcdef';
+    const withPhoto: PositionsState = {
+      ...changed(),
+      estimatedPhoto: PHOTO,
+      undo: { estimateId: 'e1', photoId: PHOTO },
+    };
+    const pending = run(withPhoto, { type: 'recalcStart', id: 2 });
     // Another recalculation's news, or none running: ignored.
-    expect(estimateReducer(pending, { type: 'photoGone', id: 1 })).toBe(pending);
-    expect(estimateReducer(changed(), { type: 'photoGone', id: 2 })).toEqual(changed());
-    expect(estimateReducer(IDLE, { type: 'photoGone', id: 2 })).toBe(IDLE);
+    expect(estimateReducer(pending, { type: 'photoGone', id: 1, photoId: PHOTO })).toBe(pending);
+    expect(estimateReducer(withPhoto, { type: 'photoGone', id: 2, photoId: PHOTO })).toBe(withPhoto);
 
-    const gone = result(estimateReducer(pending, { type: 'photoGone', id: 2 }));
-    expect(gone.photoId).toBeNull();
-    // Still waiting for the answer (asked again without the photo), the thumbnail stays on the card.
+    const gone = result(estimateReducer(pending, { type: 'photoGone', id: 2, photoId: PHOTO }));
+    // Not sent again; the undo no longer has a photo to take away (the meal dropped it).
+    expect(gone.estimatedPhoto).toBeNull();
+    expect(gone.undo).toEqual({ estimateId: 'e1', photoId: null });
+    // Still waiting for the answer (asked again without the photo).
     expect(gone.recalc).toEqual({ pending: 2 });
-    expect(gone.preview).toBe(result(pending).preview);
     const done = result(run(gone, { type: 'recalcResolve', id: 2, rows, res: answer([1, 170]) }));
-    expect(done.photoId).toBeNull();
+    expect(done.estimatedPhoto).toBeNull();
     expect(done.drafts[1]?.kcalText).toBe('170');
   });
 
@@ -239,7 +318,7 @@ describe('estimateReducer: recalculation', () => {
 });
 
 describe('estimateReducer: the item editor', () => {
-  const editor = (s: EstimatePhase) => {
+  const editor = (s: PositionsState) => {
     const r = result(s);
     if (!r.editor) throw new Error('no editor open');
     return r.editor;
@@ -271,7 +350,7 @@ describe('estimateReducer: the item editor', () => {
     expect(s.drafts[0]).toMatchObject({ portion: '450 г', kcalText: '390' });
   });
 
-  it('closing drops the draft; another row or no result opens nothing', () => {
+  it('closing drops the draft; another row opens nothing', () => {
     const s = run(
       resolved(),
       { type: 'openItem', itemId: 'i0' },
@@ -281,8 +360,6 @@ describe('estimateReducer: the item editor', () => {
     expect(result(s).editor).toBeNull();
     expect(result(s).drafts[0]?.name).toBe('Борщ');
     expect(run(resolved(), { type: 'openItem', itemId: 'nope' })).toEqual(resolved());
-    expect(estimateReducer(IDLE, { type: 'openItem', itemId: 'i0' })).toBe(IDLE);
-    expect(estimateReducer(IDLE, { type: 'saveItem' })).toBe(IDLE);
     // Nothing open: editor changes, «Готово» and closing do nothing.
     const r = resolved();
     expect(estimateReducer(r, { type: 'editor', action: { type: 'name', value: 'x' } })).toBe(r);
@@ -306,15 +383,14 @@ describe('estimateReducer: the item editor', () => {
     );
     expect(added.editor).toBeNull();
     expect(added.drafts[2]).toEqual({
-      id: 'n1',
+      ...emptyDraft('n1'),
       name: 'Чай',
-      portion: '',
       kcalText: '5',
-      base: null,
       pinned: true,
+      fresh: true,
     });
 
-    let full: EstimatePhase = resolved();
+    let full: PositionsState = resolved();
     for (let i = 0; i < 28; i++) full = estimateReducer(full, { type: 'add', itemId: `a${i}` });
     expect(result(full).drafts).toHaveLength(30);
     expect(result(estimateReducer(full, { type: 'newItem', itemId: 'n9' })).editor).toBeNull();
@@ -349,8 +425,8 @@ describe('estimateReducer: the item editor', () => {
     const res: FoodEstimateResponse = {
       photoId: null,
       items: [
-        { name: 'Борщ', portion: '300 г', kcal: 999 },
-        { name: 'Хліб житній', portion: '2 скибки', kcal: 170 },
+        { name: 'Борщ', portion: '300 г', kcal: 999, ...NO_MACROS },
+        { name: 'Хліб житній', portion: '2 скибки', kcal: 170, protein: 5.5, fat: 1, carbs: 32 },
       ],
       totalKcal: 0,
       comment: '',
@@ -359,7 +435,9 @@ describe('estimateReducer: the item editor', () => {
     expect(done.editor?.item).toMatchObject({
       name: 'Хліб житній',
       kcalText: '170',
-      base: { name: 'Хліб житній', portion: '2 скибки', kcal: 170 },
+      proteinText: '5,5',
+      carbsText: '32',
+      base: { name: 'Хліб житній', portion: '2 скибки', kcal: 170, protein: 5.5 },
     });
     // Not applied yet: «Готово» does that.
     expect(done.drafts.map((d) => d.kcalText)).toEqual(['260', '80']);
@@ -382,7 +460,7 @@ describe('estimateReducer: the item editor', () => {
     ];
     const res: FoodEstimateResponse = {
       photoId: null,
-      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 1 })),
+      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 1, ...NO_MACROS })),
       totalKcal: 2,
       comment: '',
     };
@@ -398,13 +476,21 @@ describe('estimateReducer: the item editor', () => {
     expect(s.recalc).toEqual({ pending: 6 });
   });
 
-  it('reset drops the editor with the result', () => {
-    expect(run(resolved(), { type: 'openItem', itemId: 'i0' }, { type: 'reset' })).toBe(IDLE);
+  it('«Скасувати» drops only a request: the rows and the open editor stay', () => {
+    const open = run(
+      resolved(),
+      { type: 'openItem', itemId: 'i0' },
+      { type: 'start', id: 9, photo: false, counts: null },
+    );
+    const cancelled = run(open, { type: 'cancel' });
+    expect(cancelled.loading).toBeNull();
+    expect(cancelled.drafts).toBe(open.drafts);
+    expect(cancelled.editor).toBe(open.editor);
   });
 });
 
 describe('estimateReducer: an answer and an open editor', () => {
-  const editor = (s: EstimatePhase) => {
+  const editor = (s: PositionsState) => {
     const r = result(s);
     if (!r.editor) throw new Error('no editor open');
     return r.editor;
@@ -429,8 +515,8 @@ describe('estimateReducer: an answer and an open editor', () => {
     res: {
       photoId: null,
       items: [
-        { name: 'Борщ', portion: '300 г', kcal: 999 },
-        { name: 'Хліб житній', portion: '1 скибка', kcal: 100 },
+        { name: 'Борщ', portion: '300 г', kcal: 999, ...NO_MACROS },
+        { name: 'Хліб житній', portion: '1 скибка', kcal: 100, ...NO_MACROS },
       ],
       totalKcal: 0,
       comment,
@@ -531,7 +617,7 @@ describe('estimateReducer: a recalculation asked for in the editor', () => {
     rows: sent,
     res: {
       photoId: null,
-      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 100 })),
+      items: sent.map((r) => ({ name: r.name, portion: r.portion, kcal: 100, ...NO_MACROS })),
       totalKcal: 200,
       comment,
     },

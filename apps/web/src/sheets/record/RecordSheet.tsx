@@ -1,5 +1,7 @@
 import { addDays, type MeasureKey } from '@legko/shared';
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
+import { MealEditorBody, MealSheet, useMealEditor, type MealTarget } from '@/features/food';
 import { useToday } from '@/lib/useToday';
 import { commit, useAppData } from '@/store/data';
 import { ui, type SheetState } from '@/store/ui';
@@ -8,11 +10,12 @@ import { MeasureField, SAVE_FAILED, SaveFooter, WeightField } from '../fields/fi
 import { measurePlaceholders, sheetDateLabels, stepBaseWeight, weightHint } from '../helpers';
 import { useDraft } from '../useDraft';
 import { useSheetGuard } from '../useSheetGuard';
-import { FoodBlock, NotesBlock, WorkoutBlock } from './blocks';
+import { NotesBlock, WorkoutBlock } from './blocks';
 import { CaptureMenu } from './CaptureMenu';
+import { AddMealButton, FoodDayPanel } from './FoodDayPanel';
+import { foodDayModel } from './foodDayModel';
 import { captureMenuDateLine, captureMenuRows } from './menuModel';
 import {
-  foodUseOps,
   hasRecordErrors,
   initRecordDraft,
   isRecordDirty,
@@ -32,16 +35,23 @@ export interface RecordSheetProps {
   open: boolean;
 }
 
+/** The meal editor stacked over «Їжа» / «Запис дня», and the open sheet (`SheetState.key`) it belongs to. */
+interface StackedMeal {
+  sheetKey: number;
+  target: MealTarget;
+}
+
 /**
- * The «+» menu «Що записати?» and every record form — «Запис дня», «Їжа», «Тренування»,
- * «Контрольне зважування», «Заміри тіла» (prototype lines 425–510) — in ONE <Sheet>: a menu row
- * swaps heading, date navigator, footer and body of the same dialog in place (no second slide-up,
- * no backdrop flicker; the scroll lock and focus return to «+» stay with the one sheet). So never key
- * this component or its Sheet by mode.
+ * The «+» menu «Що записати?» and every record form — «Запис дня», «Їжа» (the day's meals), «Прийом їжі» (a new
+ * meal), «Тренування», «Контрольне зважування», «Заміри тіла» (prototype lines 425–510) — in ONE <Sheet>: a menu row
+ * swaps heading, date navigator, footer and body of the same dialog in place (no second slide-up, no backdrop
+ * flicker; the scroll lock and focus return to «+» stay with the one sheet). So never key this component or its
+ * Sheet by mode. A meal opened from «Їжа» or «Запис дня» stacks above it (`MealSheet`, rendered inside this sheet).
  */
 export function RecordSheet({ state, open }: RecordSheetProps) {
   const { date, mode, key } = state;
   const isMenu = mode === 'menu';
+  const isMeal = mode === 'meal';
   // The menu edits nothing: its draft is an untouched day draft (never dirty), without the patch.
   const formMode: RecordMode = mode === 'menu' ? 'day' : mode;
   const patch = isMenu ? undefined : state.patch;
@@ -58,14 +68,21 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
   });
   const set = (change: Partial<RecordDraft>) => update((d) => ({ ...d, ...change }));
 
-  // An estimate on screen or text in FoodAssist's composer is unsaved work too. FoodAssist is
-  // remounted per open sheet (`key`), and a report from an earlier one never counts.
-  const [assist, setAssist] = useState({ key, pending: false });
-  const foodPending = assist.key === key && assist.pending;
-  const onFoodPending = useCallback(
-    (pending: boolean) => setAssist((a) => (a.key === key && a.pending === pending ? a : { key, pending })),
-    [key],
-  );
+  // «Прийом їжі»: the new-meal editor of this sheet (idle in the other modes). ‹ › keep `key`, so the draft
+  // moves to the other day with her.
+  const meal = useMealEditor(isMeal ? { date, mealId: null, key } : null);
+
+  // A meal row or «+ Прийом їжі» in «Їжа» / «Запис дня» opens the stacked editor. A new open of this sheet
+  // (‹ ›, a deep link) leaves it behind.
+  const [stacked, setStacked] = useState<StackedMeal | null>(null);
+  const mealTarget = stacked !== null && stacked.sheetKey === key ? stacked.target : null;
+  const opens = useRef(0);
+  const openMeal = (mealId: string | null) => {
+    opens.current += 1;
+    const target: MealTarget = { date, mealId, key: opens.current };
+    // Inside the tap: a new meal's «Що я їла» takes focus at once, so the iPhone keyboard opens with it.
+    flushSync(() => setStacked({ sheetKey: key, target }));
+  };
 
   // The draft the store refused to save; the message stays until she edits it.
   const [refused, setRefused] = useState<RecordDraft | null>(null);
@@ -74,26 +91,44 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
   const show = recordSections(formMode);
   const errors = validateRecord(draft, formMode);
   const invalid = hasRecordErrors(errors);
-  const { anchor, close, guard } = useSheetGuard(dirty || foodPending, open);
+  // The stacked editor asks for itself on ✕ / Escape / drag (it is the live sheet); a notification tap meanwhile
+  // goes through this sheet's guard, so it asks too rather than dropping a meal she may be typing.
+  const { anchor, close, guard, replace } = useSheetGuard(dirty || meal.dirty || mealTarget !== null, open);
   const labels = sheetDateLabels(date, today);
   const canNext = date < today;
 
-  // ‹ › keep the sheet's mode.
+  // ‹ › keep the sheet's mode; a new meal's draft moves with her (nothing typed is lost, nothing is asked).
   const go = (delta: number) => {
     if (delta > 0 && !canNext) return;
-    guard(() => ui.openSheet(addDays(date, delta), formMode));
+    const next = addDays(date, delta);
+    if (isMeal) ui.moveSheet(next);
+    else guard(() => ui.openSheet(next, formMode));
+  };
+
+  const pick = (m: RecordMode) => {
+    // Rendered inside the tap, so the new meal's «Що я їла» takes focus and the iPhone keyboard comes up.
+    if (m === 'meal') flushSync(() => ui.openSheet(date, 'meal'));
+    else ui.openSheet(date, m);
+  };
+
+  const done = () => {
+    ui.closeSheet();
+    ui.flash('Збережено');
   };
 
   const save = () => {
-    if (!open || isMenu || invalid) return;
-    const ops = recordOps({ baseline, draft, data, date, mode: formMode });
-    if (show.food) ops.push(...foodUseOps(draft, date));
-    if (!commit(...ops)) {
+    if (!open || isMenu) return;
+    if (isMeal) {
+      if (meal.save()) done();
+      return;
+    }
+    if (invalid) return;
+    // The workout, notes, weigh-in and measurements; every meal saves on its own in the meal editor.
+    if (!commit(...recordOps({ baseline, draft, data, date, mode: formMode }))) {
       setRefused(draft);
       return;
     }
-    ui.closeSheet();
-    ui.flash('Збережено');
+    done();
   };
 
   const onMeasure = (field: MeasureKey, text: string) =>
@@ -102,6 +137,24 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
       next[field] = text;
       return next;
     });
+
+  const food = show.food ? foodDayModel(data, date) : null;
+
+  let footer: ReactNode;
+  if (isMenu) footer = undefined;
+  else if (isMeal)
+    footer = (
+      <SaveFooter
+        label="Зберегти"
+        onSave={save}
+        disabled={!meal.canSave}
+        error={meal.saveError}
+        hint={meal.saveHint}
+      />
+    );
+  else if (formMode === 'food')
+    footer = <AddMealButton canAdd={food?.canAdd ?? true} variant="solid" onAdd={() => openMeal(null)} />;
+  else footer = <SaveFooter label="Зберегти" onSave={save} disabled={invalid} error={saveError} />;
 
   return (
     <Sheet
@@ -119,11 +172,7 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
               canNext,
             }
       }
-      footer={
-        isMenu ? undefined : (
-          <SaveFooter label="Зберегти" onSave={save} disabled={invalid} error={saveError} />
-        )
-      }
+      footer={footer}
     >
       <span ref={anchor} hidden />
       <SwapBody mode={mode}>
@@ -131,8 +180,10 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
           <CaptureMenu
             rows={captureMenuRows(data, date, today)}
             dateLine={captureMenuDateLine(date, today)}
-            onPick={(m) => ui.openSheet(date, m)}
+            onPick={pick}
           />
+        ) : isMeal ? (
+          <MealEditorBody editor={meal} onShowDay={() => replace(() => ui.openSheet(date, 'food'))} />
         ) : (
           <>
             {show.workout && (
@@ -144,17 +195,11 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
                 customTypes={data.settings.customTypes}
               />
             )}
-            {show.food && (
-              <FoodBlock
-                mode={formMode}
-                draft={draft}
-                errors={errors}
-                set={set}
-                update={update}
-                onFoodPending={onFoodPending}
-                sheetKey={key}
-                date={date}
-                data={data}
+            {food && (
+              <FoodDayPanel
+                model={food}
+                variant={formMode === 'food' ? 'sheet' : 'field'}
+                onOpenMeal={openMeal}
               />
             )}
             {show.weight && (
@@ -190,6 +235,8 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
           </>
         )}
       </SwapBody>
+      {/* Inside this sheet's content, so it stacks above it (and its item editor above it in turn). */}
+      <MealSheet target={mealTarget} onClose={() => setStacked(null)} />
     </Sheet>
   );
 }

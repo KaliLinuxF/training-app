@@ -1,3 +1,4 @@
+import { flushSync } from 'react-dom';
 import { useToday } from '@/lib/useToday';
 import { setTrainedMark } from '@/store/dayMarks';
 import { ui } from '@/store/ui';
@@ -18,7 +19,13 @@ export function HomeScreen() {
   const { banner, week } = model;
 
   const open = (id: HomeRowId) => {
-    const action = HOME_ROW_ACTIONS[id];
+    const action = id === 'food' ? model.rows.food.action : HOME_ROW_ACTIONS[id];
+    if (action.mode === 'meal') {
+      // Nothing logged today → the new-meal editor. Rendered inside this tap so its «Що я їла» autoFocus opens the
+      // iPhone keyboard (iOS ignores a focus() that comes after the gesture).
+      flushSync(() => ui.openSheet(today, action.mode, action.patch));
+      return;
+    }
     ui.openSheet(today, action.mode, action.patch);
   };
   const openDay = () => ui.openSheet(today, 'day');

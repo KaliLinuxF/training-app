@@ -1,4 +1,4 @@
-import { emptyData, f0, type AppData, type DayEntry } from '@legko/shared';
+import { emptyData, f0, normalizeDay, type AppData, type DayEntry, type Meal } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import {
   buildDayDetail,
@@ -172,7 +172,7 @@ describe('buildDayDetail', () => {
   const row = (d: DayDetail, key: DayRowKey): DayRowModel => {
     const found = d.rows.find((r) => r.key === key);
     if (!found) throw new Error(`no ${key} row`);
-    return { value: undefined, text: undefined, action: undefined, ...found };
+    return { value: undefined, text: undefined, lines: undefined, action: undefined, ...found };
   };
   /** Nothing on the card ever falls back to «—». */
   const expectNoDash = (d: DayDetail) => {
@@ -283,6 +283,12 @@ describe('buildDayDetail', () => {
         describe: false,
       });
     }
+    // «Додати» on Їжа opens the new-meal editor right away (an empty list would be one more tap); the other rows
+    // open their usual sheets.
+    expect(d.rows.map((r) => r.mode)).toEqual(['meal', 'workout', 'weight', 'measure']);
+    expect(d.rows.filter((r) => r.key !== 'food').map((r) => r.mode)).toEqual(
+      d.rows.filter((r) => r.key !== 'food').map((r) => ROW_SHEET[r.key]),
+    );
     expect(row(d, 'training')).toMatchObject({
       filled: false,
       trained: null,
@@ -342,8 +348,10 @@ describe('buildDayDetail', () => {
       value: undefined,
       action: undefined,
       text: undefined,
+      lines: undefined,
       label: 'Їжа: калорії не вказані',
       describe: false,
+      mode: 'food',
     });
   });
 
@@ -351,7 +359,7 @@ describe('buildDayDetail', () => {
     const data = fixture();
     data.days['2026-10-04'] = day({ food: '  ', notes: ' \n ' });
     const d = buildDayDetail(data, '2026-10-04', TODAY);
-    expect(row(d, 'food')).toMatchObject({ filled: false, action: 'Додати', text: undefined });
+    expect(row(d, 'food')).toMatchObject({ filled: false, action: 'Додати', text: undefined, mode: 'meal' });
     expect(d.rows.some((r) => r.key === 'notes')).toBe(false);
   });
 
@@ -396,6 +404,215 @@ describe('buildDayDetail', () => {
     expect(row(buildDayDetail(data, '2026-09-30', TODAY), 'food')).toMatchObject({
       valueTone: 'ink',
       label: `Їжа: ${f0(1720)} ккал`,
+    });
+  });
+
+  describe('Їжа on a day with meals', () => {
+    /** U+00A0, spelled out so the tests pin it (the row helpers keep «520 ккал» and «3 прийоми» together). */
+    const NB = ' ';
+    const DATE = '2026-10-03';
+
+    const meal = (patch: Partial<Meal> & Pick<Meal, 'id'>): Meal => ({
+      type: '',
+      time: null,
+      text: '',
+      kcal: null,
+      protein: null,
+      fat: null,
+      carbs: null,
+      ...patch,
+    });
+    /** Stored as the reducer stores it: food, kcal and photos derived from the meals. */
+    const withMeals = (meals: Meal[], patch: Partial<DayEntry> = {}): AppData => {
+      const data = fixture();
+      data.days[DATE] = normalizeDay({ ...day(patch), meals });
+      return data;
+    };
+    const foodOf = (data: AppData): DayRowModel => row(buildDayDetail(data, DATE, TODAY), 'food');
+
+    /** The demo seed's 13 October: 1 740 ккал in three meals (meals doc §7.8). */
+    const THREE = (): Meal[] => [
+      meal({
+        id: 'demoB',
+        type: 'Сніданок',
+        time: '08:30',
+        text: 'Тост з авокадо',
+        photos: ['ph1'],
+        items: [{ name: 'Тост з авокадо', portion: '1 порція', kcal: 520, protein: 23, fat: 17, carbs: 68 }],
+      }),
+      meal({
+        id: 'demoL',
+        type: 'Обід',
+        time: '13:00',
+        text: 'Салат з куркою',
+        kcal: 700,
+        protein: 49,
+        fat: 25,
+        carbs: 70,
+        photos: ['ph2'],
+      }),
+      meal({
+        id: 'demoD',
+        type: 'Вечеря',
+        time: '19:30',
+        text: 'Індичка з броколі',
+        kcal: 520,
+        protein: 42,
+        fat: 20,
+        carbs: 43,
+      }),
+    ];
+    const THREE_LINES = [
+      `Сніданок · 520${NB}ккал · Тост з авокадо`,
+      `Обід · 700${NB}ккал · Салат з куркою`,
+      `Вечеря · 520${NB}ккал · Індичка з броколі`,
+      `Б${NB}114${NB}· Ж${NB}62${NB}· В${NB}181${NB}г`,
+    ];
+
+    it('one line per meal, then the day’s «Б · Ж · В»; the lines are the row’s description', () => {
+      const data = withMeals(THREE(), { trained: true, types: ['Кардіо'] });
+      data.settings.kcalGoal = 1800;
+      const d = buildDayDetail(data, DATE, TODAY);
+      expect(row(d, 'food')).toEqual({
+        key: 'food',
+        title: 'Їжа',
+        filled: true,
+        value: `${f0(1740)} ккал`,
+        valueTone: 'ink',
+        text: THREE_LINES.join('\n'),
+        lines: THREE_LINES,
+        action: undefined,
+        mode: 'food',
+        label: `Їжа: ${f0(1740)} ккал, 3${NB}прийоми`,
+        describe: true,
+      });
+      // The derived day photos still sit under the row; the other rows are untouched.
+      expect(d.photos).toEqual(['ph1', 'ph2']);
+      expect(row(d, 'training').label).toBe('Тренування: було, Кардіо');
+      expect(d.statusLabel).toBe('Заповнено');
+    });
+
+    it('keeps the number and «ккал» together, and never says «БЖУ»', () => {
+      const { lines = [], label } = foodOf(withMeals(THREE()));
+      for (const line of lines.slice(0, 3)) {
+        expect(line).toMatch(new RegExp(`\\d${NB}ккал`));
+        expect(line).not.toMatch(/\d ккал/);
+      }
+      expect(lines.join(' ')).not.toContain('БЖУ');
+      expect(label).toContain(`3${NB}прийоми`);
+    });
+
+    it('over the kcal goal: accent value and «більше цілі» after the meal count', () => {
+      expect(foodOf(withMeals(THREE()))).toMatchObject({
+        value: `${f0(1740)} ккал`,
+        valueTone: 'acc',
+        label: `Їжа: ${f0(1740)} ккал, 3${NB}прийоми, більше цілі`,
+      });
+    });
+
+    it('leaves out « · … ккал» without kcal and « · content» without content', () => {
+      const data = withMeals([
+        meal({ id: 'snack', type: 'Перекус', time: '10:00', text: 'Яблуко' }),
+        meal({ id: 'photo', type: 'Обід', time: '13:00', kcal: 450, photos: ['ph1'] }),
+        meal({ id: 'bare', type: 'Вечеря', time: '19:00', photos: ['ph2'] }),
+      ]);
+      expect(foodOf(data)).toMatchObject({
+        lines: ['Перекус · Яблуко', `Обід · 450${NB}ккал`, 'Вечеря'],
+        value: `${f0(450)} ккал`,
+        label: `Їжа: ${f0(450)} ккал, 3${NB}прийоми`,
+        describe: true,
+      });
+    });
+
+    it('titles and content: untyped meals, a converted legacy block, positions, several text lines', () => {
+      const data = withMeals([
+        meal({ id: 'legacy', text: 'Омлет, борщ', kcal: 900 }),
+        meal({ id: 'untyped0001', time: '12:00', text: 'Кава' }),
+        meal({
+          id: 'withItems',
+          type: 'Після тренування',
+          time: '18:00',
+          items: [
+            { name: 'Протеїновий батончик', portion: '1 шт', kcal: 200, protein: 20, fat: 7, carbs: 18 },
+            { name: 'Банан', portion: '1 шт', kcal: 100, protein: 1, fat: 0, carbs: 23 },
+          ],
+        }),
+        meal({ id: 'lines', type: 'Вечеря', time: '20:00', text: 'Риба,\nсалат;\n\n  кефір  ', kcal: 400 }),
+      ]);
+      expect(foodOf(data).lines).toEqual([
+        'Прийом їжі · Кава',
+        `Після тренування · 300${NB}ккал · Протеїновий батончик, Банан`,
+        `Вечеря · 400${NB}ккал · Риба, салат, кефір`,
+        // No time: after the timed meals (D14).
+        `Їжа за день · 900${NB}ккал · Омлет, борщ`,
+        `Б${NB}21${NB}· Ж${NB}7${NB}· В${NB}41${NB}г`,
+      ]);
+    });
+
+    it('a macro line only when some macronutrient is known; unknown parts read «—»', () => {
+      const none = withMeals([meal({ id: 'a', type: 'Обід', text: 'Борщ', kcal: 300 })]);
+      expect(foodOf(none).lines).toEqual([`Обід · 300${NB}ккал · Борщ`]);
+      expect(foodOf(none).text).toBe(`Обід · 300${NB}ккал · Борщ`);
+
+      const protein = withMeals([meal({ id: 'a', type: 'Обід', text: 'Курка', kcal: 300, protein: 30 })]);
+      expect(foodOf(protein).lines).toEqual([
+        `Обід · 300${NB}ккал · Курка`,
+        `Б${NB}30${NB}г${NB}· Ж${NB}—${NB}· В${NB}—`,
+      ]);
+    });
+
+    it('no kcal on any meal: the label says so, with the meal count', () => {
+      const data = withMeals([
+        meal({ id: 'a', type: 'Сніданок', time: '08:00', text: 'Вівсянка' }),
+        meal({ id: 'b', type: 'Перекус', time: '11:00', text: 'Яблуко' }),
+      ]);
+      expect(foodOf(data)).toMatchObject({
+        filled: true,
+        value: undefined,
+        valueTone: 'ink',
+        action: undefined,
+        lines: ['Сніданок · Вівсянка', 'Перекус · Яблуко'],
+        label: `Їжа: калорії не вказані, 2${NB}прийоми`,
+        mode: 'food',
+        describe: true,
+      });
+    });
+
+    it('counts one meal as «1 прийом»', () => {
+      const data = withMeals([meal({ id: 'a', type: 'Обід', text: 'Борщ', kcal: 300 })]);
+      data.settings.kcalGoal = 1700;
+      expect(foodOf(data).label).toBe(`Їжа: 300 ккал, 1${NB}прийом`);
+    });
+
+    it('a legacy day stays one text block, opened as the day’s list; `meals: []` is still legacy', () => {
+      const data = fixture();
+      data.days[DATE] = day({ food: 'Сирники, суп', kcal: 1200, meals: [] });
+      expect(foodOf(data)).toEqual({
+        key: 'food',
+        title: 'Їжа',
+        filled: true,
+        value: `${f0(1200)} ккал`,
+        valueTone: 'ink',
+        text: 'Сирники, суп',
+        lines: undefined,
+        action: undefined,
+        mode: 'food',
+        label: `Їжа: ${f0(1200)} ккал`,
+        describe: true,
+      });
+    });
+
+    it('a day whose meals were all removed is empty again: «Додати» opens a new meal', () => {
+      const data = withMeals([meal({ id: 'a', type: 'Обід' })], { trained: true });
+      expect(data.days[DATE]?.meals).toBeUndefined();
+      expect(foodOf(data)).toMatchObject({
+        filled: false,
+        action: 'Додати',
+        lines: undefined,
+        text: undefined,
+        label: 'Їжа: додати',
+        mode: 'meal',
+      });
     });
   });
 });

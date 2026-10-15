@@ -14,12 +14,14 @@ import {
   type ISODate,
   type MeasureKey,
 } from '@legko/shared';
+import { macroParts, NBSP, PART_SEPARATOR } from '@/lib/nutrition';
 import {
   chartGeometry,
   kcalAverages,
   kcalBars,
   kcalHistory,
   kcalTone,
+  macroAverages,
   MEASURE_LABELS,
   measureSummary,
   periodMeta,
@@ -43,6 +45,26 @@ export const HISTORY_FIRST = 3;
 export const HISTORY_PAGE = 7;
 /** Workout types listed under «Найчастіше». */
 export const TYPES_SHOWN = 5;
+
+/** Accessible name of the «Б · Ж · В» strip. */
+export const MACROS_LABEL = 'Білки, жири, вуглеводи — середнє за день';
+/** Instead of the «Б · Ж · В» strip when no day of the period has complete macros. */
+export const NO_MACROS_IN_PERIOD = 'За цей період білків, жирів і вуглеводів ще не записано';
+
+/**
+ * Period of the «Б · Ж · В» caption. Shorter than `PeriodMeta.short` («за останні 30 днів», «за весь період») so
+ * «Б · Ж · В — середнє за день · за 30 днів» stays on one phone line. Each phrase is joined with NBSP, so on a
+ * narrow line (320px) it moves down whole instead of leaving «тижня» alone.
+ */
+const MACRO_PERIOD: Readonly<Record<Period, string>> = {
+  week: `цього${NBSP}тижня`,
+  month: `за${NBSP}30${NBSP}днів`,
+  q: `за${NBSP}3${NBSP}місяці`,
+  all: `за${NBSP}весь${NBSP}час`,
+};
+
+/** «Б · Ж · В —» never splits; a wrap of the caption can only fall inside «середнє за день» or after its « ·». */
+const MACROS_CAPTION = `Б${NBSP}·${NBSP}Ж${NBSP}·${NBSP}В${NBSP}— середнє за день${PART_SEPARATOR}`;
 
 const DASH = '—';
 const CHART_VIEWBOX_HEIGHT = 120;
@@ -137,11 +159,27 @@ export interface HistoryRowModel {
   href: string;
 }
 
+/** «Б · Ж · В»: the average grams per day of the selected period, over the days complete for each (D22). */
+export interface MacroStripModel {
+  /** «Б · Ж · В — середнє за день · цього тижня» */
+  caption: string;
+  /**
+   * Білки · Жири · Вуглеводи: value in whole grams with the unit «г» (a goal goes into the label: «Білки · ціль
+   * 90 г»), lavender above its goal; «—» for a macronutrient no complete day has. Null when no day counts.
+   */
+  items: StatItem[] | null;
+  /** Shown instead of the strip when `items` is null. */
+  empty: string | null;
+  /** Accessible name of the strip. */
+  label: string;
+}
+
 export interface NutritionModel {
   /** «ціль 1 700 ккал» */
   goal: string;
   /** «Сер. цього тижня» · «Сер. цього місяця» */
   stats: StatItem[];
+  macros: MacroStripModel;
   bars: KcalBar[];
   goalPct: number;
   gap: string;
@@ -182,7 +220,7 @@ export function buildProgressModel(data: AppData, today: ISODate, opts: Progress
     weight: weightModel(data, from),
     measures: measuresModel(data, from, opts.measure),
     workouts: workoutsModel(data, from, today, period),
-    nutrition: nutritionModel(data, today, opts, period),
+    nutrition: nutritionModel(data, from, today, opts, period),
   };
 }
 
@@ -339,8 +377,27 @@ function kcalStat(label: string, avg: number | null, goal: number): StatItem {
   return { label, value: f0(avg), unit: 'ккал', tone: kcalTone(avg, goal) === 'over' ? 'acc' : 'acc2' };
 }
 
+/**
+ * D19: average Б · Ж · В per day of [from, today], each over the days where that macronutrient is known for every
+ * meal (`macroAverages`, D22), so a legacy block or a hand-typed meal without macros never reads as a low day.
+ */
+function macroStrip(data: AppData, from: ISODate, today: ISODate, period: Period): MacroStripModel {
+  const avg = macroAverages(data, from, today);
+  const base = { caption: MACROS_CAPTION + MACRO_PERIOD[period], label: MACROS_LABEL };
+  if (avg.days === 0) return { ...base, items: null, empty: NO_MACROS_IN_PERIOD };
+  // Same goal rule as the day totals (`macroParts`): over = the rounded average is above the goal.
+  const items = macroParts(avg, data.settings.macroGoals).map((p): StatItem => {
+    // «Білки · ціль 90 г»: the label wraps only after the dot; the unit stays «г» so the value fits a 320px column.
+    const label = p.goal === null ? p.name : `${p.name}${PART_SEPARATOR}ціль${NBSP}${p.goal}${NBSP}г`;
+    if (!p.known) return { label, value: p.value, tone: 'faint' };
+    return { label, value: p.value, unit: 'г', tone: p.over ? 'acc' : 'ink' };
+  });
+  return { ...base, items, empty: null };
+}
+
 function nutritionModel(
   data: AppData,
+  from: ISODate,
   today: ISODate,
   opts: ProgressOptions,
   period: PeriodMeta,
@@ -353,6 +410,7 @@ function nutritionModel(
     goal: `ціль ${f0(goal)} ккал`,
     // The period's own average is in the summary sentence above, so it is not repeated here.
     stats: [kcalStat('Сер. цього тижня', avg.week, goal), kcalStat('Сер. цього місяця', avg.month, goal)],
+    macros: macroStrip(data, from, today, opts.period),
     bars: chart.bars,
     goalPct: chart.goalPct,
     gap: chart.gap,

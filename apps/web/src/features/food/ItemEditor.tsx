@@ -1,4 +1,4 @@
-import { f0, LIMITS, type FoodItem } from '@legko/shared';
+import { f0, LIMITS, MACRO_KEYS, type FoodItem } from '@legko/shared';
 import {
   useId,
   useLayoutEffect,
@@ -9,8 +9,10 @@ import {
   type RefObject,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { MACRO_LABELS } from '@/lib/nutrition';
 import { ui, type ConfirmOptions } from '@/store/ui';
 import { Button, Chip, ChipGroup, cx, Field, Sheet, useFieldA11y, useRetained } from '@/ui';
+import { draftMacros, macroText } from './drafts';
 import { focusFirst } from './focus';
 import {
   canSave,
@@ -25,7 +27,7 @@ import {
   type EditorAction,
   type ItemEditorState,
 } from './itemEditorModel';
-import { parseKcal } from './model';
+import { macroPrecise, parseKcal } from './model';
 import { parseAmount, unitForm } from './portion';
 import s from './ItemEditor.module.css';
 
@@ -66,11 +68,11 @@ export interface ItemEditorProps {
 }
 
 /**
- * «Позиція» / «Нова позиція»: one estimate row in a second sheet over the day sheet (a centred
- * modal on desktop) with large controls — what it is, how much, how many kcal. Works on a local
- * draft: «Готово» applies it, ✕ drops it (asking first when something changed). While the kcal
- * wait for the model, «✨ Перерахувати» sits in the footer next to «Готово»: always in view, even
- * when the fields scroll under it.
+ * «Позиція» / «Нова позиція»: one position in a sheet stacked over the meal editor (a centred
+ * modal on desktop) with large controls — what it is, how much, how many kcal and Б · Ж · В. Works
+ * on a local draft: «Готово» applies it, ✕ drops it (asking first when something changed). While
+ * the kcal wait for the model, «✨ Перерахувати» sits in the footer next to «Готово»: always in
+ * view, even when the fields scroll under it.
  */
 export function ItemEditor({
   state,
@@ -285,6 +287,7 @@ function ItemFields({
   const note = kcalNote(source);
   const amount = parseAmount(state.amountText);
   const kcal = item.kcalText === '' ? null : parseKcal(item.kcalText);
+  const macros = macroPrecise(draftMacros(item));
 
   // The unit chips scroll sideways on a phone: keep the chosen one in view (a dish's «чашка» comes
   // after the basic units).
@@ -435,25 +438,52 @@ function ItemFields({
 
       <Field label="Калорії">
         {state.manualKcal ? (
-          <div className={s.kcalField}>
-            <FieldInput
-              ref={kcalInputRef}
-              className={s.kcalInput}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={5}
-              value={item.kcalText}
-              placeholder="0"
-              aria-describedby={note ? kcalId : undefined}
-              onChange={(e) => onChange({ type: 'kcal', value: e.target.value })}
-              onFocus={(e) => e.target.select()}
-            />
-            <span className={s.kcalUnit}>ккал</span>
-          </div>
+          <>
+            <div className={s.kcalField}>
+              <FieldInput
+                ref={kcalInputRef}
+                className={s.kcalInput}
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={5}
+                value={item.kcalText}
+                placeholder="0"
+                aria-describedby={note ? kcalId : undefined}
+                onChange={(e) => onChange({ type: 'kcal', value: e.target.value })}
+                onFocus={(e) => e.target.select()}
+              />
+              <span className={s.kcalUnit}>ккал</span>
+            </div>
+            <div className={s.macroInputs}>
+              {MACRO_KEYS.map((key) => (
+                <label key={key} className={s.macroField}>
+                  <span className={s.macroLabel}>{MACRO_LABELS[key].name}</span>
+                  <span className={s.macroWrap}>
+                    <FieldInput
+                      className={s.macroInput}
+                      inputMode="decimal"
+                      value={macroText(item, key)}
+                      placeholder="—"
+                      aria-label={MACRO_LABELS[key].name}
+                      aria-describedby={note ? kcalId : undefined}
+                      onChange={(e) => onChange({ type: 'macro', key, value: e.target.value })}
+                      onFocus={(e) => e.target.select()}
+                    />
+                    <span className={s.macroUnit} aria-hidden="true">
+                      г
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </>
         ) : (
-          <p className={s.kcal} aria-live="polite" aria-atomic="true">
-            {kcal === null ? '—' : f0(kcal)} <span className={s.kcalUnit}>ккал</span>
-          </p>
+          <div className={s.kcalBlock} aria-live="polite" aria-atomic="true">
+            <p className={s.kcal}>
+              {kcal === null ? '—' : f0(kcal)} <span className={s.kcalUnit}>ккал</span>
+            </p>
+            {macros && <p className={s.macros}>{macros}</p>}
+          </div>
         )}
         {note && (
           <p id={kcalId} className={cx(s.note, source.kind === 'needsAi' && s.noteTag)}>

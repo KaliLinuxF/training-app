@@ -1,11 +1,14 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getPasswordHash, verifyPassword } from '../auth/password';
 import { createSessionStore } from '../auth/sessions';
+import { createDataRepo } from '../db/data';
+import { migrate, MIGRATIONS, schemaVersion } from '../db/migrations';
 import { databasePath, openDatabase } from '../db/open';
+import { sqlite, type Database } from '../db/sqlite';
 import { readFirstLine } from './prompt';
 import { runCli, type CliIo } from './run';
 
@@ -75,6 +78,129 @@ describe('cli set-password', () => {
     const c = io('');
     expect(await runCli(['--help'], c)).toBe(0);
     expect(c.out()).toContain('set-password');
+  });
+});
+
+describe('cli downgrade-schema', () => {
+  const D = '2026-10-10';
+  const at = () => new Date('2026-10-15T09:00:00Z');
+  const columns = (db: Database, table: string): unknown[] =>
+    db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .map((c) => c.name);
+
+  it('turns a v3 database into v2: every day keeps its food text, kcal and photos; the v3 columns go', async () => {
+    const db = openDatabase(databasePath(dir));
+    const repo = createDataRepo(db);
+    repo.apply([
+      {
+        kind: 'day.put',
+        date: D,
+        value: { food: 'Борщ', kcal: 500, trained: true, types: ['Кардіо'], notes: 'n' },
+      },
+      {
+        kind: 'meal.put',
+        date: D,
+        value: {
+          id: 'breakfast001',
+          type: 'Сніданок',
+          time: '08:30',
+          text: 'Тост',
+          kcal: 300,
+          protein: 20,
+          fat: 10,
+          carbs: 30,
+          photos: ['AAAAAAAAAAAAAAAAAAAAAA'],
+        },
+      },
+      { kind: 'food.use', date: D, value: { name: 'Тост', portion: '2 шт', kcal: 300, protein: 20 } },
+    ]);
+    const before = repo.read().days[D];
+    db.close();
+
+    const term = { ...io(''), now: at };
+    expect(await runCli(['downgrade-schema'], term)).toBe(0);
+    expect(term.out()).toContain('Schema downgraded to v2');
+    expect(term.out()).toMatch(/Dropped: the meal structure .* protein \/ fat \/ carbs/);
+    expect(term.out()).toContain('food text, kcal and photos');
+    expect(readdirSync(join(dir, 'backups'))).toEqual(['legko-pre-down-v3-2026-10-15.db']);
+
+    const v2 = new (sqlite().DatabaseSync)(databasePath(dir));
+    try {
+      expect(schemaVersion(v2)).toBe(2);
+      expect(columns(v2, 'days')).not.toContain('meals');
+      expect(columns(v2, 'foods')).not.toContain('protein');
+      expect(columns(v2, 'foods')).not.toContain('carbs');
+      expect(v2.prepare('SELECT food, kcal, trained, notes, photos FROM days').get()).toEqual({
+        food: before?.food,
+        kcal: 800,
+        trained: 1,
+        notes: 'n',
+        photos: '["AAAAAAAAAAAAAAAAAAAAAA"]',
+      });
+      expect(v2.prepare('SELECT name, kcal FROM foods').get()).toEqual({ name: 'Тост', kcal: 300 });
+    } finally {
+      v2.close();
+    }
+    const snapshot = new (sqlite().DatabaseSync)(join(dir, 'backups', 'legko-pre-down-v3-2026-10-15.db'), {
+      readOnly: true,
+    });
+    try {
+      expect(schemaVersion(snapshot)).toBe(3);
+    } finally {
+      snapshot.close();
+    }
+
+    // Upgrading again re-adds the columns: the day is a legacy day with the same food.
+    const again = openDatabase(databasePath(dir), { now: at });
+    try {
+      expect(schemaVersion(again)).toBe(MIGRATIONS.length);
+      expect(again.prepare('SELECT meals FROM days').get()).toEqual({ meals: null });
+      const day = createDataRepo(again).read().days[D];
+      expect(day).toEqual({
+        food: before?.food,
+        kcal: 800,
+        trained: true,
+        types: ['Кардіо'],
+        notes: 'n',
+        photos: ['AAAAAAAAAAAAAAAAAAAAAA'],
+      });
+    } finally {
+      again.close();
+    }
+  });
+
+  it('refuses a database that is not at schema v3, changing nothing', async () => {
+    const v2 = new (sqlite().DatabaseSync)(databasePath(dir));
+    migrate(v2, MIGRATIONS.slice(0, 2));
+    v2.close();
+    const term = io('');
+    expect(await runCli(['downgrade-schema'], term)).toBe(1);
+    expect(term.err()).toMatch(/only works on schema v3; this database is v2\. Nothing was changed/);
+    expect(existsSync(join(dir, 'backups'))).toBe(false);
+    const check = new (sqlite().DatabaseSync)(databasePath(dir));
+    try {
+      expect(schemaVersion(check)).toBe(2);
+    } finally {
+      check.close();
+    }
+  });
+
+  it('fails clearly without a database and rejects options', async () => {
+    const missing = io('');
+    expect(await runCli(['downgrade-schema'], missing)).toBe(1);
+    expect(missing.err()).toMatch(/No database at/);
+    expect(existsSync(databasePath(dir))).toBe(false);
+    const extra = io('');
+    expect(await runCli(['downgrade-schema', '--force'], extra)).toBe(2);
+    expect(extra.err()).toContain('Usage');
+  });
+
+  it('is listed in the usage', async () => {
+    const help = io('');
+    expect(await runCli(['help'], help)).toBe(0);
+    expect(help.out()).toContain('downgrade-schema');
   });
 });
 

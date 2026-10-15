@@ -25,3 +25,15 @@ describe('DayCard reveal', () => {
     expect(cssValue(card, '.root', 'scroll-margin', DESKTOP)).toBe('24px');
   });
 });
+
+describe('Їжа lines of a day with meals', () => {
+  const card = readCss('screens/calendar/DayCard.module.css');
+
+  it('each meal is one block line that never wraps and ends in «…» (no wrapped line at 390 / 320px)', () => {
+    expect(cssValue(card, '.line', 'display')).toBe('block');
+    expect(cssValue(card, '.line', 'min-width')).toBe('0');
+    expect(cssValue(card, '.line', 'white-space')).toBe('nowrap');
+    expect(cssValue(card, '.line', 'overflow')).toBe('hidden');
+    expect(cssValue(card, '.line', 'text-overflow')).toBe('ellipsis');
+  });
+});

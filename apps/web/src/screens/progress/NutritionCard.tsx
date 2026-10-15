@@ -13,10 +13,14 @@ export const NO_KCAL_IN_PERIOD = 'За цей період калорій ще �
 export const NO_KCAL_HISTORY = 'Ще немає днів із калоріями';
 export const SHOW_MORE = 'Показати ще';
 
-/** «Харчування»: average kcal of this week / month, the bar chart with the goal line and the kcal history. */
+/**
+ * «Харчування»: average kcal of this week / month, the period's average Б · Ж · В per day, the bar chart with the
+ * goal line and the kcal history.
+ */
 export function NutritionCard({
   goal,
   stats,
+  macros,
   bars,
   goalPct,
   gap,
@@ -48,6 +52,14 @@ export function NutritionCard({
     <Card as="section" aria-labelledby={titleId}>
       <CardHeader title="Харчування" titleId={titleId} meta={goal} align="baseline" />
       <StatStrip items={stats} columns={2} />
+      <div className={s.macros}>
+        <p className={s.macrosCaption}>{macros.caption}</p>
+        {macros.items ? (
+          <StatStrip items={macros.items} columns={3} aria-label={macros.label} />
+        ) : (
+          <p className={s.macrosEmpty}>{macros.empty}</p>
+        )}
+      </div>
       <div className={s.chart}>
         <BarChart bars={bars} goalPct={goalPct} gap={gap} labeled={labeled} aria-label={chartLabel} />
         {!hasBarData && <p className={s.chartEmpty}>{NO_KCAL_IN_PERIOD}</p>}

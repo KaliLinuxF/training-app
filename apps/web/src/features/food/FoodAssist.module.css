@@ -1,10 +1,4 @@
-.root {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-
+/* The meal editor's AI row: two 44px buttons side by side, hints and the composer under them. */
 .ai {
   display: flex;
   flex-direction: column;
@@ -23,6 +17,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+  min-width: 0;
   min-height: 44px;
   padding: 0 12px;
   border-radius: var(--r14);
@@ -37,11 +32,12 @@
     opacity 150ms ease;
 }
 
-.action:active:not(:disabled) {
+.action:active:not([aria-disabled='true']) {
   transform: scale(0.98);
 }
 
-.action:disabled {
+/* Locked (aria-disabled, so a button locked under her focus keeps it): the kit's disabled look. */
+.action[aria-disabled='true'] {
   opacity: 0.45;
   cursor: default;
 }
@@ -127,6 +123,15 @@
   flex-shrink: 0;
 }
 
+.composerSubmit[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.composerSubmit[aria-disabled='true']:active {
+  transform: none;
+}
+
 @keyframes composer-in {
   from {
     opacity: 0;
@@ -134,24 +139,22 @@
   }
 }
 
-@media (hover: hover) {
-  .count:hover:not(:disabled) {
-    border-color: var(--accLine);
-  }
-
-  .count[aria-expanded='true']:hover:not(:disabled) {
-    border-color: var(--acc);
-  }
-
-  .photo:hover:not(:disabled) {
-    border-color: var(--line3);
+@media (prefers-reduced-motion: reduce) {
+  .composer {
+    animation: none;
   }
 }
 
-/*
- * Nothing to show (AI off, no frequent dishes): take no space in the sheet's field. `.live` is the
- * visually hidden status region, always rendered so that announcements are read out.
- */
-.root:has(> .live:only-child) {
-  display: none;
+@media (hover: hover) {
+  .count:hover:not([aria-disabled='true']) {
+    border-color: var(--accLine);
+  }
+
+  .count[aria-expanded='true']:hover:not([aria-disabled='true']) {
+    border-color: var(--acc);
+  }
+
+  .photo:hover:not([aria-disabled='true']) {
+    border-color: var(--line3);
+  }
 }
