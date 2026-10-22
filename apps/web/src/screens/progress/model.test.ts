@@ -5,6 +5,8 @@ import type { Period } from '@/lib/stats';
 import type { StatItem } from '@/ui';
 import {
   buildProgressModel,
+  calendarDayHref,
+  COACH_CHART_HINTS,
   HISTORY_FIRST,
   HISTORY_PAGE,
   MACROS_LABEL,
@@ -570,5 +572,50 @@ describe('buildProgressModel — robustness', () => {
       const json = JSON.stringify(build(data, { period }));
       expect(json).not.toMatch(/NaN|undefined|Infinity/);
     }
+  });
+});
+
+describe('buildProgressModel — audience and dayHref', () => {
+  it('defaults to her own copy and calendar links (self)', () => {
+    const fresh = build(freshData());
+    expect(fresh.weight.chart.emptyHint).toBe('Запиши перше зважування, щоб бачити динаміку');
+    expect(fresh.measures.chart.emptyHint).toBe('Запиши заміри, щоб бачити динаміку');
+    expect(build(freshData(), { audience: 'self' })).toEqual(fresh);
+    const rows = build(progressData()).nutrition.history;
+    expect(rows.map((r) => r.href)).toEqual(rows.map((r) => calendarDayHref(r.date)));
+    expect(calendarDayHref('2026-10-07')).toBe('/calendar?date=2026-10-07');
+  });
+
+  it('coach: third-person hints without any reading; the single-reading hints stay', () => {
+    const fresh = build(freshData(), { audience: 'coach' });
+    expect(COACH_CHART_HINTS).toEqual({ weightNone: 'Зважувань ще немає', measureNone: 'Замірів ще немає' });
+    expect(fresh.weight.chart.emptyHint).toBe(COACH_CHART_HINTS.weightNone);
+    expect(fresh.measures.chart.emptyHint).toBe(COACH_CHART_HINTS.measureNone);
+
+    const one = freshData();
+    one.weights = [{ date: TODAY, kg: 70 }];
+    one.measures = [{ date: TODAY, chest: null, waist: 72, hips: null }];
+    const single = build(one, { audience: 'coach' });
+    expect(single.weight.chart.emptyHint).toBe('Потрібно щонайменше два зважування');
+    expect(single.measures.chart.emptyHint).toBe('Потрібно щонайменше два заміри');
+
+    // Everything else is the same model as hers.
+    const self = build(progressData());
+    const coach = build(progressData(), { audience: 'coach' });
+    expect(coach).toEqual(self);
+  });
+
+  it('history rows lead to dayHref(date); nothing else changes', () => {
+    const dayHref = (date: string) => `/coach/7?tab=calendar&date=${date}`;
+    const n = build(progressData(), { dayHref }).nutrition;
+    expect(n.history.map((r) => r.href)).toEqual([
+      '/coach/7?tab=calendar&date=2026-10-08',
+      '/coach/7?tab=calendar&date=2026-10-07',
+      '/coach/7?tab=calendar&date=2026-10-06',
+    ]);
+    const self = build(progressData()).nutrition;
+    const rest = (rows: typeof n.history) => rows.map((r) => [r.date, r.label, r.value, r.tone, r.ariaLabel]);
+    expect(rest(n.history)).toEqual(rest(self.history));
+    expect(n.hasMore).toBe(self.hasMore);
   });
 });

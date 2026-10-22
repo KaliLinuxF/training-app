@@ -65,8 +65,9 @@ const groupTitleClass = (headingLevel: UsersPageProps['headingLevel']) =>
 
 /**
  * «Користувачі» (`/settings/users`, admins only; docs/multi-user.md §9.6): invite a person, the pending invites, the
- * accounts (a row opens the user sheet) and the AI limits. Everything comes from the admin API — never anyone's
- * records — and every change is online only (D20). A 403 means the role changed elsewhere: back to the list.
+ * accounts (a row opens the user sheet) and the AI limits. Everything comes from the admin API — this page never
+ * shows anyone's records; a client's records and progress live in «Клієнти» (`/coach/<id>`, read-only, linked from
+ * the user sheet) — and every change is online only (D20). A 403 means the role changed elsewhere: back to the list.
  */
 export function UsersPage({ headingLevel }: UsersPageProps) {
   const me = useCurrentUser();

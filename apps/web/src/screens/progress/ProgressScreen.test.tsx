@@ -3,16 +3,23 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { todayISO, type AppData } from '@legko/shared';
+import type { Period } from '@/lib/stats';
 import { useDataStore } from '@/store/data';
 import { useUiStore } from '@/store/ui';
 import { toneClass } from '@/ui/tone';
 import { NOT_ENOUGH_DATA, RECORD_MEASURE, RECORD_WEIGHT } from './ChartPlaceholder';
-import { MACROS_LABEL, NO_MACROS_IN_PERIOD } from './model';
+import { COACH_CHART_HINTS, MACROS_LABEL, NO_MACROS_IN_PERIOD } from './model';
 import { NO_KCAL_HISTORY, NO_KCAL_IN_PERIOD, SHOW_MORE } from './NutritionCard';
 import barStyles from './PeriodBar.module.css';
 import { PERIOD_STORAGE_KEY } from './period';
 import { freshData, progressData, TODAY } from './progress.fixtures';
-import { ProgressScreen, ProgressView, type ProgressViewProps } from './ProgressScreen';
+import {
+  ProgressBody,
+  ProgressScreen,
+  ProgressView,
+  type ProgressBodyProps,
+  type ProgressViewProps,
+} from './ProgressScreen';
 import summaryStyles from './SummaryCard.module.css';
 import { NO_WORKOUTS } from './WorkoutsCard';
 
@@ -449,5 +456,122 @@ describe('ProgressScreen', () => {
       useUiStore.setState({ sheet: null });
       useDataStore.setState({ data: before });
     });
+  });
+});
+
+function renderBody(props: Partial<ProgressBodyProps> = {}, path = '/coach/7', data: AppData = progressData()) {
+  const memory = memoryLocation({ path, record: true });
+  const onPeriodChange = vi.fn<(period: Period) => void>();
+  const view = render(
+    <Router hook={memory.hook} searchHook={memory.searchHook}>
+      <ProgressBody data={data} today={TODAY} period="week" onPeriodChange={onPeriodChange} {...props} />
+    </Router>,
+  );
+  return { memory, view, onPeriodChange };
+}
+
+describe('ProgressBody — the screen for an injected data source', () => {
+  it('has a controlled period: a change is only reported, never stored or put in the URL', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    const { memory, onPeriodChange, view } = renderBody({}, '/coach/7?period=all');
+    // A `?period=` of the host page is not hers: neither read nor removed.
+    expect(radio('Тиждень').getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(radio('Місяць'));
+    expect(onPeriodChange).toHaveBeenCalledExactlyOnceWith('month');
+    // Still the week until the owner passes the new period.
+    expect(radio('Тиждень').getAttribute('aria-checked')).toBe('true');
+    expect(window.sessionStorage.getItem(PERIOD_STORAGE_KEY)).toBeNull();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(memory.history).toEqual(['/coach/7?period=all']);
+
+    view.rerender(
+      <Router hook={memory.hook} searchHook={memory.searchHook}>
+        <ProgressBody data={progressData()} today={TODAY} period="month" onPeriodChange={onPeriodChange} />
+      </Router>,
+    );
+    expect(radio('Місяць').getAttribute('aria-checked')).toBe('true');
+    expect(text(region('За останні 30 днів'))).toContain('Тренувань 9');
+    expect(window.sessionStorage.getItem(PERIOD_STORAGE_KEY)).toBeNull();
+    expect(memory.history).toEqual(['/coach/7?period=all']);
+  });
+
+  it('title: «Мій прогрес» by default, a custom one, or no header at all with null', () => {
+    renderBody();
+    expect(screen.getByRole('heading', { level: 1, name: 'Мій прогрес' })).toBeTruthy();
+    cleanup();
+
+    renderBody({ title: 'Прогрес' });
+    expect(screen.getByRole('heading', { level: 1, name: 'Прогрес' })).toBeTruthy();
+    cleanup();
+
+    const { view } = renderBody({ title: null });
+    expect(screen.queryByRole('heading', { level: 1 })).toBeNull();
+    expect(view.container.querySelector('header')).toBeNull();
+    // The period bar comes first, then the cards in the usual order.
+    const children = [...(view.container.firstElementChild?.children ?? [])];
+    expect(children[0]?.querySelector('[role="radiogroup"]')).toBeTruthy();
+    expect(children.slice(1).map((c) => text(c.querySelector('h2') ?? c))).toEqual([
+      'Цього тижня',
+      'Вага',
+      'Заміри тіла',
+      'Тренування',
+      'Харчування',
+    ]);
+  });
+
+  it("audience 'coach': third-person hints and no record button, even with onRecord", () => {
+    const onRecord = vi.fn();
+    renderBody({ audience: 'coach', onRecord }, '/coach/7', freshData());
+    expect(screen.getAllByText(NOT_ENOUGH_DATA)).toHaveLength(2);
+    expect(within(region('Вага')).getByText(COACH_CHART_HINTS.weightNone)).toBeTruthy();
+    expect(within(region('Заміри тіла')).getByText(COACH_CHART_HINTS.measureNone)).toBeTruthy();
+    expect(screen.queryByText(/^Запиши/)).toBeNull();
+    expect(screen.queryByRole('button', { name: RECORD_WEIGHT })).toBeNull();
+    expect(screen.queryByRole('button', { name: RECORD_MEASURE })).toBeNull();
+    expect(onRecord).not.toHaveBeenCalled();
+  });
+
+  it("audience 'self' (default) keeps her hints and record buttons", () => {
+    const onRecord = vi.fn();
+    renderBody({ onRecord }, '/progress', freshData());
+    expect(screen.getByText('Запиши перше зважування, щоб бачити динаміку')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: RECORD_WEIGHT }));
+    expect(onRecord).toHaveBeenCalledExactlyOnceWith('weight');
+  });
+
+  it('«Історія калорій» rows lead to dayHref and call onOpenDay with it instead of navigating', () => {
+    const onOpenDay = vi.fn<(href: string) => void>();
+    const dayHref = (date: string) => `/coach/7?tab=calendar&date=${date}`;
+    const { memory } = renderBody({ dayHref, onOpenDay });
+    expect(historyRows()).toHaveLength(3);
+    fireEvent.click(screen.getByRole('button', { name: /^7 жовтня:/ }));
+    expect(onOpenDay).toHaveBeenCalledExactlyOnceWith('/coach/7?tab=calendar&date=2026-10-07');
+    expect(memory.history).toEqual(['/coach/7']);
+  });
+
+  it('without onOpenDay a row pushes its href (dayHref, or her calendar by default)', () => {
+    const dayHref = (date: string) => `/coach/7?tab=calendar&date=${date}`;
+    const { memory } = renderBody({ dayHref });
+    fireEvent.click(screen.getByRole('button', { name: /^6 жовтня:/ }));
+    expect(memory.history).toEqual(['/coach/7', '/coach/7?tab=calendar&date=2026-10-06']);
+    cleanup();
+
+    const own = renderBody({}, '/progress');
+    fireEvent.click(screen.getByRole('button', { name: /^8 жовтня:/ }));
+    expect(own.memory.history).toEqual(['/progress', '/calendar?date=2026-10-08']);
+  });
+
+  it('ProgressView without onOpenDay still pushes /calendar?date=… onto the history', () => {
+    const { memory } = renderView();
+    fireEvent.click(screen.getByRole('button', { name: /^8 жовтня:/ }));
+    expect(memory.history).toEqual(['/progress', '/calendar?date=2026-10-08']);
+  });
+
+  it('className lands on the root grid next to its own classes', () => {
+    const { view } = renderBody({ className: 'coach-panel' });
+    const root = view.container.firstElementChild!;
+    expect(root.classList.contains('coach-panel')).toBe(true);
+    expect(root.classList.length).toBeGreaterThan(1);
+    expect(root.querySelector('[role="radiogroup"]')).toBeTruthy();
   });
 });

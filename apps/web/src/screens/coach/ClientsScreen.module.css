@@ -1,0 +1,147 @@
+/* «Клієнти»: one column (the table needs the full width), gap 14 like the screen grids. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Phone: search, chips, then the period + sort row (three rows); desktop: one row, the period on the right. */
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.search {
+  min-width: 0;
+}
+
+/* 16px: no iOS zoom on focus; 48 tall on the phone (≥ 44). */
+.input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r14);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input:focus-visible {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.chips {
+  min-width: 0;
+}
+
+/* Phone: «7 днів | 30 днів» and «Сортування» side by side, half and half (they fit at 320). */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.period {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sort {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* As tall as the 7 / 30 track next to it (48). */
+.sort select {
+  min-height: 48px;
+}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .controls {
+    margin-left: auto;
+  }
+  .toolbar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .search {
+    flex: 1 1 220px;
+    max-width: 280px;
+  }
+
+  .input {
+    min-height: 44px;
+  }
+
+  .period {
+    flex: 0 0 auto;
+    min-width: 220px;
+  }
+}
+
+.empty {
+  gap: 8px;
+}
+
+.emptyTitle {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+}
+
+.usersLink {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accD);
+  text-decoration: none;
+  border-radius: var(--r12);
+}
+
+.usersLink:hover {
+  text-decoration: underline;
+}
+
+.count {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.note {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}

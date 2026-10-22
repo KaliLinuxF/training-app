@@ -14,6 +14,11 @@
   max-width: 1280px;
 }
 
+/* «Клієнти» (/coach, /coach/<id>): room for the clients table and the client pages (docs/coach-cabinet.md C13). */
+.wide {
+  max-width: 1440px;
+}
+
 /*
  * Phone shell only (AppShell sets <html data-shell="phone"> while it is mounted): keyboard focus (Tab, Full Keyboard
  * Access) and scrollIntoView stop above the floating tab bar and below the status bar (WCAG 2.2 SC 2.4.11, C43).

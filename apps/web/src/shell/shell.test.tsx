@@ -5,7 +5,7 @@ import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cssValue, px, readCss } from '@/ui/internal/cssSource';
 import { installMatchMedia, stubScrollTo } from '@/ui/internal/testing';
-import { NAV_ITEMS, NAV_SPLIT, isNavActive, isNavRoot } from './nav';
+import { COACH_NAV_ITEM, NAV_ITEMS, NAV_SPLIT, isNavActive, isNavRoot, isWidePage, navItems } from './nav';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 
@@ -31,6 +31,42 @@ describe('nav', () => {
       { href: '/settings', label: 'Налаштування', icon: 'gear' },
     ]);
     expect(NAV_SPLIT).toBe(2);
+  });
+
+  it('gives everyone but an admin exactly the four sections, in both places', () => {
+    expect(navItems(false, 'sidebar')).toBe(NAV_ITEMS);
+    expect(navItems(false, 'tabbar')).toBe(NAV_ITEMS);
+  });
+
+  it('adds «Клієнти» for an admin: a fifth sidebar link before «Налаштування», in place of «Прогрес» on the tab bar', () => {
+    expect(COACH_NAV_ITEM).toEqual({ href: '/coach', label: 'Клієнти', icon: 'users' });
+    expect(navItems(true, 'sidebar').map((i) => i.label)).toEqual([
+      'Головна',
+      'Календар',
+      'Прогрес',
+      'Клієнти',
+      'Налаштування',
+    ]);
+    expect(navItems(true, 'tabbar').map((i) => i.label)).toEqual([
+      'Головна',
+      'Календар',
+      'Клієнти',
+      'Налаштування',
+    ]);
+    // The four sections themselves are untouched.
+    expect(NAV_ITEMS.map((i) => i.href)).toEqual(['/', '/calendar', '/progress', '/settings']);
+  });
+
+  it('«Клієнти» stays active on a client page; only the coach pages are wide', () => {
+    expect(isNavActive('/coach', '/coach')).toBe(true);
+    expect(isNavActive('/coach', '/coach/abc')).toBe(true);
+    expect(isNavRoot('/coach', '/coach/abc')).toBe(false);
+    expect(isNavActive('/coach', '/coachx')).toBe(false);
+    expect(isWidePage('/coach')).toBe(true);
+    expect(isWidePage('/coach/abc')).toBe(true);
+    expect(isWidePage('/coachx')).toBe(false);
+    expect(isWidePage('/progress')).toBe(false);
+    expect(isWidePage('/')).toBe(false);
   });
 
   it('isNavActive matches a section and its sub-pages by pathname', () => {
@@ -67,7 +103,7 @@ const link = (name: string) => screen.getByRole('link', { name });
 
 describe('TabBar', () => {
   it('renders Головна, Календар, «+», Прогрес, Налаштування in that order, each tab with its icon', () => {
-    inRouter('/progress', <TabBar location="/progress" onRecord={() => undefined} />);
+    inRouter('/progress', <TabBar location="/progress" items={NAV_ITEMS} onRecord={() => undefined} />);
     const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
     const items = Array.from(nav.querySelectorAll('a, button')).map(
       (el) => el.getAttribute('aria-label') ?? el.textContent,
@@ -81,16 +117,16 @@ describe('TabBar', () => {
   });
 
   it('marks the current section: «page» at its root, «true» on a sub-page', () => {
-    inRouter('/progress', <TabBar location="/progress" onRecord={() => undefined} />);
+    inRouter('/progress', <TabBar location="/progress" items={NAV_ITEMS} onRecord={() => undefined} />);
     expect(link('Прогрес').getAttribute('aria-current')).toBe('page');
     expect(link('Головна').getAttribute('aria-current')).toBeNull();
     cleanup();
 
-    inRouter('/settings', <TabBar location="/settings" onRecord={() => undefined} />);
+    inRouter('/settings', <TabBar location="/settings" items={NAV_ITEMS} onRecord={() => undefined} />);
     expect(link('Налаштування').getAttribute('aria-current')).toBe('page');
     cleanup();
 
-    inRouter('/settings/goals', <TabBar location="/settings/goals" onRecord={() => undefined} />);
+    inRouter('/settings/goals', <TabBar location="/settings/goals" items={NAV_ITEMS} onRecord={() => undefined} />);
     expect(link('Налаштування').getAttribute('aria-current')).toBe('true');
     for (const name of ['Головна', 'Календар', 'Прогрес'])
       expect(link(name).getAttribute('aria-current')).toBeNull();
@@ -98,7 +134,7 @@ describe('TabBar', () => {
 
   it('«+» opens the record menu and says so with aria-haspopup / aria-expanded', () => {
     const onRecord = vi.fn();
-    const { view } = inRouter('/', <TabBar location="/" onRecord={onRecord} />);
+    const { view } = inRouter('/', <TabBar location="/" items={NAV_ITEMS} onRecord={onRecord} />);
     const plus = screen.getByRole('button', { name: 'Записати день' });
     expect(plus.getAttribute('aria-haspopup')).toBe('dialog');
     expect(plus.getAttribute('aria-expanded')).toBe('false');
@@ -106,15 +142,15 @@ describe('TabBar', () => {
     fireEvent.click(plus);
     expect(onRecord).toHaveBeenCalledOnce();
 
-    view.rerender(<TabBar location="/" onRecord={onRecord} recordOpen />);
+    view.rerender(<TabBar location="/" items={NAV_ITEMS} onRecord={onRecord} recordOpen />);
     expect(screen.getByRole('button', { name: 'Записати день' }).getAttribute('aria-expanded')).toBe('true');
-    view.rerender(<TabBar location="/" onRecord={onRecord} recordOpen={false} />);
+    view.rerender(<TabBar location="/" items={NAV_ITEMS} onRecord={onRecord} recordOpen={false} />);
     expect(screen.getByRole('button', { name: 'Записати день' }).getAttribute('aria-expanded')).toBe('false');
   });
 
   it('navigates to another section, and scrolls up instead when the current root is tapped', () => {
     const scrollTo = stubScrollTo();
-    const { memory } = inRouter('/', <TabBar location="/" onRecord={() => undefined} />);
+    const { memory } = inRouter('/', <TabBar location="/" items={NAV_ITEMS} onRecord={() => undefined} />);
     fireEvent.click(link('Головна'));
     expect(memory.history).toEqual(['/']);
     expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, behavior: 'smooth' });
@@ -125,7 +161,7 @@ describe('TabBar', () => {
 
   it('at /settings the active tab scrolls to the top without navigating', () => {
     const scrollTo = stubScrollTo();
-    const { memory } = inRouter('/settings', <TabBar location="/settings" onRecord={() => undefined} />);
+    const { memory } = inRouter('/settings', <TabBar location="/settings" items={NAV_ITEMS} onRecord={() => undefined} />);
     fireEvent.click(link('Налаштування'));
     expect(memory.history).toEqual(['/settings']);
     expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, behavior: 'smooth' });
@@ -134,7 +170,7 @@ describe('TabBar', () => {
   it('scrolls without the smooth animation when reduced motion is on', () => {
     installMatchMedia((query) => query === '(prefers-reduced-motion: reduce)');
     const scrollTo = stubScrollTo();
-    inRouter('/progress', <TabBar location="/progress" onRecord={() => undefined} />);
+    inRouter('/progress', <TabBar location="/progress" items={NAV_ITEMS} onRecord={() => undefined} />);
     fireEvent.click(link('Прогрес'));
     expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, behavior: 'auto' });
   });
@@ -144,7 +180,7 @@ describe('TabBar', () => {
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
     const { memory } = inRouter(
       '/settings/goals',
-      <TabBar location="/settings/goals" onRecord={() => undefined} />,
+      <TabBar location="/settings/goals" items={NAV_ITEMS} onRecord={() => undefined} />,
     );
     fireEvent.click(link('Налаштування'));
     expect(memory.history).toEqual(['/settings']);
@@ -157,7 +193,7 @@ describe('TabBar', () => {
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => undefined);
     const { memory } = inRouter(
       '/settings/goals',
-      <TabBar location="/settings/goals" onRecord={() => undefined} />,
+      <TabBar location="/settings/goals" items={NAV_ITEMS} onRecord={() => undefined} />,
     );
     fireEvent.click(link('Налаштування'));
     expect(back).toHaveBeenCalledOnce();
@@ -168,7 +204,7 @@ describe('TabBar', () => {
 describe('Sidebar', () => {
   it('shows the logo, the links and «+ Записати день» (a menu opener)', () => {
     const onRecord = vi.fn();
-    const { view } = inRouter('/', <Sidebar location="/" onRecord={onRecord} />);
+    const { view } = inRouter('/', <Sidebar location="/" items={NAV_ITEMS} onRecord={onRecord} />);
     expect(screen.getByText('Легко')).toBeTruthy();
     const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
     expect(
@@ -183,7 +219,7 @@ describe('Sidebar', () => {
     expect(record.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(record);
     expect(onRecord).toHaveBeenCalledOnce();
-    view.rerender(<Sidebar location="/" onRecord={onRecord} recordOpen />);
+    view.rerender(<Sidebar location="/" items={NAV_ITEMS} onRecord={onRecord} recordOpen />);
     expect(screen.getByRole('button', { name: '+ Записати день' }).getAttribute('aria-expanded')).toBe(
       'true',
     );
@@ -192,13 +228,46 @@ describe('Sidebar', () => {
   it('marks «Налаштування» on /settings/data, and tapping it goes back to the list', () => {
     const { memory } = inRouter(
       '/settings/data',
-      <Sidebar location="/settings/data" onRecord={() => undefined} />,
+      <Sidebar location="/settings/data" items={NAV_ITEMS} onRecord={() => undefined} />,
     );
     expect(link('Налаштування').getAttribute('aria-current')).toBe('true');
     for (const name of ['Головна', 'Календар', 'Прогрес'])
       expect(link(name).getAttribute('aria-current')).toBeNull();
     fireEvent.click(link('Налаштування'));
     expect(memory.history).toEqual(['/settings']);
+  });
+
+  it('renders the admin items: «Клієнти» before «Налаштування», marked on a client page', () => {
+    const { memory } = inRouter(
+      '/coach/abc',
+      <Sidebar location="/coach/abc" items={navItems(true, 'sidebar')} onRecord={() => undefined} />,
+    );
+    const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
+    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual([
+      'Головна',
+      'Календар',
+      'Прогрес',
+      'Клієнти',
+      'Налаштування',
+    ]);
+    expect(link('Клієнти').getAttribute('href')).toBe('/coach');
+    expect(link('Клієнти').getAttribute('aria-current')).toBe('true');
+    fireEvent.click(link('Клієнти'));
+    expect(memory.history).toEqual(['/coach']);
+  });
+});
+
+describe('TabBar for an admin', () => {
+  it('shows Головна, Календар, «+», Клієнти, Налаштування (no Прогрес)', () => {
+    inRouter('/coach', <TabBar location="/coach" items={navItems(true, 'tabbar')} onRecord={() => undefined} />);
+    const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
+    const items = Array.from(nav.querySelectorAll('a, button')).map(
+      (el) => el.getAttribute('aria-label') ?? el.textContent,
+    );
+    expect(items).toEqual(['Головна', 'Календар', 'Записати день', 'Клієнти', 'Налаштування']);
+    expect(screen.queryByRole('link', { name: 'Прогрес' })).toBeNull();
+    expect(link('Клієнти').getAttribute('aria-current')).toBe('page');
+    expect(link('Клієнти').querySelector('svg')).toBeTruthy();
   });
 });
 

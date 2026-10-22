@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photoIdSchema } from '@legko/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createDataRepos, type DataRepo } from '../db/data';
+import { createDataRepos, type ClientId, type DataRepo } from '../db/data';
 import { openDatabase } from '../db/open';
 import type { Database } from '../db/sqlite';
 import { createUserRepo, type UserId } from '../db/users';
 import { createLogger } from '../logger';
 import { createPhotoGcJob } from './gc';
 import {
+  createPhotoAccess,
   createPhotoStore,
   decodeUpload,
   isJpeg,
@@ -254,6 +255,31 @@ describe('photo store', () => {
     expect(await theirs.read(id, 'thumb')).toBeNull();
     expect(await mine.read(id, 'full')).not.toBeNull();
     expect(db.prepare('SELECT user_id FROM photos WHERE id = ?').get(id)?.user_id).toBe(anna);
+  });
+
+  it('readers (coach): readerFor reads its owner’s photos only; keys [read]; frozen', async () => {
+    const access = createPhotoAccess(db, dir, () => clock);
+    const annaPhoto = await save(500);
+    const olyaPhoto = await access.store
+      .forUser(olya)
+      .save({ full: fakeJpeg(300, 3), thumb: fakeJpeg(30, 4) }, '2026-10-09');
+    const annaReader = access.readers.readerFor(anna as ClientId);
+    const olyaReader = access.readers.readerFor(olya as ClientId);
+
+    expect(Object.keys(annaReader)).toEqual(['read']);
+    expect(Object.isFrozen(annaReader)).toBe(true);
+    expect((await annaReader.read(annaPhoto, 'full'))?.length).toBe(500);
+    expect((await annaReader.read(annaPhoto, 'thumb'))?.length).toBe(50);
+    expect(await annaReader.read(olyaPhoto, 'full')).toBeNull();
+    expect(await annaReader.read(olyaPhoto, 'thumb')).toBeNull();
+    expect((await olyaReader.read(olyaPhoto, 'full'))?.length).toBe(300);
+    expect(await olyaReader.read(annaPhoto, 'full')).toBeNull();
+    expect(await annaReader.read(newPhotoId(), 'full')).toBeNull();
+    // A row whose file is gone reads as missing, as for the owner.
+    rmSync(join(dir, `${annaPhoto}_t.jpg`));
+    expect(await annaReader.read(annaPhoto, 'thumb')).toBeNull();
+    // The wrapper store is the access's store: same keys as before.
+    expect(Object.keys(store).sort()).toEqual(['collectGarbage', 'dir', 'forUser', 'removeFiles']);
   });
 
   it('GC: a reference from ANOTHER user keeps nothing alive', async () => {

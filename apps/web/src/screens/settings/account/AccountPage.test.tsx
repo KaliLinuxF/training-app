@@ -110,9 +110,23 @@ describe('«Акаунт» — profile and «Вийти»', () => {
     expect(profile.getByText('A').getAttribute('aria-hidden')).toBe('true');
   });
 
-  it('says «Адміністратор» for an admin', async () => {
+  it('tells a user, in one calm line under «з …», that the admin sees their records', async () => {
+    await renderPage();
+    const profile = screen.getByRole('region', { name: 'Профіль' });
+    const line = within(profile).getByText('Адміністратор бачить твої записи та прогрес.');
+    expect(line.tagName).toBe('P');
+    const since = within(profile).getByText('Користувач · з 9 жовтня 2026');
+    expect(since.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Nothing louder: no alert, no dialog.
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getAllByText(/Адміністратор бачить/)).toHaveLength(1);
+  });
+
+  it('says «Адміністратор» for an admin, without the line', async () => {
     await renderPage(sessionUser({ username: 'admin', role: 'admin', createdAt: at(2026, 10, 21) }));
     expect(region('Профіль').getByText('Адміністратор · з 21 жовтня 2026')).toBeTruthy();
+    expect(screen.queryByText(/Адміністратор бачить/)).toBeNull();
   });
 
   it('ends with «Вийти», which logs out with the usual confirm', async () => {

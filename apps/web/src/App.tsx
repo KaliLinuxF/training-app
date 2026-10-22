@@ -2,6 +2,7 @@ import { SETTINGS_REMINDERS_PATH } from '@legko/shared';
 import { Redirect, Route, Switch } from 'wouter';
 import { AuthGate } from './auth/AuthGate';
 import { CalendarScreen } from './screens/calendar';
+import { CoachClientScreen, CoachClientsScreen } from './screens/coach';
 import { HomeScreen } from './screens/home';
 import { ProgressScreen } from './screens/progress';
 import { SettingsScreen } from './screens/settings';
@@ -11,6 +12,7 @@ import { AppShell } from './shell/AppShell';
  * Routes: `/` home, `/calendar?date=YYYY-MM-DD`, `/progress`, `/settings` (the list) and
  * `/settings/:section` (reminders | goals | workouts | appearance | data; anything else goes back to the list).
  * `/reminders` (old bookmarks, test notifications delivered before the move) redirects to `/settings/reminders`;
+ * `/coach` and `/coach/:id` are the admin's read-only «Клієнти» (everyone else is sent home);
  * unknown paths go home.
  */
 export function App() {
@@ -31,6 +33,8 @@ export function AppRoutes() {
       <Route path="/calendar" component={CalendarScreen} />
       <Route path="/progress" component={ProgressScreen} />
       <Route path="/settings/:section?" component={SettingsScreen} />
+      <Route path="/coach" component={CoachClientsScreen} />
+      <Route path="/coach/:id" component={CoachClientScreen} />
       <Route path="/reminders">
         <Redirect to={SETTINGS_REMINDERS_PATH} replace />
       </Route>

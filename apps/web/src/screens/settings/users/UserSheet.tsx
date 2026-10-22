@@ -3,7 +3,18 @@ import type { AdminUser, LinkResponse, UserRole } from '@legko/shared';
 import { authActions } from '@/auth/auth';
 import { api } from '@/lib/api';
 import { ui } from '@/store/ui';
-import { Button, cx, KeyValueRow, Segmented, Sheet, Stepper, Switch, useRetained } from '@/ui';
+import {
+  Button,
+  cx,
+  KeyValueRow,
+  ListGroup,
+  ListRow,
+  Segmented,
+  Sheet,
+  Stepper,
+  Switch,
+  useRetained,
+} from '@/ui';
 import { focusedControl, useRefocus, type FocusCandidate } from '../focus';
 import f from '../forms.module.css';
 import { isForbidden, noteForbidden } from './adminOverview';
@@ -63,7 +74,8 @@ const ROLE_OPTIONS: readonly { value: UserRole; label: string }[] = [
 /**
  * One account in «Користувачі» (docs/multi-user.md §9.6): facts, role, own AI limit, a reset link, disable / enable
  * and delete (a typed-name confirm panel that Escape / ✕ leave first). A phone bottom sheet, the standard centred
- * modal on desktop (`Sheet` decides). Never any of the person's records.
+ * modal on desktop (`Sheet` decides). Never any of the person's records: a client's sheet (role user, not yourself)
+ * only links to them in «Клієнти» (`/coach/<id>`, read-only; the sheet goes away with the route change).
  */
 export function UserSheet({
   user,
@@ -280,6 +292,12 @@ function UserSheetBody({
           refocus([control, limitSwitchId, dialog]);
         }}
       />
+
+      {user.role === 'user' && !user.self && (
+        <ListGroup>
+          <ListRow href={`/coach/${user.id}`} icon="chart" iconTone="acc2" title={SHEET_COPY.clientRecords} />
+        </ListGroup>
+      )}
 
       <div className={s.actions}>
         {user.status === 'disabled' ? (

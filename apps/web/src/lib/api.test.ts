@@ -334,6 +334,52 @@ describe('admin', () => {
   });
 });
 
+describe('coach («Клієнти», read-only)', () => {
+  const clientId = 'c3'.padEnd(32, '0');
+
+  it('GETs the list with the window and one client by id, with no body and no device user header', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, { from: '2026-09-11', to: '2026-10-15', clients: [] }));
+    await expect(api.coach.clients({ from: '2026-09-11', to: '2026-10-15' })).resolves.toEqual({
+      from: '2026-09-11',
+      to: '2026-10-15',
+      clients: [],
+    });
+    await api.coach.client(clientId);
+
+    expect(callOf(0).path).toBe('/api/coach/clients?from=2026-09-11&to=2026-10-15');
+    expect(callOf(1).path).toBe(`/api/coach/clients/${clientId}`);
+    for (const i of [0, 1]) {
+      expect(callOf(i).init?.method).toBe('GET');
+      expect(callOf(i).init?.body).toBeUndefined();
+      expect(callOf(i).init?.headers).toBeUndefined();
+      expect(callOf(i).init).toMatchObject({ credentials: 'same-origin', cache: 'no-store' });
+    }
+    expect(API.coachClients).toBe('/api/coach/clients');
+  });
+
+  it('encodes the client id in the path', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, {}));
+    await api.coach.client('a/b?c');
+    expect(callOf().path).toBe('/api/coach/clients/a%2Fb%3Fc');
+  });
+
+  it('maps 403 forbidden and 404 not_found to ApiError codes', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: 'forbidden', message: 'Немає доступу' }));
+    const forbidden = await api.coach.clients({ from: '2026-09-11', to: '2026-10-15' }).catch((e: unknown) => e);
+    expect(forbidden).toBeInstanceOf(ApiError);
+    expect(forbidden).toMatchObject({ status: 403, code: 'forbidden' });
+    expect((forbidden as ApiError).isNetwork).toBe(false);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(404, { error: 'not_found', message: 'Не знайдено' }));
+    await expect(api.coach.client(clientId)).rejects.toMatchObject({ status: 404, code: 'not_found' });
+
+    fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const offline = await api.coach.client(clientId).catch((e: unknown) => e);
+    expect(offline).toMatchObject({ code: 'network' });
+    expect((offline as ApiError).isNetwork).toBe(true);
+  });
+});
+
 describe('push', () => {
   it('unsubscribes with the subscription’s auth key when given (D15)', async () => {
     fetchMock.mockResolvedValue(jsonResponse(200, { ok: true }));

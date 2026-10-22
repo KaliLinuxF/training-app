@@ -155,7 +155,7 @@ export interface HistoryRowModel {
   /** Dot colour: within the kcal goal (mint) or above it (lavender). */
   tone: 'ok' | 'over';
   ariaLabel: string;
-  /** Calendar route of that day. */
+  /** Where the row leads: `ProgressOptions.dayHref` of that day (her calendar by default). */
   href: string;
 }
 
@@ -203,22 +203,47 @@ export interface ProgressModel {
   nutrition: NutritionModel;
 }
 
+/** Who looks at the screen: she herself, or the coach's read-only view of a client. */
+export type ProgressAudience = 'self' | 'coach';
+
+/** Calendar route of a day: where an «Історія калорій» row of her own screen leads. */
+export const calendarDayHref = (date: ISODate): string => `/calendar?date=${date}`;
+
+/**
+ * Empty-chart hints for the coach (third person: the coach cannot record anything for the client). The «only one
+ * reading» hints stay the same for both audiences.
+ */
+export const COACH_CHART_HINTS = {
+  weightNone: 'Зважувань ще немає',
+  measureNone: 'Замірів ще немає',
+} as const;
+
+const SELF_CHART_HINTS: Readonly<Record<keyof typeof COACH_CHART_HINTS, string>> = {
+  weightNone: 'Запиши перше зважування, щоб бачити динаміку',
+  measureNone: 'Запиши заміри, щоб бачити динаміку',
+};
+
 export interface ProgressOptions {
   period: Period;
   /** Parameter shown in the «Заміри тіла» chart. */
   measure: MeasureKey;
   /** Rows of «Історія калорій». */
   historyLimit: number;
+  /** 'coach': third-person empty-chart hints (`COACH_CHART_HINTS`). Default 'self'. */
+  audience?: ProgressAudience;
+  /** Where an «Історія калорій» row leads. Default `calendarDayHref`. */
+  dayHref?: (date: ISODate) => string;
 }
 
 export function buildProgressModel(data: AppData, today: ISODate, opts: ProgressOptions): ProgressModel {
   const period = periodMeta(opts.period);
   const from = periodStart(data, opts.period, today);
+  const hints = opts.audience === 'coach' ? COACH_CHART_HINTS : SELF_CHART_HINTS;
   return {
     period,
     summary: summaryModel(data, from, today, period),
-    weight: weightModel(data, from),
-    measures: measuresModel(data, from, opts.measure),
+    weight: weightModel(data, from, hints.weightNone),
+    measures: measuresModel(data, from, opts.measure, hints.measureNone),
     workouts: workoutsModel(data, from, today, period),
     nutrition: nutritionModel(data, from, today, opts, period),
   };
@@ -297,7 +322,7 @@ function lineChart(points: readonly DatedValue[], copy: ChartCopy): LineChartMod
   };
 }
 
-function weightModel(data: AppData, from: ISODate): WeightModel {
+function weightModel(data: AppData, from: ISODate, hintNone: string): WeightModel {
   const w = weightSummary(data);
   const { first, last } = w;
   // A single weigh-in is the start itself: «0,0 кг від старту» would be noise.
@@ -318,13 +343,18 @@ function weightModel(data: AppData, from: ISODate): WeightModel {
       title: 'Вага',
       unit: 'кг',
       format: f1,
-      hintNone: 'Запиши перше зважування, щоб бачити динаміку',
+      hintNone,
       hintOne: 'Потрібно щонайменше два зважування',
     }),
   };
 }
 
-function measuresModel(data: AppData, from: ISODate, selected: MeasureKey): ProgressModel['measures'] {
+function measuresModel(
+  data: AppData,
+  from: ISODate,
+  selected: MeasureKey,
+  hintNone: string,
+): ProgressModel['measures'] {
   const rows = measureSummary(data).params.map(({ key, label, first, last, delta }): MeasureRowModel => {
     const has = first !== null && last !== null;
     const range = has ? `${fN(first)} → ${fN(last)} см` : 'ще немає';
@@ -349,7 +379,7 @@ function measuresModel(data: AppData, from: ISODate, selected: MeasureKey): Prog
       title: label,
       unit: 'см',
       format: fN,
-      hintNone: 'Запиши заміри, щоб бачити динаміку',
+      hintNone,
       hintOne: 'Потрібно щонайменше два заміри',
     }),
   };
@@ -406,6 +436,7 @@ function nutritionModel(
   const chart = kcalBars(data, opts.period, today);
   const avg = kcalAverages(data, today, opts.period);
   const history = kcalHistory(data, opts.historyLimit, chart.max);
+  const dayHref = opts.dayHref ?? calendarDayHref;
   return {
     goal: `ціль ${f0(goal)} ккал`,
     // The period's own average is in the summary sentence above, so it is not repeated here.
@@ -425,7 +456,7 @@ function nutritionModel(
       value: `${f0(kcal)} ккал`,
       tone,
       ariaLabel: `${dLong(date)}: ${f0(kcal)} ккал. Відкрити в календарі`,
-      href: `/calendar?date=${date}`,
+      href: dayHref(date),
     })),
     hasMore: history.items.length < history.total,
   };

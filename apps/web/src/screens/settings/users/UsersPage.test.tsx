@@ -549,6 +549,46 @@ describe('the user sheet', () => {
     expect(s.getByRole('button', { name: 'Видалити акаунт…' })).toBeTruthy();
   });
 
+  it('links a client to their records and progress (navigation only; the sheet goes with the route)', async () => {
+    const { memory } = await renderPage(overview());
+    const s = await openSheet('anna');
+    const link = s.getByRole('link', { name: 'Записи й прогрес' });
+    expect(link.getAttribute('href')).toBe(`/coach/${idOf('anna')}`);
+    // It comes before the account actions.
+    const reset = s.getByRole('button', { name: 'Посилання для нового пароля' });
+    expect(link.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(link);
+    await act(settle);
+    expect(memory.history?.at(-1)).toBe(`/coach/${idOf('anna')}`);
+    expect(screen.queryByRole('dialog', { name: 'anna' })).toBeNull();
+    // Nothing was written.
+    expect(mocks.admin.setRole).not.toHaveBeenCalled();
+    expect(mocks.admin.setDisabled).not.toHaveBeenCalled();
+  });
+
+  it('has no records link for an admin or for yourself', async () => {
+    await renderPage(
+      adminOverview({
+        users: [adminUser('admin', { role: 'admin', self: true }), adminUser('boss', { role: 'admin' })],
+      }),
+    );
+    let s = await openSheet('boss');
+    expect(s.queryByRole('link', { name: 'Записи й прогрес' })).toBeNull();
+    cleanup();
+    await renderPage(
+      adminOverview({
+        users: [adminUser('admin', { role: 'admin', self: true }), adminUser('boss', { role: 'admin' })],
+      }),
+    );
+    s = await openSheet('admin');
+    expect(s.queryByRole('link', { name: 'Записи й прогрес' })).toBeNull();
+    cleanup();
+    // Even a «user» row that is yourself (only possible mid-demotion) gets none.
+    await renderPage(adminOverview({ users: [adminUser('me', { role: 'user', self: true })] }));
+    s = await openSheet('me');
+    expect(s.queryByRole('link', { name: 'Записи й прогрес' })).toBeNull();
+  });
+
   it('makes an admin after the honest confirm', async () => {
     const confirm = vi.spyOn(ui, 'confirm').mockResolvedValue(true);
     await renderPage(overview());
@@ -558,8 +598,9 @@ describe('the user sheet', () => {
     expect(confirm).toHaveBeenCalledWith({
       title: 'Зробити anna адміністратором?',
       body:
-        'Адміністратор бачить список акаунтів і може запрошувати, вимикати й видаляти їх. Чужих записів ' +
-        'адміністратор не бачить. Він може видати посилання для нового пароля — людина про це дізнається.',
+        'Адміністратор бачить усі акаунти, а також записи й прогрес кожного користувача — лише для перегляду, ' +
+        'змінити їх він не може. Він запрошує, вимикає й видаляє акаунти та може видати посилання для нового ' +
+        'пароля — людина про це дізнається.',
       confirmLabel: 'Зробити адміністратором',
     });
     expect(mocks.admin.setRole).toHaveBeenCalledWith({ userId: idOf('anna'), role: 'admin' });
@@ -579,7 +620,7 @@ describe('the user sheet', () => {
     await act(settle);
     expect(confirm).toHaveBeenCalledWith({
       title: 'Забрати права адміністратора в boss?',
-      body: 'Розділ «Користувачі» зникне для цього акаунта.',
+      body: 'Розділи «Користувачі» й «Клієнти» зникнуть для цього акаунта, а його записи й прогрес бачитимуть адміністратори.',
       confirmLabel: 'Забрати права',
       destructive: true,
     });

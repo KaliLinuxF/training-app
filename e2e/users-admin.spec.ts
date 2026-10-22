@@ -1,7 +1,8 @@
 /**
  * «Користувачі» (docs/multi-user.md §9.6, §11.2): only an admin sees it; inviting (link card, copy, pending row,
  * revoke), the user sheet (role, the sole-admin lock, a reset link, disable / enable, delete with the typed name),
- * the AI limits, and the desktop pane + centred modal.
+ * the AI limits, and the desktop pane + centred modal. A client's sheet links to «Записи й прогрес» (`/coach/<id>`,
+ * docs/coach-cabinet.md §7.1) and the promote confirm says what an admin sees.
  *
  * Rules: anna and admin are never changed — every account touched here is a throwaway one from `createUser()`,
  * deleted (or demoted) in `finally`; the AI limits are restored after each test; pending invites are revoked by the
@@ -21,6 +22,12 @@ import {
   type TestUser,
 } from './support/server';
 import { expect, test } from './support/test';
+
+/** The promote confirm's body (docs/coach-cabinet.md §7.1): the admin sees records and progress, read-only. */
+const PROMOTE_BODY =
+  'Адміністратор бачить усі акаунти, а також записи й прогрес кожного користувача — лише для перегляду, ' +
+  'змінити їх він не може. Він запрошує, вимикає й видаляє акаунти та може видати посилання для нового ' +
+  'пароля — людина про це дізнається.';
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -229,9 +236,57 @@ test.describe('the user sheet', () => {
       await expect(radio).toBeDisabled();
     }
     await expect(sheet.getByText('Єдиний адміністратор — спершу признач іншого')).toBeVisible();
-    // Yourself: no disable, no delete.
+    // Yourself: no disable, no delete, no records link (an admin is never a client).
     await expect(sheet.getByRole('button', { name: 'Вимкнути акаунт' })).toHaveCount(0);
     await expect(sheet.getByRole('button', { name: 'Видалити акаунт…' })).toHaveCount(0);
+    await expect(sheet.getByRole('link', { name: 'Записи й прогрес' })).toHaveCount(0);
+  });
+
+  test('the promote confirm says honestly what an admin sees; cancel keeps the role', async ({
+    app,
+    page,
+    admin,
+    playwright,
+  }) => {
+    const user = await createUser(playwright, admin);
+    try {
+      const sheet = await openUser(app, user.creds.username);
+      const role = sheet.getByRole('radiogroup', { name: 'Роль' });
+      await role.getByRole('radio', { name: 'Адміністратор' }).click();
+      const dialog = page.getByRole('alertdialog');
+      await expect(dialog).toContainText(`Зробити ${user.creds.username} адміністратором?`);
+      await expect(dialog).toContainText(PROMOTE_BODY);
+      await expect(dialog).not.toContainText('Чужих записів');
+      await confirmWith(page, 'Скасувати');
+      await expect(role.getByRole('radio', { name: 'Користувач' })).toHaveAttribute('aria-checked', 'true');
+      expect((await admin.overview()).users.find((u) => u.id === user.id)?.role).toBe('user');
+    } finally {
+      await cleanUp(admin, user);
+    }
+  });
+
+  test('a client’s sheet links to «Записи й прогрес» → /coach/<id>', async ({
+    app,
+    page,
+    admin,
+    playwright,
+  }) => {
+    const user = await createUser(playwright, admin);
+    try {
+      const sheet = await openUser(app, user.creds.username);
+      const link = sheet.getByRole('link', { name: 'Записи й прогрес' });
+      await expect(link).toBeVisible();
+      await expect(link).toHaveAttribute('href', `/coach/${user.id}`);
+      await link.click();
+      // Navigation only: the sheet goes with the route (the screen itself is «Клієнти»).
+      await expect(page).toHaveURL(new RegExp(`/coach/${user.id}(?:[?#].*)?$`));
+      await expect(app.userSheet(user.creds.username)).toHaveCount(0);
+      // Nothing about the account changed.
+      const after = (await admin.overview()).users.find((u) => u.id === user.id);
+      expect(after).toMatchObject({ role: 'user', status: 'active' });
+    } finally {
+      await cleanUp(admin, user);
+    }
   });
 
   test('a reset link for a throwaway account, shown once in the sheet', async ({

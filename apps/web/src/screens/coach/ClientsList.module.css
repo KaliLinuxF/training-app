@@ -1,0 +1,29 @@
+/* «Сортування [ … ▾ ]»: a native select, 16px (no iOS zoom), 44px tall; its label is visually hidden. */
+.sort {
+  display: flex;
+  min-width: 0;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r14);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 0;
+}
+
+/* Pills under the row (ListRow's block below the link already lines them up with the title). */
+.pills {
+  margin-top: -4px;
+}

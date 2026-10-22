@@ -1,0 +1,10 @@
+.card {
+  max-width: 520px;
+}
+
+.text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+}

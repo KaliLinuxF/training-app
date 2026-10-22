@@ -67,6 +67,7 @@ function ProfileCard({ user }: { user: SessionUser }) {
       <div className={s.profileText}>
         <p className={s.name}>{user.username}</p>
         <p className={s.since}>{profileLine(user)}</p>
+        {user.role === 'user' && <p className={s.visibility}>{ACCOUNT_COPY.adminSees}</p>}
       </div>
     </Card>
   );

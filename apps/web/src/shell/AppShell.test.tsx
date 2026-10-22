@@ -2,8 +2,10 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAuthStore } from '@/auth/auth';
 import { DESKTOP_QUERY } from '@/lib/platform';
 import { ui, useUiStore } from '@/store/ui';
+import { cssValue, readCss } from '@/ui/internal/cssSource';
 import { installMatchMedia, stubScrollTo } from '@/ui/internal/testing';
 import { AppShell } from './AppShell';
 
@@ -137,5 +139,117 @@ describe('AppShell on the desktop', () => {
     expect(sheet()).toMatchObject({ mode: 'menu', date: TODAY });
     expect(record.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('link', { name: 'Налаштування' }).getAttribute('aria-current')).toBe('true');
+  });
+});
+
+describe('AppShell navigation by role', () => {
+  const account = (role: 'user' | 'admin') => ({
+    id: (role === 'admin' ? 'ad' : 'a1').padEnd(32, '0'),
+    username: role === 'admin' ? 'admin' : 'anna',
+    role,
+    createdAt: 1_760_000_000_000,
+    legacyOwner: false,
+    passwordChange: null,
+  });
+  const navLabels = () =>
+    Array.from(screen.getByRole('navigation', { name: 'Основна навігація' }).querySelectorAll('a')).map(
+      (a) => a.textContent,
+    );
+  const shellRoot = () => screen.getByRole('main').parentElement;
+
+  afterEach(() => useAuthStore.setState({ status: 'checking', offline: false, user: null }));
+
+  it('keeps a user’s sidebar and tab bar exactly as before', () => {
+    useAuthStore.setState({ status: 'authed', offline: false, user: account('user') });
+    installMatchMedia((query) => query === DESKTOP_QUERY);
+    const { memory, rerender } = renderShell();
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Налаштування']);
+
+    installMatchMedia(() => false);
+    rerender(shellTree(memory));
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Налаштування']);
+    expect(screen.queryByRole('link', { name: 'Клієнти' })).toBeNull();
+  });
+
+  it('gives an admin five sidebar links and «Клієнти» in place of «Прогрес» on the tab bar', () => {
+    useAuthStore.setState({ status: 'authed', offline: false, user: account('admin') });
+    installMatchMedia((query) => query === DESKTOP_QUERY);
+    const { memory, rerender } = renderShell();
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Клієнти', 'Налаштування']);
+
+    installMatchMedia(() => false);
+    rerender(shellTree(memory));
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Клієнти', 'Налаштування']);
+    expect(screen.queryByRole('link', { name: 'Прогрес' })).toBeNull();
+  });
+
+  it('widens the desktop container on /coach and /coach/<id> only', () => {
+    useAuthStore.setState({ status: 'authed', offline: false, user: account('admin') });
+    installMatchMedia((query) => query === DESKTOP_QUERY);
+    renderShell('/coach');
+    expect(shellRoot()?.className).toMatch(/wide/);
+    expect(shellRoot()?.className).toMatch(/desktop/);
+    cleanup();
+
+    renderShell('/coach/abc');
+    expect(shellRoot()?.className).toMatch(/wide/);
+    cleanup();
+
+    renderShell('/progress');
+    expect(shellRoot()?.className).not.toMatch(/wide/);
+    cleanup();
+
+    // The phone column never widens.
+    installMatchMedia(() => false);
+    renderShell('/coach');
+    expect(shellRoot()?.className).not.toMatch(/wide/);
+  });
+
+  it('offers no «Записати день» on the coach’s read-only pages (it writes into the admin’s own diary)', () => {
+    useAuthStore.setState({ status: 'authed', offline: false, user: account('admin') });
+    installMatchMedia((query) => query === DESKTOP_QUERY);
+    for (const path of ['/coach', '/coach/abc']) {
+      renderShell(path);
+      expect(screen.queryByRole('button', { name: /Записати день/ })).toBeNull();
+      cleanup();
+    }
+    // Her own pages keep it.
+    for (const path of ['/', '/calendar', '/progress', '/settings/users']) {
+      renderShell(path);
+      expect(screen.getByRole('button', { name: '+ Записати день' })).toBeTruthy();
+      cleanup();
+    }
+
+    installMatchMedia(() => false);
+    for (const path of ['/coach', '/coach/abc']) {
+      renderShell(path);
+      expect(screen.queryByRole('button', { name: /Записати день/ })).toBeNull();
+      // The tab bar keeps its four tabs in their places around an empty, hidden centre slot.
+      expect(navLabels()).toEqual(['Головна', 'Календар', 'Клієнти', 'Налаштування']);
+      const inner = screen.getByRole('navigation', { name: 'Основна навігація' }).firstElementChild;
+      expect(inner?.children).toHaveLength(3);
+      expect(inner?.children[1]?.getAttribute('aria-hidden')).toBe('true');
+      cleanup();
+    }
+    renderShell('/');
+    expect(screen.getByRole('button', { name: 'Записати день' })).toBeTruthy();
+  });
+
+  it('keeps «Записати день» for a user everywhere she can go', () => {
+    useAuthStore.setState({ status: 'authed', offline: false, user: account('user') });
+    for (const desktop of [true, false]) {
+      installMatchMedia(desktop ? (query) => query === DESKTOP_QUERY : () => false);
+      for (const path of ['/', '/calendar', '/progress', '/settings']) {
+        renderShell(path);
+        expect(screen.getByRole('button', { name: desktop ? '+ Записати день' : 'Записати день' })).toBeTruthy();
+        cleanup();
+      }
+    }
+  });
+
+  it('declares the wide container as 1440px (the default desktop stays 1280px)', () => {
+    const css = readCss('shell/AppShell.module.css');
+    expect(cssValue(css, '.desktop', 'max-width')).toBe('1280px');
+    expect(cssValue(css, '.wide', 'max-width')).toBe('1440px');
   });
 });

@@ -32,6 +32,11 @@ import { useLinkCheck } from './useLinkCheck';
 
 export const INVITE_TITLE = 'Запрошення в Легко';
 const INVITE_SUBTITLE = 'Обери імʼя і пароль — і можна починати';
+/**
+ * Read before registering (docs/coach-cabinet.md §7.1): inside the form, right above «Створити акаунт», so it is on
+ * screen next to the button with the keyboard open or not. Only on the form, never on «Готово» or the interstitial.
+ */
+export const INVITE_ADMIN_NOTE = 'Адміністратор бачить твої записи та прогрес.';
 
 const checkInvite = (token: string): Promise<InviteCheckResponse> => api.inviteCheck(token);
 
@@ -237,6 +242,7 @@ function InviteForm({
           </p>
         ) : null}
 
+        <p className={s.hint}>{INVITE_ADMIN_NOTE}</p>
         <button type="submit" className={s.submit} disabled={busy} aria-busy={busy || undefined}>
           {busy ? 'Створюю…' : 'Створити акаунт'}
         </button>

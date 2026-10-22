@@ -178,7 +178,9 @@ new image has started (only a missing or empty database is created, for a first 
    It prints `https://fit.triple-a.dev/reset#<token>` — single use, valid 24 h — together with the expiry in Kyiv
    time. `create-admin` refuses (exit 1, nothing created) when the name already exists: an existing admin →
    `reset-password-link admin`; an existing regular user → pick another name. The admin has its own, empty data and
-   sees only the list of accounts (names, role, created, last activity, AI counts) — never anyone's records. Until
+   sees the list of accounts (names, role, created, last activity, AI counts) in «Користувачі». Since the coach
+   release the admin also sees each ordinary user's records and progress, **read-only**, in «Клієнти»
+   (`docs/coach-cabinet.md`); it never sees other admins' records and can change nobody's. Until
    anna's app makes its first request after the deploy her row reads «Ще не входили» (v3 kept no activity time).
 
 3. Open the link (on the device you will manage from), choose the password on «Створення пароля»; you are signed in
@@ -212,6 +214,13 @@ their old password works until the link is used; using it signs all their device
 their records), delete (typed name; removes all their records and photos), their own AI limit and the global limits.
 The last usable admin can be neither demoted, disabled nor deleted, and nobody can disable or delete themselves.
 Every person changes their own password and name in Settings → «Акаунт», where «Вийти» lives too.
+
+«Клієнти» (admins only; sidebar on a computer, tab bar on the phone) is the read-only coach view of every ordinary
+user: a table with weight, kcal, Б · Ж · В, workouts, activity and attention flags, and a page per person (overview,
+their Progress, calendar with meals and photos, nutrition). Nothing there can be changed. Every ordinary user sees
+«Адміністратор бачить твої записи та прогрес.» in «Акаунт» and on the invite page. The coach release needs **no
+migration** and no new `.env` setting — a routine deploy; the server logs one `coach: admin <id> …` line per access
+(ids only, `docs/coach-cabinet.md` C10).
 
 ### Setting a password
 

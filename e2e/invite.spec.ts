@@ -2,7 +2,8 @@
  * One-time links (docs/multi-user.md §8.4, §9.2, §9.3, §11.2): an admin-made invite registers a new account, a used
  * or garbage link explains itself, a signed-in device asks to sign out first, a reset link sets a new password (and
  * signs every other device of that person out), and — in iPhone Safari — the «Готово» state and the paste path
- * into the installed app (D29).
+ * into the installed app (D29). The form says «Адміністратор бачить твої записи та прогрес.» right above «Створити
+ * акаунт» (docs/coach-cabinet.md §7.1).
  *
  * Rules: anna and admin are never changed (throwaway accounts only, deleted in `finally`); at most two failed link
  * attempts in a row and one failed login; no server-derived dates are asserted.
@@ -17,6 +18,7 @@ import { expect, test } from './support/test';
 const USED = 'Це запрошення вже використали. Якщо акаунт за ним уже створено — просто ввійди.';
 const UNKNOWN = 'Посилання неправильне або неповне.';
 const ASK_ADMIN = 'Попроси в адміністратора нове.';
+const ADMIN_SEES = 'Адміністратор бачить твої записи та прогрес.';
 
 /** Deletes the account named `username` if it exists (a registration a test made through the UI). */
 async function deleteAccount(admin: ServerApi, username: string): Promise<void> {
@@ -67,6 +69,34 @@ test.describe('invite', () => {
     } finally {
       await deleteAccount(admin, username);
     }
+  });
+
+  test('the form says the admin sees the records, inside it and right above «Створити акаунт»', async ({
+    page,
+    admin,
+  }) => {
+    // Nothing is registered: the pending invite is revoked by the suite's auto fixture.
+    const { path } = await admin.createInvite('e2e invite line');
+    await page.goto(path);
+    const submit = page.getByRole('button', { name: 'Створити акаунт', exact: true });
+    await expect(submit).toBeVisible();
+    const line = page.locator('form').getByText(ADMIN_SEES, { exact: true });
+    await expect(line).toBeVisible();
+    await expect(page.getByText(ADMIN_SEES, { exact: true })).toHaveCount(1);
+    // The line comes right before the button (document order and on screen).
+    expect(await line.evaluate((el) => el.nextElementSibling?.textContent?.trim() ?? null)).toBe(
+      'Створити акаунт',
+    );
+    const [above, button] = [await line.boundingBox(), await submit.boundingBox()];
+    if (!above || !button) throw new Error('the line or the button is not visible');
+    expect(above.y + above.height).toBeLessThanOrEqual(button.y + 0.5);
+    // The repeat field is above the line.
+    const repeat = await page.getByLabel('Повтори пароль', { exact: true }).boundingBox();
+    if (!repeat) throw new Error('no repeat field');
+    expect(repeat.y + repeat.height).toBeLessThanOrEqual(above.y + 0.5);
+    // A line, not a pop-up.
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   test('a used invite says so, without the «ask the admin» line', async ({ page, admin, playwright }) => {

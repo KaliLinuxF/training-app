@@ -1,4 +1,3 @@
-import { photoThumbUrl, photoUrl } from '@legko/shared';
 import {
   useEffect,
   useEffectEvent,
@@ -8,6 +7,7 @@ import {
   type PointerEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { usePhotoUrls } from '@/lib/photoUrls';
 import { cx } from '@/ui';
 import s from './PhotoViewer.module.css';
 
@@ -46,6 +46,7 @@ interface Drag {
 }
 
 function ViewerFrame({ ids, index, onIndexChange, onClose, restoreFocus = true }: PhotoViewerProps) {
+  const urls = usePhotoUrls();
   const rootRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -183,7 +184,7 @@ function ViewerFrame({ ids, index, onIndexChange, onClose, restoreFocus = true }
               <img
                 key={`t-${id}`}
                 className={s.image}
-                src={photoThumbUrl(id)}
+                src={urls.thumb(id)}
                 alt={fullFailed ? 'Фото їжі' : ''}
                 aria-hidden={fullFailed ? undefined : true}
                 draggable={false}
@@ -194,7 +195,7 @@ function ViewerFrame({ ids, index, onIndexChange, onClose, restoreFocus = true }
               <img
                 key={id}
                 className={s.image}
-                src={photoUrl(id)}
+                src={urls.full(id)}
                 alt="Фото їжі"
                 draggable={false}
                 onError={() => markFailed(`f:${id}`)}

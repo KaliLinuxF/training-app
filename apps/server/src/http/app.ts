@@ -16,14 +16,15 @@ import {
 } from '../auth/rateLimit';
 import { createSessionStore, MAX_SESSIONS_PER_USER } from '../auth/sessions';
 import { DEFAULT_FOOD_DAILY_LIMIT, DEFAULT_FOOD_USER_DAILY_LIMIT, type Config } from '../config';
-import { createDataRepos } from '../db/data';
+import { createCoachAccess } from '../coach/access';
+import { createDataAccess } from '../db/data';
 import type { Database } from '../db/sqlite';
 import { createTokenRepo } from '../db/tokens';
 import { createUserRepo } from '../db/users';
 import { createFoodBudget } from '../food/budget';
 import type { FoodEstimator } from '../food/estimator';
 import { silentLogger, type Logger } from '../logger';
-import { createPhotoStore } from '../photos/store';
+import { createPhotoAccess } from '../photos/store';
 import type { PushService } from '../push/service';
 import { createSubscriptionRepo } from '../push/subscriptions';
 import { isApiPath, serveWebApp } from '../static';
@@ -36,6 +37,7 @@ import { noStore, securityHeaders } from './middleware/securityHeaders';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerAuthRoutes } from './routes/auth';
+import { registerCoachRoutes } from './routes/coach';
 import { registerDataRoutes } from './routes/data';
 import type { RouteDeps } from './routes/deps';
 import { registerFoodRoutes } from './routes/food';
@@ -106,7 +108,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
         : deps.sessionsPerUser,
   });
   const subscriptions = createSubscriptionRepo(db);
-  const photos = createPhotoStore(db, deps.photosDir, now, logger);
+  const photoAccess = createPhotoAccess(db, deps.photosDir, now, logger);
+  const photos = photoAccess.store;
+  const dataAccess = createDataAccess(db, now, logger);
   const accounts = createAccountService({
     db,
     users,
@@ -124,7 +128,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     tokens,
     accounts,
     sessions,
-    data: createDataRepos(db, now, logger),
+    data: dataAccess.repos,
     photos,
     push,
     subscriptions,
@@ -153,6 +157,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     scryptGate,
     version,
   };
+  // The read-only readers go here and nowhere else: not on RouteDeps (docs/coach-cabinet.md §2.1, coach lint).
+  const coach = createCoachAccess({
+    users,
+    data: dataAccess.readers,
+    photos: photoAccess.readers,
+    logger,
+  });
 
   const app = new Hono<AppEnv>();
   app.use(requestLog(logger));
@@ -166,6 +177,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   registerLinkRoutes(app, routeDeps);
   registerAccountRoutes(app, routeDeps);
   registerAdminRoutes(app, routeDeps);
+  registerCoachRoutes(app, { auth: routeDeps.auth, admin: routeDeps.admin }, coach);
   registerDataRoutes(app, routeDeps);
   registerPushRoutes(app, routeDeps);
   registerFoodRoutes(app, routeDeps);

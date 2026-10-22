@@ -70,6 +70,7 @@ Reading order for engineers: §1 decisions → §2 data model → §3–§5 secu
 | D29 | **iPhone link flow**: links open in Safari, whose storage is separate from the home-screen app. In iOS Safari (not standalone) a finished invite/reset shows a «Готово» state (username, install steps, «Продовжити в Safari») instead of reloading at once; the login screen offers **«Маю посилання»** to paste an invite / reset link straight into the installed app. | Otherwise every iPhone invite ends in a Safari copy of the app, and every reset silently logs the installed app out. |
 | D30 | **Settings list**: the «Акаунт» row (value = username) takes the place of today's «Вийти» card at the bottom of the list; for admins the same card holds «Акаунт» + «Користувачі» and the caption «Легко · трекер схуднення» is hidden. «Вийти» moves to the bottom of the «Акаунт» page / pane. | Measured: a new card would make the list scroll at 390×763 (installed app) for users and at 390×844 for admins; this layout adds +0 px for users and ≈ +28 px for admins. Owner item 5 already lists logout under «Акаунт». |
 | D31 | **scrypt concurrency cap**: at most 2 hashes/verifies in flight app-wide, a FIFO queue of ≤ 16; beyond that the request gets 429 `rate_limited` (Retry-After 5). Every endpoint counts an attempt **before** hashing, and invite accept rejects a taken name **before** hashing. | One endpoint (or a parallel burst) must not monopolise libuv's 4-thread pool, which photo file I/O shares. |
+| D32 | **Admin = read-only coach** (owner, 2026-10-22; `docs/coach-cabinet.md`). An admin also sees every role-`user` account's records and progress in «Клієнти» (`GET /api/coach/**`, GET only), **read-only**; admins are never clients (404, the caller included). It goes through a separate read-only path (§4 item 6), never through `forUser`. This **supersedes** the earlier statements that the admin never sees anyone's records («Чужих записів адміністратор не бачить», §9.6, D28) — the copy now says what the admin sees (§9.5, §9.6). | Owner: «админ должен видеть прогресс и данные каждого, как тренер»; transparency is non-negotiable. |
 
 ---
 
@@ -546,6 +547,32 @@ the throttle); account/admin endpoints `BODY_LIMITS.small` behind `auth`. Securi
    FROM days WHERE user_id = ?; DELETE FROM weights;`; `… WHERE user_id = ? OR 1 = 1`; `UPDATE days SET user_id = ?`)
    and ≈ 24 good ones. A new unscoped statement fails the test.
 5. **Defence in depth**: `X-Legko-User` (D11); photo reads check `photos.user_id`; GC joins on `p.user_id`.
+6. **The read-only coach path** (D32, `docs/coach-cabinet.md` §2). The only way an admin reads another account:
+   - **Reader factories outside `RouteDeps`**: `createDataAccess(db, now, logger)` → `{ repos, readers }` and
+     `createPhotoAccess(…)` → `{ store, readers }` share one set of prepared statements; `createDataRepos` /
+     `createPhotoStore` return `.repos` / `.store` as before, so `RouteDeps.data` / `.photos` and
+     `http/routes/deps.ts` are unchanged. `createApp` hands the `readers` only to `createCoachAccess`, whose result
+     (`CoachAccess`) is a **third argument** of `registerCoachRoutes(app, Pick<RouteDeps, 'auth' | 'admin'>, coach)` —
+     not a `RouteDeps` field, so no other route module can reach it. A `DataReader` is frozen
+     `{ read, settings, weights, measures, daysBetween, recordSpan }` (`read()` returns `Omit<AppData, 'foods'>` and
+     never runs the foods statement); a `PhotoReader` is frozen `{ read }`. Neither has a write method.
+   - **The `ClientId` brand**: `type ClientId = UserId & { __coachClient }`; `readerFor(id: ClientId)` takes only that.
+     It is minted in one place — `coach/access.ts` `resolveClient` / its private `asClient` — after `users.byId` found
+     an account with role `user`; an admin's `UserId` (the caller's included) does not compile there. `assertCoach`
+     (role admin, else `NotCoach` → 403) is the first statement of `list`, `detail` and `photo`.
+   - **SQL**: four new statements (days in a date range; `MIN/MAX(date)` over days, weights, measures — three
+     separate statements so no `UNION` needs an exemption), all `user_id = ?`; the scope lint (item 4) is **not
+     edited** and still has exactly 28 allowlist entries.
+   - **Coach lint** (`apps/server/src/coach/coach-lint.test.ts`): `routes/coach.ts` has no
+     `.post/.put/.patch/.delete/.all/.on/.use/.route/.mount(`, at least 4 `app.get(` and the exact
+     `registerCoachRoutes` parameters; `readerFor` appears only in `db/data.ts`, `photos/store.ts`, `coach/access.ts`;
+     `.readers` only in `http/app.ts`; `as ClientId` only in `coach/access.ts`; `createCoachAccess(` /
+     `registerCoachRoutes(` are called only in `http/app.ts`; `deps.ts` never mentions `coach` / `Reader`;
+     `coach/access.ts` has no `.forUser(`, write call or SQL literal; reader key lists and `Object.isFrozen` are
+     checked at runtime.
+   - **Route-table test** (`apps/server/test/coach.test.ts`): on the real app every route whose path starts with
+     `/api/coach` has method `GET`, and their path set equals `COACH_ROUTES` — a non-GET or extra coach path
+     registered by any module fails. `HEAD` is answered 405 before any read (Hono routes it through `GET`).
 
 ---
 
@@ -801,6 +828,10 @@ export type ApiErrorCode = …existing ('bad_password' is still sent, «Непр
 | POST `/api/admin/users/delete` | admin | `OkResponse` | 400 `bad_request` (confirm ≠ username, case-insensitive) · 404 · 409 `last_admin` / `self_action` |
 | POST `/api/admin/users/ai-limit` | admin | `OkResponse` | 404 |
 | POST `/api/admin/ai-limits` | admin | `OkResponse` | 400 |
+| GET `/api/coach/clients?from=&to=` (D32) | admin | `CoachClientsResponse` (role-`user` accounts only; profile `{ id, username, status, createdAt, lastSeenAt }` + digests) | 401 · 403 `forbidden` · 400 `bad_request` «Некоректний період» (missing / invalid date, to < from, > 62 days) |
+| GET `/api/coach/clients/:id` (D32) | admin | `CoachClientResponse` (`data.foods` = []) | 401 · 403 · 404 `not_found` (malformed / unknown id, any admin incl. the caller) |
+| GET `/api/coach/clients/:id/photos/:photoId[/thumb]` (D32) | admin | `image/jpeg` of a photo owned by that client | 401 · 403 · 400 `bad_request` (photo id format, first) · 404 (not a client; not their photo; file missing) |
+| HEAD · POST · PUT · PATCH · DELETE · OPTIONS `/api/coach/**` | — | never | HEAD (after auth / admin) 405 `Allow: GET`, nothing read or logged · writes 403 `forbidden_origin` (no same-origin Origin / JSON), else 404 · OPTIONS 404 |
 | existing data / ops / export / import / push / food / photos | session, **scoped** | unchanged | + 409 `user_mismatch` when `X-Legko-User` ≠ session user, or when it is missing on data / ops / import with a non-legacy session (D11) |
 | POST `/api/push/subscribe` | session | `OkResponse` | + 400 `bad_request` «Цей сервіс сповіщень не підтримується» (not a known push service, §5.4) · 403 `forbidden` when the endpoint belongs to another user with a different `auth` key (D15) |
 | POST `/api/push/unsubscribe` | session | `OkResponse` | body gains optional `auth` (D15) |
@@ -1170,6 +1201,8 @@ shows the section. `/settings/users` for a non-admin → redirect to `/settings`
  ┌─────────────────────────────────────────┐   Card section aria «Профіль»
  │ (А)  anna                               │   Avatar (first letter, upper case) · 17/700
  │      Користувач · з 9 жовтня 2026       │   14 --ink2 («Адміністратор» for admins)
+ │      Адміністратор бачить твої записи   │   role user only (D32): 13/500 --muted, ACCOUNT_COPY.adminSees,
+ │      та прогрес.                        │   no pop-up, no banner; absent for admins
  └─────────────────────────────────────────┘
  ┌ Пароль ─────────────────────────────────┐   CardHeader «Пароль»; a real <form onSubmit>
  │ Пароль задано 21 жовтня за посиланням   │   13 --ink2, from user.passwordChange (D28; see below)
@@ -1194,6 +1227,10 @@ shows the section. `/settings/users` for a non-admin → redirect to `/settings`
  │ [⇥]  Вийти                              │   same confirm as today
  └─────────────────────────────────────────┘
 ```
+
+Transparency line (D32, `docs/coach-cabinet.md` §7.1): for role `user` only, a third line in «Профіль» under the
+since-line, «Адміністратор бачить твої записи та прогрес.» (13/500 `--muted`). The invite page (§9.2) shows the same
+sentence (`INVITE_ADMIN_NOTE`, `s.hint`) inside the form, directly above «Створити акаунт». Nothing else (no pop-up).
 
 Password provenance line (D28), only when `user.passwordChange` is set: via `self` «Пароль змінено <date>.»; via
 `reset` / `setup` with `by` = another username «Пароль задано <date> за посиланням від <by>.»; with `by` null «Пароль
@@ -1278,10 +1315,16 @@ User sheet (`Sheet heading={username}`; desktop = centred modal):
  └──────────────────────────────────────────────┘
 ```
 
-Confirms: to admin — «Зробити anna адміністратором?» / «Адміністратор бачить список акаунтів і може запрошувати,
-вимикати й видаляти їх. Чужих записів адміністратор не бачить. Він може видати посилання для нового пароля — людина
-про це дізнається.» / «Зробити адміністратором». To user — «Забрати права
-адміністратора в anna?» / «Розділ «Користувачі» зникне для цього акаунта.» / «Забрати права» (self: «…в себе?»).
+Confirms (copy since the coach release, D32 — the earlier «Чужих записів адміністратор не бачить» is
+**superseded**: it is no longer true): to admin — «Зробити anna адміністратором?» / «Адміністратор бачить усі
+акаунти, а також записи й прогрес кожного користувача — лише для перегляду, змінити їх він не може. Він запрошує,
+вимикає й видаляє акаунти та може видати посилання для нового пароля — людина про це дізнається.» / «Зробити
+адміністратором». To user — «Забрати права адміністратора в anna?» / «Розділи «Користувачі» й «Клієнти» зникнуть для
+цього акаунта, а його записи й прогрес бачитимуть адміністратори.» / «Забрати права» (self: «…в себе?»).
+
+User sheet, for a role-`user` account other than yourself (D32): a static link row «Записи й прогрес» (icon `chart`,
+`acc2`) before the account actions → `/coach/<id>` (the client's page in «Клієнти»; navigation only). Hidden for
+admins and for yourself.
 Disable — «Вимкнути акаунт anna?» / «Увійти в нього буде неможливо, усі його пристрої вийдуть з акаунта, нагадування
 зупиняться. Записи збережуться — акаунт можна знову ввімкнути.» / «Вимкнути» → toast «Акаунт вимкнено»; enable →
 toast «Акаунт увімкнено». Pending user: «Посилання для пароля» instead of «…нового пароля».
@@ -1357,6 +1400,12 @@ disable and own-limit save → the matching control. Headings that take the focu
 | the moved `guard.test.ts` case «small routes still take realistic bodies» (`/api/push/subscribe` with a 1900-char endpoint) | `test/push.test.ts` (features) |
 | cache per owner, legacy adoption + merge (pointer + per-user cache + legacy keys with one pending op → sent exactly once, legacy keys gone), `wipeDevice` with `idbUsable = false` still deletes the keys, a failing wipe leaves the tombstone and `check()` renders no copy, sync sends the header and never another owner's outbox, 409 → check (no silent wipe with pending ops), `outdated_server` (`{ ok: true }` bodies for `me` and login), switch confirm / cancel / reload, `keepLegacy` on a switch to the legacy owner, admin landing `/settings/users` after a link flow, logout reload, BroadcastChannel, `disablePush` sends `auth`, API client headers + new calls, Login (paste link, forgot-password hint, autofocus) / Invite / Reset screens (per-reason copy, button label, iOS «Готово» state, copy-link note, the fragment is stripped), setup gate for admins; the whole `@legko/web` suite stays green (no owner bound = today's behaviour) | `store/*.test.ts`, `auth/*.test.ts(x)`, `lib/api.test.ts`, `lib/push.test.ts`, `screens/login/*.test.tsx`, `sheets/setupGate.test.ts` (web-auth) |
 | settings list (account / users rows, admin only, caption hidden for admins, no «Вийти» row on the list), routes (users redirect), account forms (autofill attributes, hidden username, provenance line, «Вийти» on the page), users page (invite → LinkCard, copy success / failure toasts, share text, revoke, «від admin» / «з консолі», admin-invite pill, activity wording, user sheet actions, last-admin disabled role, reset link hidden for disabled users, `account_disabled` mapping, typed delete attributes), date/expiry formatting incl. future timestamps, «з L» omitted without `limitToday` | `screens/settings/**/*.test.ts(x)` (web-admin) |
+| **coach (D32, `docs/coach-cabinet.md` §8.1)**: reader key lists + frozen, `daysBetween` bounds, `recordSpan` ignores later rows, two users never mix, `reader.read()` has no `foods` key and never runs the foods statement, `createDataRepos` unchanged; photo reader reads only its owner's photos | `db/data-reader.test.ts`, `photos/store.test.ts` (server-coach) |
+| coach access: a user actor throws `NotCoach` before any `users` / reader call (spies); admin / self / unknown / malformed → null; only role `user` listed (disabled / pending with their status); profile keys exactly `id, username, status, createdAt, lastSeenAt`; log lines without content | `coach/access.test.ts` (server-coach) |
+| coach lint (rules 1–5: GET only in `routes/coach.ts`, `readerFor` / `.readers` / `as ClientId` placement, wiring only in `app.ts`, no writes or SQL in `access.ts`, reader shapes) with self-tests | `coach/coach-lint.test.ts` (server-coach) |
+| **coach routes, negative authz**: runtime route-table test (every `/api/coach*` route is GET, paths = `COACH_ROUTES`); 401 / 403 (a user, about herself and another user) / 404 (the admin's own id, another admin, unknown, malformed) on every route; POST / PUT / PATCH / DELETE → 403 without Origin, 404 with it, every owned row byte-identical afterwards; HEAD → 403 for a user, 405 `Allow: GET` for the admin, no log line; OPTIONS 404; window 400s; `private, no-store`, photo `Vary: Cookie` + `image/jpeg` + nosniff; photos only through the owning client's path, user B's `GET /api/photos/<A's id>` 404; no secret-like keys; role changes act at once; `last_seen_at` of the client untouched | `test/coach.test.ts` (server-coach) |
+| shared coach maths: `digestDay`, `clientToday`, `coachWindow(Schema)`, paths, every §4.1 value and §4.4 flag boundary, suppression by `inactive`, status gate, `compareAttention`, `coachItemFromData` ≡ a server item | `packages/shared/src/coach.test.ts` (contracts) |
+| web: nav for user / admin, `CoachGate`, `api.coach.*`, clients model / table / list, client page and panels (no button that writes), `useReplaceParams`, parity with `lib/stats`, no `@/store/` import under `screens/coach`; `PhotoUrlsProvider`, `ProgressBody`, `useShownMonth`; the «Акаунт» and invite lines, the role confirms, the user-sheet «Записи й прогрес» row | `screens/coach/**`, `shell/*.test.tsx`, `lib/*.test.ts(x)`, `screens/progress/*`, `screens/settings/**`, `screens/login/InviteScreen.test.tsx` (web-coach, web-data, web-copy) |
 
 ### 11.2 e2e (Playwright, port 3399, one run at a time — **only the e2e-gate runs it**)
 
@@ -1368,6 +1417,10 @@ disable and own-limit save → the matching control. Headings that take the focu
 | `e2e/users-admin.spec.ts` (new) | web-admin | admin sees «Користувачі», anna does not and `/settings/users` redirects; create invite with note → LinkCard → «Скопіювати» (clipboard permission) → pending row («від admin») → revoke → the link says «Запрошення скасовано»; user sheet: role change, sole-admin role control disabled (precondition: `admin.overview()` shows exactly one usable admin), reset link, disable → login «Акаунт вимкнено…» → enable, delete with typed name; AI limits save and restore; desktop pane + modal |
 | `e2e/settings.spec.ts` | web-admin | existing + the list fits one screen at **390×844 and 390×763** for a user **and** for an admin; «Акаунт» row shows the name; the caption shows for a user and is hidden for an admin |
 | `e2e/multi-user.spec.ts` (new) | e2e-gate | API isolation (B's data empty, B's ops never touch A, B's export, B's import, A's photo URL 404 for B, admin endpoints 403 for users, `X-Legko-User` mismatch 409, a header-less ops POST on B's v4 session → 409); UI same device: A logs out → B logs in → empty app, IndexedDB only B's keys → B logs out → A sees her data; expired session with pending changes → log in as B → switch confirm (cancel keeps the login screen; confirm → B's app, A's change never reached B and is gone from the device); legacy device cache (`legko.data` / `legko.outbox` with a pending op) is adopted by anna and the op reaches the server; **admin bootstrap**: `node apps/server/dist/cli.js create-admin <unique>` against the e2e `DATA_DIR` with `PUBLIC_ORIGIN = BASE_URL` → open the printed link → set the password → lands on «Користувачі» → **finally** delete that admin through `admin.deleteUser` |
+| `e2e/coach-api.spec.ts` (coach, D32) | server-coach | API only: 401 / 403 (anna) on all four coach routes; the list has anna and a seeded throwaway client, never an admin; anna's detail = her data with `foods: []`; admin id / malformed / unknown → 404; window 400s; `no-store`; no secret-like keys; writes with Origin → 404 and anna's data unchanged; HEAD → 405; photo 404 / 400 |
+| `e2e/coach.spec.ts` (coach, D32) | web-coach | «Клієнти» in the admin's navigation only (anna: none, `/coach` sends her home); seeded throwaway clients: cells, pills, filter, 7 / 30, sort; client page tabs; the back stamp keeps the list's query; photos only from the coach route; no non-GET to `/api/coach/**`, no `/api/ops`; phone without side scroll |
+| `e2e/account.spec.ts`, `e2e/invite.spec.ts`, `e2e/users-admin.spec.ts` (coach copy, D32) | web-copy | the «Акаунт» line for anna (not for the admin), the invite line above «Створити акаунт», the new promote body (cancelled), the user sheet's «Записи й прогрес» → `/coach/<id>` |
+| `e2e/visual.spec.ts`, `e2e/a11y.spec.ts` (coach, D32) | e2e-gate | stubbed coach API: shots 70–78 (list, attention filter, overview, progress, calendar with photos, nutrition, empty client, 320, a 1000px table scrolled right); a11y: table `th` scopes, `aria-sort`, keyboard sort cycle, focus rings, tab links `aria-current`, focusable region that fits 1280×800, sticky header row, no side scroll / 44px / 16px at 390 and 320, the «Акаунт» and invite lines ≥ 13px in `--muted` |
 | all other specs | e2e-gate | adapted to the username login, «Вийти» inside «Акаунт» and the new settings layout; screenshots re-recorded for login, settings list (user + admin), the new screens (light + dark, iPhone + desktop), plus 320 shots of the user sheet and the invite screen (light + dark); a11y at 320×568 for login (pending hint + error), invite, reset, «Акаунт», «Користувачі», the user sheet and the delete panel: no horizontal scroll, targets ≥ 44 px, inputs ≥ 16 px |
 
 Rules for every e2e spec:

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { PhotoUrlsProvider, type PhotoUrls } from '@/lib/photoUrls';
 import { PhotoStrip } from './PhotoStrip';
 import { swipeResult } from './PhotoViewer';
 
@@ -104,6 +105,44 @@ describe('PhotoStrip', () => {
     expect(shown.getAttribute('src')).toBe('/api/photos/aaaaaaaaaaaaaaaa/thumb');
     fireEvent.error(shown);
     expect(screen.getByText('Фото недоступне')).toBeTruthy();
+  });
+
+  it('without a PhotoUrlsProvider the thumbs and the viewer use her own photo routes', () => {
+    render(<PhotoStrip ids={IDS.slice(0, 1)} />);
+    expect(screen.getByRole('img', { name: 'Фото їжі' }).getAttribute('src')).toBe(
+      '/api/photos/aaaaaaaaaaaaaaaa/thumb',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Фото їжі' }));
+    const dialog = screen.getByRole('dialog');
+    expect([...dialog.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      '/api/photos/aaaaaaaaaaaaaaaa/thumb',
+      '/api/photos/aaaaaaaaaaaaaaaa',
+    ]);
+  });
+
+  it('a PhotoUrlsProvider changes both the thumbnail and the viewer image URLs', () => {
+    const urls: PhotoUrls = {
+      thumb: (id) => `/api/coach/clients/7/photos/${id}/thumb`,
+      full: (id) => `/api/coach/clients/7/photos/${id}`,
+    };
+    render(
+      <PhotoUrlsProvider value={urls}>
+        <PhotoStrip ids={IDS.slice(0, 2)} size="sm" />
+      </PhotoUrlsProvider>,
+    );
+    expect(screen.getAllByRole('img', { name: 'Фото їжі' }).map((img) => img.getAttribute('src'))).toEqual([
+      '/api/coach/clients/7/photos/aaaaaaaaaaaaaaaa/thumb',
+      '/api/coach/clients/7/photos/bbbbbbbbbbbbbbbb/thumb',
+    ]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Фото їжі' })[1]!);
+    // The viewer is portalled to <body> and still reads the provider of the strip.
+    const dialog = screen.getByRole('dialog', { name: 'Фото їжі' });
+    expect(dialog.parentElement).toBe(document.body);
+    expect([...dialog.querySelectorAll('img')].map((img) => img.getAttribute('src'))).toEqual([
+      '/api/coach/clients/7/photos/bbbbbbbbbbbbbbbb/thumb',
+      '/api/coach/clients/7/photos/bbbbbbbbbbbbbbbb',
+    ]);
+    expect(document.body.innerHTML).not.toContain('/api/photos/');
   });
 
   it('a single photo has no paging controls; ✕ closes', () => {

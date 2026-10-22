@@ -2,7 +2,9 @@
  * HTTP API contract between `apps/web` and `apps/server` (accounts: docs/multi-user.md §6).
  * All bodies are JSON. The public routes are `health`, `auth/login`, `auth/logout`, `auth/invite/*` and
  * `auth/reset/*`; every other `/api/*` route (`auth/me` included) needs a session cookie, and `admin/*` an admin's.
- * Every request acts on the signed-in user's own data only. `GET /api/data`, `POST /api/ops` and `POST /api/import`
+ * Every request acts on the signed-in user's own data only, except `coach/*` (docs/coach-cabinet.md): it needs an
+ * admin's session and is GET only; it reads other accounts' (role user) records and never changes them.
+ * `GET /api/data`, `POST /api/ops` and `POST /api/import`
  * carry `X-Legko-User: <device user id>` (`USER_HEADER`, D11): a different id — or no header on a session created
  * by a v4 login — answers 409 `user_mismatch` with nothing applied. Mutating requests must send
  * `Content-Type: application/json` and a same-origin `Origin` header.
@@ -40,6 +42,7 @@ export const API = {
   adminDeleteUser: '/api/admin/users/delete', // POST { userId, confirmUsername } → OkResponse | 400 | 404 | 409
   adminUserAiLimit: '/api/admin/users/ai-limit', // POST { userId, limit } → OkResponse | 404
   adminAiLimits: '/api/admin/ai-limits', // POST { perUser, global } → OkResponse | 400
+  coachClients: '/api/coach/clients', // GET ?from=&to= → CoachClientsResponse (admin only, GET only; `coach.ts` builds the sub-paths)
 } as const;
 
 /** Stored food photo (JPEG): full size and thumbnail. Auth required, immutable. */

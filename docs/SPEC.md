@@ -11,7 +11,8 @@ desktop. Server: one Docker container on a VPS behind Caddy at `https://fit.trip
 Accounts (since the users release, `docs/multi-user.md`): username + password; **no open sign-up** — an admin sends
 a one-time invite link; every account's data (days, meals, weights, measurements, settings, dishes, photos, push
 subscriptions, reminders, AI usage, backups / export / import) is completely separate. Admins manage accounts in
-Settings → «Користувачі» and never see anyone's records. The pre-accounts installation's data belongs to the ordinary
+Settings → «Користувачі» and, since the coach release (`docs/coach-cabinet.md`), also see every ordinary user's
+records and progress **read-only** in «Клієнти» (#11 below); they never change them. The pre-accounts installation's data belongs to the ordinary
 user **«anna»** (the legacy owner); the owner's account is the one admin **«admin»**, bootstrapped over SSH with a
 one-time setup link (`docs/DEPLOY.md`). The requirements below («she records …») apply to every account.
 
@@ -43,11 +44,21 @@ one-time setup link (`docs/DEPLOY.md`). The requirements below («she records �
    «+ Харчування / + Тренування / + Вага / + Заміри».
 10. **Ease of use** — phone first, minimal typing, big tap targets: ✅/❌ workout, food, kcal, weight,
     measurements, notes — all quick.
+11. **«Клієнти» — the admin is a read-only coach** (owner, 2026-10-22; `docs/coach-cabinet.md`). An admin sees every
+    account with role `user` (any status; admins are never clients) as a client: a desktop-first table (phone: a
+    compact list) with current weight, change this week / 30 days and since start, % of the way to the goal, average
+    kcal and Б · Ж · В of the last 7 / 30 full days against the goals, workouts against the plan, days logged, last
+    activity, sortable, searchable, «Потребують уваги» / «Усі» filters and attention flags with documented thresholds
+    (§3.8); and a client page with «Огляд», «Прогрес» (the client's own Progress screen), «Календар» (month + read-only
+    day with meals and photos) and «Харчування». Strictly **read-only**: the coach cannot change, note or comment on
+    anything of a client (every coach endpoint is GET only, enforced on the server). Every user is told, calmly, in
+    «Акаунт» and on the invite page: «Адміністратор бачить твої записи та прогрес.»
 
 Additions we make on top of the design (keep them in the same visual language):
 **accounts** — the login screen (username + password, «Маю посилання»), one-time invite links (`/invite`) and
 password / setup links (`/reset`), Settings → «Акаунт» (name, password, AI left today, «Вийти») and, for admins,
-«Користувачі» (users, invites, reset links, roles, disable / delete, AI limits) (§3.2, §3.5) —, first-run setup sheet
+«Користувачі» (users, invites, reset links, roles, disable / delete, AI limits) and «Клієнти» (read-only coach)
+(§1.1 #11, §3.2, §3.5, §3.8) —, first-run setup sheet
 (start weight, goal weight, kcal goal),
 «Додай на початковий екран» guidance for iPhone push, test notification, custom workout types,
 theme switch (auto/light/dark), JSON export/import backup, offline queue with sync,
@@ -130,6 +141,14 @@ with the sub «Б 68 · Ж 41 · В 132 г · 3 прийоми» (with goals «�
 (one tap → that action's short sheet; Тренування also has inline ✓/✕) and by the «+» menu with the same four actions;
 there is no separate button grid. The UI says «Їжа» where the prototype said «Харчування» (calendar legend, Home,
 menu); the setup sheet is «Перші кроки» (the tab is «Налаштування»); the Settings list sits right under its header.
+
+**Navigation for admins** (coach release, `docs/coach-cabinet.md` §5.2): the desktop sidebar has five items —
+Головна · Календар · Прогрес · **Клієнти** · Налаштування; the phone tab bar is Головна · Календар · + · **Клієнти** ·
+Налаштування («Клієнти» replaces «Прогрес»; the admin's own Progress stays one tap away from Home's week row).
+`/coach` pages use a wide desktop shell (`max-width: 1440px`; other pages keep 1280) and have **no record button**:
+no «+ Записати день» in the sidebar, an empty centre slot instead of «+» in the tab bar (it would write into the
+admin's own diary while she looks at a client). Ordinary users' navigation, and the admin's own pages, are unchanged
+(the four sections above).
 
 ## 3. Architecture
 
@@ -249,6 +268,22 @@ Contract: `packages/shared/src/api.ts` (paths, bodies, responses, error codes) a
   the user, and for an admin every invite / reset link they created; demotion → the target's sessions and the links
   they created; disable → sessions, push subscriptions, resets for them, links they created; delete → links they
   created, then cascade.
+- **Coach** (role admin, read-only, `docs/coach-cabinet.md` §2–§3): four routes, all registered with `app.get` only.
+  `GET /api/coach/clients?from=&to=` → `CoachClientsResponse` (every role-`user` account, any status: the profile
+  `{ id, username, status, createdAt, lastSeenAt }`, settings, all weigh-ins and measurements, per-day digests of the
+  window and the first / last record date; 400 `bad_request` «Некоректний період» for a missing / invalid date,
+  `to < from` or more than 62 days); `GET /api/coach/clients/:id` → `CoachClientResponse` (the profile + the client's
+  `AppData` with `foods: []`; 404 `not_found` for a malformed or unknown id and for any admin, the caller included);
+  `GET /api/coach/clients/:id/photos/:photoId` and `…/thumb` → `image/jpeg` of a photo **owned by that client** (400
+  `bad_request` for a malformed photo id, checked first; then 404 when the id is not a client or the photo is not
+  theirs / missing). 401 without a session, 403 `forbidden` for a non-admin. **Headers**: every handler response
+  (200 and its 400 / 404 / 405) has `Cache-Control: private, no-store`; photos also `Vary: Cookie`,
+  `X-Content-Type-Options: nosniff`. **Other methods**: `HEAD` on a coach path → 405 with `Allow: GET` and an empty
+  body (after the auth / admin middlewares; nothing is read or logged); `POST` / `PUT` / `PATCH` / `DELETE` → 403
+  `forbidden_origin` without a same-origin `Origin` + JSON, otherwise 404 (no route); `OPTIONS` → 404. Nothing but
+  `GET` is ever 2xx. Never sent: password hashes, sessions, tokens, push subscriptions, invites, AI usage. One info
+  log line per access (admin id, client id, never content). An admin asking for a client's photo on the ordinary
+  `GET /api/photos/:id` still gets 404 (owner check unchanged).
 - **Error codes** (`ApiErrorCode`): `bad_credentials`, `account_disabled`, `forbidden`, `user_mismatch`,
   `link_invalid` (+ `reason`), `username_taken`, `invalid_username`, `weak_password`, `wrong_password`, `last_admin`,
   `self_action`, `limit_reached` (20 pending invites) next to the existing ones (`bad_password` «Неправильний
@@ -406,7 +441,8 @@ link <id> for user <id> created by …`, `links revoked: N …`). Start-up: `No 
   anything else → `/settings`; `meals` = «Прийоми їжі», her meal types: view mode, «Змінити» → rename / ↑ ↓ / ✕, add,
   «Повернути стандартні»; «Цілі» also holds the optional Б · Ж · В goals; `account` = «Акаунт»; `users` =
   «Користувачі», admins only — anyone else is redirected to `/settings` before it renders),
-  `/reminders` → redirect to `/settings/reminders` (old bookmarks and test notifications), catch-all → `/`.
+  `/reminders` → redirect to `/settings/reminders` (old bookmarks and test notifications), `/coach` and `/coach/:id`
+  («Клієнти», admins only, §3.8), catch-all → `/`.
   Screens export `HomeScreen`, `CalendarScreen`, `ProgressScreen`, `SettingsScreen` (`screens/settings`). These
   files and the exported names are the contract between tasks.
 - **Accounts UI** (`docs/multi-user.md` §8–§9). `AuthGate` routes `/invite` and `/reset` **before** the auth status
@@ -425,6 +461,20 @@ link <id> for user <id> created by …`, `links revoked: N …`). Start-up: `No 
   them); **«Вийти» is at the bottom of «Акаунт»** (with the profile, «Пароль» (current + new; shows who set it last:
   «Пароль задано … за посиланням від admin»), «Імʼя для входу» and «Підрахунки калорій» — AI left today). Admin and
   account actions are online only (not in the outbox).
+- **Coach UI** (`screens/coach/`, `docs/coach-cabinet.md` §5). Both `/coach` routes sit behind **`CoachGate`**:
+  nothing renders while the account is unknown, a non-admin is redirected to `/` (a 403 from a coach call refreshes
+  the role first, then redirects). `/coach` = `CoachClientsScreen` (URL state, replace navigation: `days=7|30`,
+  `show=attention|all`, `sort=…` + `dir=asc|desc`, `q=`); `/coach/:id` = `CoachClientScreen` (`tab=overview|progress|
+  calendar|nutrition`, `days`, `period`, `date`). Every param change goes through `useReplaceParams` (replace that
+  keeps `history.state`, so «‹ Клієнти» returns to the list with its filters). The data are fetched with
+  `api.coach.clients(window)` / `api.coach.client(id)` into **component state only** — never IndexedDB, local /
+  session storage, the zustand store or the outbox — and reloaded when the device date changes or the page returns
+  after more than 2 minutes. A client's «today» is `clientToday(settings.timezone, now)`. The client pages reuse the
+  client's own components with injected data: `ProgressBody` (controlled period, coach copy, no «+ Записати …»),
+  `MonthCard` + `useShownMonth`, `buildDayDetail`, `DayNutritionCard`, `PhotoStrip` inside
+  `PhotoUrlsProvider(coachPhotoUrls(id))` (photos load only from the coach photo route). Nothing under
+  `screens/coach` imports `@/store/`, calls `dataActions` or opens a sheet. The user's own screens are unchanged
+  (`ProgressView` = `usePeriod()` + `ProgressBody`; `useToday` untouched).
 - **Data**: `apps/web/src/store/data.ts` — `useAppData()`, `useSettings()`, `useSyncState()`, `dataActions.*`,
   `startSync()`. Screens never call the API for data directly.
   Implementation: zustand state; device cache in IndexedDB (`idb-keyval`, **per account**: `legko.user` = the full
@@ -605,6 +655,46 @@ max-age=31536000, immutable`, `Vary: Cookie`, deliberately no `ETag` / `Last-Mod
   full-screen viewer, remove); the «Їжа» list shows them under each meal row and the calendar under its «Їжа» row.
   «Зберегти» sends `meal.put` (+ the `food.use` of the positions added in this editor); nothing reaches the day
   before that.
+
+### 3.8 «Кабінет тренера» — «Клієнти» (admin = read-only coach)
+
+Full plan, formulas and UX: **`docs/coach-cabinet.md`**. Summary of the rules:
+
+- **Who**: clients = every account with role `user` (active, disabled or pending); admins are never clients — not in
+  the list, 404 on their id (the caller's own included). Role changes act at once (role read on every request).
+- **Read-only by construction** (server): `routes/coach.ts` registers only `app.get`; it receives
+  `Pick<RouteDeps, 'auth' | 'admin'>` and a separate `CoachAccess` (not a `RouteDeps` field). `coach/access.ts`
+  checks the admin role first in every method and holds only **reader** objects (`DataReaders.readerFor(ClientId)`,
+  `PhotoReaders.readerFor(ClientId)`, frozen, no write method) from `createDataAccess` / `createPhotoAccess`;
+  `ClientId` is a branded id minted only by `resolveClient` after the role check. Four new SQL statements, all
+  `user_id = ?` scoped — the scope lint is unchanged (28 allowlist entries). A coach lint and a runtime route-table
+  test pin this; multi-user §4 item 6.
+- **Summaries are computed in the browser** (`coachSummary` in `packages/shared/src/coach.ts`, pure, `now` passed in)
+  from the list's compact digests (the server computes nothing time-relative; 7 statements per client, no N+1). The
+  detail page builds the same item from the full copy (`coachItemFromData`), so the table and the page agree.
+- **«Today» of a client** = their time zone (`settings.timezone`, invalid → Europe/Kyiv) at the admin's instant.
+  Averages of kcal and Б · Ж · В and «записи» use the **full days before today** (`[T − P, T − 1]`, P = 7 | 30);
+  weight change and workouts of «this week» use Monday … today (P 30: `T − 29 … T`), like Home / Progress. Workouts
+  are lavender only when behind the plan days already past (`plannedSoFar`).
+- **Attention flags** (active accounts only; disabled / pending get none):
+  - «Не заходить N днів» / «Ще не входили» — 7+ whole days since `lastSeenAt` (or `createdAt`);
+  - «N днів без записів» — 3+ full days before today without any day, weigh-in or measurement, or «Жодного запису
+    від реєстрації» when nothing was ever recorded on an account at least 3 days old (a younger empty account gets
+    the neutral «Новий клієнт» pill instead);
+  - «Без зважування» — the planned weigh-in weekday of the last 6 days passed with no weigh-in since (only for
+    someone who started before it); weigh-in reminder off → 8+ days since the last weigh-in;
+  - «Калорії +N% за 7 днів» — average of the last 7 full days above the kcal goal by **more than** 10 %, with at
+    least 3 days with kcal;
+  - «Не заходить» hides the two record flags (implied). Default order: more flags first, then the more severe
+    (inactive > no records > no weigh-in > kcal), then active / pending / disabled, then the name.
+- **Privacy**: coach data live only in memory on the admin's device (C8); `Cache-Control: private, no-store`;
+  `foods` («Часті страви») are never sent; one log line per access without content; coach reads never touch the
+  client's `last_seen_at`. **Transparency**: the Users page role copy says what an admin sees; every user's «Акаунт»
+  and the invite page show one line «Адміністратор бачить твої записи та прогрес.» (no pop-up); the old statement
+  «Чужих записів адміністратор не бачить» is gone.
+- **Deploy note**: no schema change, no migration, no new env or dependency — an ordinary deploy
+  (`docs/DEPLOY.md`). After it, every ordinary user sees the transparency line in «Акаунт» on their next visit, and
+  admins get «Клієнти» in the sidebar / tab bar. Rollback = the previous image (nothing to undo in the database).
 
 ## 4. Conventions
 

@@ -9,7 +9,7 @@ import type * as PlatformModule from '../../lib/platform';
 import { bindOwner, resetLocal } from '../../store/data';
 import { deferred, sessionUser } from '../../store/test-utils';
 import { useUiStore } from '../../store/ui';
-import { InviteScreen } from './InviteScreen';
+import { INVITE_ADMIN_NOTE, InviteScreen } from './InviteScreen';
 import { COPY_LINK } from './LinkParts';
 import { ASK_ADMIN, INVITE_INVALID, LINK_FORM_ERRORS, LOGIN_ERRORS, untilDate, USERNAME_HINT } from './loginErrors';
 
@@ -179,6 +179,7 @@ describe('InviteScreen: signed in on this device', () => {
       await screen.findByText('На цьому пристрої вже ввійдено як anna. Щоб створити новий акаунт, спершу вийди.'),
     ).toBeTruthy();
     expect(screen.queryByLabelText('Імʼя користувача')).toBeNull();
+    expect(screen.queryByText(INVITE_ADMIN_NOTE)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Повернутися в застосунок' }));
     expect(replace).toHaveBeenCalledWith('/');
@@ -198,6 +199,34 @@ describe('InviteScreen: signed in on this device', () => {
 });
 
 describe('InviteScreen: the form', () => {
+  it('says, inside the form and before «Створити акаунт», that the admin sees the records', async () => {
+    openAt();
+    const submit = await screen.findByRole('button', { name: 'Створити акаунт' });
+    expect(INVITE_ADMIN_NOTE).toBe('Адміністратор бачить твої записи та прогрес.');
+    const note = screen.getByText(INVITE_ADMIN_NOTE);
+    expect(note.tagName).toBe('P');
+    expect(note.closest('form')).toBe(submit.closest('form'));
+    expect(note.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Directly above the button, after the fields.
+    expect(note.nextElementSibling).toBe(submit);
+    expect(repeatField().compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The one-time-link hint stays below the form; nothing louder than a line.
+    const once = screen.getByText(/^Посилання одноразове, діє до /);
+    expect(once.closest('form')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getAllByText(/Адміністратор бачить/)).toHaveLength(1);
+  });
+
+  it('keeps the line above the button while an error is shown', async () => {
+    openAt();
+    await fill('olya', 'short');
+    fireEvent.click(createButton());
+    const alert = await screen.findByRole('alert');
+    const note = screen.getByText(INVITE_ADMIN_NOTE);
+    expect(alert.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(note.nextElementSibling).toBe(createButton());
+  });
+
   it('has the hints and the right autofill hints', async () => {
     openAt();
     await screen.findByRole('button', { name: 'Створити акаунт' });
@@ -355,6 +384,7 @@ describe('InviteScreen in iOS Safari (D29)', () => {
       ),
     ).toBeTruthy();
     expect(within(screen.getByRole('list')).getAllByRole('listitem').length).toBeGreaterThan(2);
+    expect(screen.queryByText(INVITE_ADMIN_NOTE)).toBeNull();
     // The storage work is done, the reload waits for her.
     expect(replace).not.toHaveBeenCalled();
     expect(useAuthStore.getState()).toMatchObject({ status: 'authed', user: OLYA });

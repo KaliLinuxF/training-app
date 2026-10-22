@@ -1,7 +1,8 @@
 /**
  * «Акаунт» (docs/multi-user.md §9.5, §11.2): the signed-in account's own page — change the password (every other
  * device of that account is signed out, this one stays signed in on a fresh cookie), rename the login (a taken name
- * is refused, the new name works at the next login), and «Вийти» at the bottom of the page (D30).
+ * is refused, the new name works at the next login), «Вийти» at the bottom of the page (D30), and the one calm line
+ * «Адміністратор бачить твої записи та прогрес.» under the profile — for a user only (docs/coach-cabinet.md §7.1).
  *
  * Rules: anna and admin are never changed — the password and rename tests run on a throwaway account made with
  * `createUser()` and deleted in `finally`. This file makes one failed password check, one taken-name rename and one
@@ -195,7 +196,28 @@ test.describe('«Акаунт» of a throwaway account', () => {
   });
 });
 
+/** The profile's transparency line (users only; docs/coach-cabinet.md §7.1). */
+const ADMIN_SEES = 'Адміністратор бачить твої записи та прогрес.';
+
 test.describe('«Акаунт» of anna', () => {
+  test('the profile says, in one muted line, that the admin sees her records — no pop-up', async ({
+    app,
+    page,
+  }) => {
+    await app.gotoSettings('Акаунт');
+    const profile = app.region('Профіль');
+    const line = profile.getByText(ADMIN_SEES, { exact: true });
+    await expect(line).toBeVisible();
+    // Under «Користувач · з …».
+    const since = await box(profile.getByText(/^Користувач · з /), 'since line');
+    expect((await box(line, 'the line')).y).toBeGreaterThan(since.y);
+    // Once on the page, nothing louder.
+    await expect(page.getByText(ADMIN_SEES, { exact: true })).toHaveCount(1);
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(parseFloat(await line.evaluate((el) => getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(13);
+  });
+
   test('«Вийти» sits at the bottom of «Акаунт» and no longer on the list', async ({ app, page }) => {
     await app.goto('/settings');
     await expect(page.getByRole('button', { name: 'Вийти', exact: true })).toHaveCount(0);
@@ -228,5 +250,16 @@ test.describe('«Акаунт» of anna', () => {
       () => (document.scrollingElement ?? document.documentElement).scrollWidth - window.innerWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
+  });
+});
+
+test.describe('«Акаунт» of the admin', () => {
+  test.use({ account: 'admin' });
+
+  test('has no «Адміністратор бачить…» line', async ({ app }) => {
+    await app.gotoSettings('Акаунт');
+    const profile = app.region('Профіль');
+    await expect(profile).toContainText('Адміністратор · з ');
+    await expect(profile.getByText(ADMIN_SEES, { exact: true })).toHaveCount(0);
   });
 });

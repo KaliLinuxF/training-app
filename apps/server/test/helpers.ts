@@ -15,6 +15,7 @@ import { createFoodBudget, type FoodBudget } from '../src/food/budget';
 import type { FoodEstimator } from '../src/food/estimator';
 import { createApp } from '../src/http/app';
 import type { AppEnv } from '../src/http/types';
+import type { Logger } from '../src/logger';
 import { createPhotoStore, type PhotoStore } from '../src/photos/store';
 import { createPushService, type PushService } from '../src/push/service';
 import {
@@ -62,8 +63,11 @@ export interface Clock {
 }
 
 export interface CallOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  /** Serialised as JSON unless already a string. POSTs default to `{}`. */
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+  /**
+   * Serialised as JSON unless already a string. Mutating methods default to `{}`; GET, HEAD and OPTIONS never send
+   * a body (and, like GET, no default Origin / Content-Type).
+   */
   body?: unknown;
   cookie?: string | null;
   /** `null` omits the header. Default: same origin for non-GET requests. */
@@ -132,6 +136,8 @@ export interface TestServerOptions {
   loginSuccessLimiter?: RateLimiter;
   /** Live sessions per user; default as in `createApp` (production: `MAX_SESSIONS_PER_USER`, otherwise no cap). */
   sessionsPerUser?: number | null;
+  /** The app's logger (e.g. one that captures lines); default silent. */
+  logger?: Logger;
 }
 
 export function sessionCookie(res: Response): string | null {
@@ -160,6 +166,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     scryptGate = createScryptGate(),
     loginSuccessLimiter,
     sessionsPerUser,
+    logger,
   } = options;
   const db = openDatabase(':memory:');
   const clock: Clock = { now: Date.UTC(2026, 9, 9, 9, 0) };
@@ -198,6 +205,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
     version: 'test',
     ...(loginSuccessLimiter ? { loginSuccessLimiter } : {}),
     ...(sessionsPerUser !== undefined ? { sessionsPerUser } : {}),
+    ...(logger ? { logger } : {}),
   });
 
   const owners = new Map<string, UserId>();
@@ -207,7 +215,7 @@ export async function createTestServer(options: TestServerOptions = {}): Promise
   const call = (path: string, opts: CallOptions = {}): Promise<Response> => {
     const method = opts.method ?? (opts.body === undefined ? 'GET' : 'POST');
     const headers = new Headers(opts.headers);
-    const mutating = method !== 'GET';
+    const mutating = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS';
     const origin = opts.origin === undefined ? (mutating ? ORIGIN : null) : opts.origin;
     if (origin !== null) headers.set('Origin', origin);
     const contentType =

@@ -39,6 +39,8 @@ export const ACCOUNT_COPY = {
   aiTitle: 'Підрахунки калорій',
   offline: 'Потрібен інтернет',
   loading: 'Завантажую…',
+  /** The profile card's third line, role user only (docs/coach-cabinet.md §7.1): no pop-up, nothing else. */
+  adminSees: 'Адміністратор бачить твої записи та прогрес.',
 } as const;
 
 export const ACCOUNT_ERRORS = {

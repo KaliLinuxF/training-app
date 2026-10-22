@@ -1,0 +1,145 @@
+/*
+ * The client page header (docs/coach-cabinet.md §6.3): a plain full-width block — never inside a ContentGrid — so
+ * each panel below it owns its own layout.
+ */
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* A username has no spaces (up to 32 characters): let it break instead of widening the page at 320px. */
+.header h1 {
+  overflow-wrap: anywhere;
+}
+
+/*
+ * «Лише перегляд» sits on the page background: the kit's neutral pill is filled with --paper (made for cards) and
+ * would vanish here, so it gets a card fill, a hairline ring and darker text (light and dark themes alike).
+ */
+.head .readOnly {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink2);
+}
+
+.goals {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+.pills {
+  padding: 0 4px;
+}
+
+/* Tabs, then (overview / nutrition) the 7 / 30 switch: stacked on the phone, one row on the desktop. */
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/*
+ * The tab strip looks like the kit's Segmented. On the phone it spans the width and the four tabs share it (they fit
+ * at 390); narrower, it scrolls inside itself — never the page — and a fade on an edge says more tabs are there.
+ */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--r16);
+  background: var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.fadeEnd {
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 28px), transparent);
+}
+
+.fadeStart {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 28px);
+  mask-image: linear-gradient(to right, transparent, black 28px);
+}
+
+.fadeStart.fadeEnd {
+  -webkit-mask-image: linear-gradient(to right, transparent, black 28px, black calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, transparent, black 28px, black calc(100% - 28px), transparent);
+}
+
+.tab {
+  flex: 1 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  border-radius: var(--r12);
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--ink2);
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.tab:focus-visible {
+  outline-offset: -2px;
+}
+
+.activeTab {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow-seg);
+}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .bar {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .days {
+    min-width: 220px;
+  }
+
+  .tabs {
+    align-self: flex-start;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+    padding: 0 16px;
+  }
+}
+
+.state {
+  max-width: 520px;
+}
+
+.stateText {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+}

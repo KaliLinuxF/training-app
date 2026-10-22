@@ -23,6 +23,15 @@
   color: var(--ink2);
 }
 
+/* Role user only: «Адміністратор бачить твої записи та прогрес.» (13/500 --muted, one calm line). */
+.visibility {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
 /* «Пароль задано 21 жовтня за посиланням від admin.» */
 .provenance {
   margin: 0;

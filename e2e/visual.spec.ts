@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import {
   API,
+  coachSummary,
   normalizeDay,
   type AdminInvite,
   type AdminOverview,
@@ -18,7 +19,25 @@ import {
   type LinkResponse,
   type SessionUser,
 } from '../packages/shared/src/index';
+import {
+  COACH_PHOTO_IDS,
+  COACH_STUB_IDS,
+  COACH_STUB_NAMES,
+  coachClientPayload,
+  coachClientsPayload,
+} from './fixtures/coach';
 import { USERNAME_LABEL } from './support/app';
+import { stubCoachClient, stubCoachClients, stubCoachPhotos } from './support/coachApi';
+import {
+  clientRow,
+  clientsRegion,
+  clientTab,
+  dayView,
+  expectNoSideScroll,
+  openClient,
+  openClients,
+  showFilter,
+} from './support/coachUi';
 import { BASE_URL, FIXED_NOW, TODAY } from './support/env';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
 import type { ServerApi } from './support/server';
@@ -263,6 +282,39 @@ async function scrollTop(page: Page): Promise<void> {
   await page.evaluate(() => window.scrollTo(0, 0));
 }
 
+/**
+ * A whole long page on the desktop without Chrome's full-page capture: that capture resizes the window to 1×1 for a
+ * moment and the shell turns into the phone one and back (the tab strip no longer scrolls the page, but the swap still
+ * remounts the shell mid-capture). So the window is made as tall as the page instead, shot, and restored. On the phone this is `shot(…, true)` (viewport-sized pages).
+ */
+async function tallShot(page: Page, info: TestInfo, name: string): Promise<void> {
+  const size = page.viewportSize();
+  if (info.project.name !== 'desktop' || !size) {
+    await shot(page, info, name, true);
+    return;
+  }
+  const height = await page.evaluate(() => document.documentElement.scrollHeight);
+  await page.setViewportSize({ width: size.width, height: Math.max(size.height, height) });
+  await expect.poll(() => page.evaluate(() => window.innerHeight)).toBe(Math.max(size.height, height));
+  await shot(page, info, name);
+  await page.setViewportSize(size);
+}
+
+/**
+ * Scrolls to the top and waits until the page stays there (a tab switch may still be scrolling its strip into view);
+ * a desktop full-page capture of a scrolled page would paint the sticky sidebar and period bar mid-page.
+ */
+async function settleAtTop(page: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
+        return window.scrollY;
+      }),
+    )
+    .toBe(0);
+}
+
 /** Scrolls the page so `locator` sits near the top of the viewport (below the sticky bar / notch). */
 async function scrollToTop(page: Page, locator: Locator, offset = 80): Promise<void> {
   const top = await locator.evaluate((el) => el.getBoundingClientRect().top + window.scrollY);
@@ -280,15 +332,19 @@ const tokenColor = (page: Page, token: string): Promise<string> =>
     return color;
   }, token);
 
-/** No horizontal scroll: neither the page nor any open sheet is wider than the screen. */
-async function expectNoSideScroll(page: Page, what: string): Promise<void> {
-  const overflow = await page.evaluate(() => [
-    document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    ...[...document.querySelectorAll<HTMLElement>('[role="dialog"]')].map(
-      (d) => d.scrollWidth - d.clientWidth,
-    ),
-  ]);
-  expect(Math.max(...overflow), `${what}: horizontal overflow`).toBeLessThanOrEqual(0);
+/**
+ * «Клієнти» with the stub roster of e2e/fixtures/coach.ts (olya, marta, ivan, sofia, taras, petro; relative to
+ * FIXED_NOW): the list, each client page and every coach photo (FOOD_JPEG) are served by `page.route`, so the shots
+ * do not depend on the real server clock or on other accounts. Returns the requested coach photo URLs (live).
+ */
+async function stubCoach(page: Page, admin: ServerApi): Promise<string[]> {
+  await stubMe(page, admin, {
+    createdAt: NOW - 40 * DAY,
+    passwordChange: { at: NOW - 40 * DAY, via: 'setup', by: null },
+  });
+  await stubCoachClients(page, coachClientsPayload());
+  for (const name of COACH_STUB_NAMES) await stubCoachClient(page, coachClientPayload(name));
+  return stubCoachPhotos(page, FOOD_JPEG);
 }
 
 /**
@@ -634,6 +690,128 @@ for (const colorScheme of ['light', 'dark'] as const) {
           await reset.scrollIntoViewIfNeeded();
           await shot(page, info, '495-user-sheet-reset-link-320');
         }
+      });
+    });
+
+    // «Клієнти» — the admin as a read-only coach (docs/coach-cabinet.md §6, §8.2): stubbed API, 70–78.
+    test.describe('coach', () => {
+      test.use({ account: 'admin' });
+
+      test('the clients list, «Потребують уваги», 320 and a narrow desktop table', async ({
+        page,
+        admin,
+      }, info) => {
+        const phone = info.project.name === 'iphone';
+        await stubCoach(page, admin);
+        await openClients(page);
+        await expect(clientRow(page, 'olya')).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Потребують уваги · 4', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Усі · 6', exact: true })).toBeVisible();
+        for (const name of COACH_STUB_NAMES) await expect(clientRow(page, name)).toHaveCount(1);
+        await expectNoSideScroll(page, 'clients list');
+        // The desktop table fits the window; a long phone list is saved as pages.
+        await shot(page, info, '70-coach-list', phone);
+
+        await showFilter(page, 'Потребують уваги');
+        for (const name of ['olya', 'marta', 'ivan', 'petro'])
+          await expect(clientRow(page, name)).toHaveCount(1);
+        for (const name of ['sofia', 'taras']) await expect(clientRow(page, name)).toHaveCount(0);
+        await shot(page, info, '71-coach-list-attention', phone);
+        await showFilter(page, 'Усі');
+
+        if (phone) {
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expect(clientRow(page, 'petro')).toBeVisible();
+          await expectNoSideScroll(page, 'clients list 320');
+          await shot(page, info, '77-coach-list-320', true);
+          await page.setViewportSize({ width: 390, height: 844 });
+          return;
+        }
+
+        // 1000px: the table is wider than its region, which scrolls on its own; scrolled all the way right, the
+        // sticky name column stays at the left edge and paints over the cells (opaque --card).
+        await page.setViewportSize({ width: 1000, height: 800 });
+        await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1000);
+        const region = clientsRegion(page);
+        const scrolled = await region.evaluate((el) => {
+          el.scrollLeft = el.scrollWidth;
+          return el.scrollLeft;
+        });
+        expect(scrolled, 'the table region scrolls sideways at 1000px').toBeGreaterThan(0);
+        const name = clientRow(page, 'olya').locator('th[scope="row"]');
+        const regionBox = await region.boundingBox();
+        const nameBox = await name.boundingBox();
+        if (!regionBox || !nameBox) throw new Error('the table is not rendered');
+        expect(Math.abs(nameBox.x - regionBox.x), 'the name column sticks to the left').toBeLessThanOrEqual(
+          2,
+        );
+        const cover = await name.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.left + r.width - 8, r.top + r.height / 2);
+          return { onTop: !!hit && el.contains(hit), background: getComputedStyle(el).backgroundColor };
+        });
+        expect(cover.onTop, 'the name cell paints over the scrolled cells').toBe(true);
+        expect(cover.background).not.toMatch(/transparent|rgba\(.*, 0\)/);
+        await shot(page, info, '78-coach-list-narrow');
+        // Checked after the shot so a failure still leaves the picture for review: the page never scrolls sideways.
+        await expectNoSideScroll(page, 'clients list 1000');
+        await page.setViewportSize({ width: 1280, height: 800 });
+      });
+
+      test('a client: «Огляд», «Прогрес», «Календар» with photos, «Харчування», a new client', async ({
+        page,
+        admin,
+      }, info) => {
+        // Shot 74 needs sofia's meals day with photos and a client without any flag (docs/coach-cabinet.md §8.3).
+        const sofia = coachClientPayload('sofia');
+        const breakfast = sofia.data.days['2026-10-13']?.meals?.flatMap((m) => m.photos ?? []) ?? [];
+        expect(breakfast).toEqual(expect.arrayContaining([...COACH_PHOTO_IDS.slice(0, 2)]));
+        const sofiaItem = coachClientsPayload().clients.find((c) => c.client.id === COACH_STUB_IDS.sofia);
+        if (!sofiaItem) throw new Error('sofia is in the stub list');
+        expect(coachSummary(sofiaItem, FIXED_NOW, 7).flags).toEqual([]);
+
+        const photos = await stubCoach(page, admin);
+        await openClients(page);
+        await openClient(page, 'olya');
+        await expect(page.getByText('Лише перегляд', { exact: true })).toBeVisible();
+        await expect(page.getByText('Калорії +15% за 7 днів').first()).toBeVisible();
+        await settleAtTop(page);
+        await tallShot(page, info, '72-coach-overview');
+
+        await clientTab(page, 'Прогрес');
+        await expect(page.getByRole('radio', { name: 'Тиждень' })).toBeVisible();
+        await expect(page.getByRole('main').getByRole('button', { name: /Записати/ })).toHaveCount(0);
+        await settleAtTop(page);
+        await tallShot(page, info, '73-coach-progress');
+
+        await page.goto(`/coach/${COACH_STUB_IDS.sofia}?tab=calendar&date=2026-10-13`);
+        const day = dayView(page);
+        await expect(day).toBeVisible();
+        await expect(day).toContainText('Кардіо');
+        // The meals come in their own card «Прийоми їжі» under the day card.
+        await expect(
+          page
+            .getByRole('main')
+            .getByText(/^Сніданок/)
+            .first(),
+        ).toBeVisible();
+        await expect.poll(() => photos.length).toBeGreaterThanOrEqual(2);
+        for (const url of photos) expect(url).toContain(`/api/coach/clients/${COACH_STUB_IDS.sofia}/photos/`);
+        await settleAtTop(page);
+        await tallShot(page, info, '74-coach-calendar');
+
+        await clientTab(page, 'Харчування');
+        await expect(page.getByText('Калорії по днях').first()).toBeVisible();
+        await settleAtTop(page);
+        await tallShot(page, info, '75-coach-nutrition');
+
+        await page.goto(`/coach/${COACH_STUB_IDS.ivan}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'ivan', exact: true })).toBeVisible();
+        await expect(
+          page.getByText('Записи зʼявляться тут, щойно людина почне вести щоденник.'),
+        ).toBeVisible();
+        await settleAtTop(page);
+        await tallShot(page, info, '76-coach-empty');
       });
     });
 

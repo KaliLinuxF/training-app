@@ -1,5 +1,5 @@
-import { photoThumbUrl } from '@legko/shared';
 import { useLayoutEffect, useRef, useState } from 'react';
+import { usePhotoUrls } from '@/lib/photoUrls';
 import { cx } from '@/ui';
 import { focusFirst, neighbourControls } from './focus';
 import { PhotoViewer } from './PhotoViewer';
@@ -23,6 +23,7 @@ interface AfterRemove {
 
 /** Row of food photo thumbnails (photo diary); tap opens the full-screen viewer. */
 export function PhotoStrip({ ids, size = 'md', onRemove }: PhotoStripProps) {
+  const urls = usePhotoUrls();
   const [openAt, setOpenAt] = useState<number | null>(null);
   const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
   const thumbs = useRef(new Map<string, HTMLButtonElement>());
@@ -81,7 +82,7 @@ export function PhotoStrip({ ids, size = 'md', onRemove }: PhotoStripProps) {
               ) : (
                 <img
                   className={s.img}
-                  src={photoThumbUrl(id)}
+                  src={urls.thumb(id)}
                   alt="Фото їжі"
                   width={px}
                   height={px}

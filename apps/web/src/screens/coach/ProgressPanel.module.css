@@ -1,0 +1,4 @@
+/* The client's ProgressBody grid, a direct sibling of the page header (docs/coach-cabinet.md §5.6). */
+.panel {
+  min-width: 0;
+}

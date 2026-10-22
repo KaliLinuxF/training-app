@@ -37,6 +37,8 @@ export const MESSAGES = {
   photoTooLarge: 'Фото завелике',
   badPhotoId: 'Некоректний ідентифікатор фото',
   photoNotFound: 'Фото не знайдено',
+  /** `GET /api/coach/clients`: missing / invalid dates, to < from or more than 62 days. */
+  badWindow: 'Некоректний період',
   internal: 'Помилка сервера',
   // Accounts (docs/multi-user.md §6.3).
   badCredentials: 'Неправильне імʼя або пароль',

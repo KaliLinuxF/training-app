@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/lib/api';
 import { at } from '../users/testing';
 import {
+  ACCOUNT_COPY,
   ACCOUNT_ERRORS,
   aiLeftText,
   avatarLetter,
@@ -23,6 +24,10 @@ describe('profile', () => {
     expect(profileLine({ role: 'admin', createdAt: at(2026, 10, 21) })).toBe(
       'Адміністратор · з 21 жовтня 2026',
     );
+  });
+
+  it('tells a user the admin sees their records (docs/coach-cabinet.md §7.1)', () => {
+    expect(ACCOUNT_COPY.adminSees).toBe('Адміністратор бачить твої записи та прогрес.');
   });
 
   it('puts the first letter of the name, upper case, in the avatar', () => {

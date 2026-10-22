@@ -1,0 +1,285 @@
+/*
+ * The desktop clients table (docs/coach-cabinet.md §6.1). 8 columns ≈ 920px fit the 960px content of a 1280px
+ * window; narrower, the region scrolls on both axes with a sticky header row and an opaque sticky name column.
+ */
+.surface {
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r24);
+  overflow: hidden;
+  overflow: clip;
+  min-width: 0;
+}
+
+/*
+ * `position: relative` makes the region the containing block of the cells' visually hidden long forms
+ * (`.visually-hidden` is absolutely positioned): without it they escape the region's clipping at their static place
+ * in the 880px table and widen the page at 900–1099px windows.
+ */
+.scroller {
+  position: relative;
+  overflow: auto;
+  overscroll-behavior-x: contain;
+}
+
+/* More columns to the right: a soft fade over the region's right edge (never catches clicks). */
+.surface::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  width: 32px;
+  pointer-events: none;
+  background: linear-gradient(to left, var(--card), transparent);
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.more::after {
+  opacity: 1;
+}
+
+/* Scrolled sideways: the sticky name column casts a soft shadow over the cells that slid under it. */
+.scrolled .corner,
+.scrolled .nameCell {
+  box-shadow: 6px 0 10px -6px color-mix(in srgb, var(--ink) 24%, transparent);
+  clip-path: inset(0 -16px 0 0);
+}
+
+/* The header row sticks while the rows scroll inside the region (header + toolbar + note ≈ 220px). */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .scroller {
+    max-height: calc(100dvh - 220px);
+  }
+}
+
+/* Inset ring: the region clips anything drawn outside it. */
+.scroller:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--r24);
+}
+
+.table {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* ---- header row ---------------------------------------------------------------------------- */
+
+.th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+  vertical-align: bottom;
+  white-space: normal;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The «Клієнт» header sticks on both axes, above the other headers and the name column. */
+.corner {
+  left: 0;
+  z-index: 3;
+  /* 8 + the button's 4 = the name cells' 12. */
+  padding-left: 8px;
+  border-right: 1px solid var(--line2);
+}
+
+.sortButton {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: var(--r12);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--ink);
+}
+
+.sortButton:focus-visible {
+  outline-offset: -2px;
+}
+
+/*
+ * Numbers: the sort glyph goes before the label (row-reverse packs from the right), so the label ends exactly where
+ * the values end — the th's 2 + the button's 4 = the cells' 6 — whether or not the glyph shows.
+ */
+.num .sortButton {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
+  text-align: right;
+}
+
+.headText {
+  display: flex;
+  flex-direction: column;
+}
+
+.headSub {
+  font-weight: 500;
+}
+
+.glyph {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--accD);
+}
+
+/* Unsorted columns keep the glyph's room (no jump) but do not show it. */
+.glyphOff {
+  visibility: hidden;
+}
+
+/* Column widths (≈ 920px at 15px; the headers wrap to two lines). */
+.col_name {
+  min-width: 180px;
+  width: 190px;
+}
+
+.col_weight {
+  width: 110px;
+  max-width: 120px;
+}
+
+.col_change,
+.col_workouts,
+.col_logged {
+  width: 85px;
+  max-width: 95px;
+}
+
+.col_goalPct {
+  width: 110px;
+}
+
+.col_kcal {
+  width: 150px;
+}
+
+.col_activity {
+  width: 105px;
+}
+
+/* ---- rows ---------------------------------------------------------------------------------- */
+
+.row {
+  cursor: pointer;
+}
+
+.row > th,
+.row > td {
+  height: 64px;
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--line2);
+  background: var(--card);
+  vertical-align: middle;
+  transition: background-color 120ms ease;
+}
+
+.row:last-child > th,
+.row:last-child > td {
+  border-bottom: 0;
+}
+
+.row:hover > * {
+  background: var(--paper);
+}
+
+.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The name column sticks to the left over the scrolled cells (opaque, with a hairline on its right). */
+.nameCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  min-width: 180px;
+  text-align: left;
+  font-weight: 500;
+  border-right: 1px solid var(--line2);
+}
+
+.row > .nameCell {
+  padding-inline: 12px 10px;
+}
+
+/* The last column keeps the card's inner margin on the right. */
+.row > td:last-child,
+.th:last-child {
+  padding-right: 12px;
+}
+
+.nameStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.name:hover {
+  text-decoration: underline;
+}
+
+/* Second line of a cell («−2,9 від старту», «Б 92 · Ж 48 · В 160»): 13px. */
+.second {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+}
+
+/* «Б 92/90 · Ж 48 · В 160/180»: the goals that are set follow their value; pieces wrap whole, never mid-number. */
+.macros {
+  white-space: normal;
+}
+
+.macro {
+  white-space: nowrap;
+}
+
+.goal {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bar {
+  width: 48px;
+  flex-shrink: 0;
+}

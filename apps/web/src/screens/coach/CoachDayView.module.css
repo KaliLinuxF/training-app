@@ -1,0 +1,7 @@
+/* The read-only day: the date card, the day's totals, the meals (docs/coach-cabinet.md §6.5). */
+.day {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}

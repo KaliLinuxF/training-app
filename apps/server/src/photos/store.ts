@@ -3,6 +3,7 @@ import { readdirSync, rmSync, statSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ISODate } from '@legko/shared';
+import type { ClientId } from '../db/data';
 import { num, text } from '../db/rows';
 import type { Database } from '../db/sqlite';
 import { transaction } from '../db/tx';
@@ -100,12 +101,34 @@ function candidateIds(stem: string): string[] {
   return stem.endsWith('_t') ? [stem, stem.slice(0, -2)] : [stem];
 }
 
+/** Read-only view of one client's photos (docs/coach-cabinet.md §2.3). */
+export interface PhotoReader {
+  /** Bytes of a photo OWNED by this user, else null (same `owned` check as `UserPhotos.read`). `id` is validated. */
+  read(id: string, variant: PhotoVariant): Promise<Uint8Array<ArrayBuffer> | null>;
+}
+
+/** Not part of `RouteDeps`: `createApp` hands it only to `createCoachAccess`. */
+export interface PhotoReaders {
+  readerFor(id: ClientId): PhotoReader;
+}
+
+/** `createPhotoAccess(...).store`: unchanged signature and behaviour. */
 export function createPhotoStore(
   db: Database,
   dir: string,
   now: () => number = Date.now,
   logger: Logger = silentLogger,
 ): PhotoStore {
+  return createPhotoAccess(db, dir, now, logger).store;
+}
+
+/** The read-write store and the read-only readers, on one set of statements and one file reader. */
+export function createPhotoAccess(
+  db: Database,
+  dir: string,
+  now: () => number = Date.now,
+  logger: Logger = silentLogger,
+): { store: PhotoStore; readers: PhotoReaders } {
   const q = {
     insert: db.prepare(
       'INSERT INTO photos (id, user_id, date, created_at, bytes, thumb_bytes) VALUES (?, ?, ?, ?, ?, ?)',
@@ -162,6 +185,21 @@ export function createPhotoStore(
     return removed;
   }
 
+  /** The owner's photo file, or null when `owner` does not own `id` or the file is gone (no existence oracle). */
+  async function readOwned(
+    owner: UserId,
+    id: string,
+    variant: PhotoVariant,
+  ): Promise<Uint8Array<ArrayBuffer> | null> {
+    if (q.owned.get(id, owner) === undefined) return null;
+    try {
+      return await readFile(fileOf(id, variant));
+    } catch (err) {
+      if (isMissingFile(err)) return null;
+      throw err;
+    }
+  }
+
   function forUser(userId: UserId): UserPhotos {
     return {
       async save(photo, date) {
@@ -174,19 +212,14 @@ export function createPhotoStore(
         return id;
       },
 
-      async read(id, variant) {
-        if (q.owned.get(id, userId) === undefined) return null;
-        try {
-          return await readFile(fileOf(id, variant));
-        } catch (err) {
-          if (isMissingFile(err)) return null;
-          throw err;
-        }
-      },
+      read: (id, variant) => readOwned(userId, id, variant),
     };
   }
 
-  return {
+  const readerFor = (id: ClientId): PhotoReader =>
+    Object.freeze({ read: (photoId: string, variant: PhotoVariant) => readOwned(id, photoId, variant) });
+
+  const store: PhotoStore = {
     dir,
     forUser,
     removeFiles,
@@ -211,4 +244,6 @@ export function createPhotoStore(
       return { photos, strayFiles: removeStrayFiles(cutoff), skippedUsers };
     },
   };
+
+  return { store, readers: { readerFor } };
 }

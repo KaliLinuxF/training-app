@@ -1,10 +1,15 @@
 import {
   API,
+  coachClientPath,
+  coachClientsPath,
   meResponseSchema,
   USER_HEADER,
   type AdminOverview,
   type ApiErrorCode,
   type AppData,
+  type CoachClientResponse,
+  type CoachClientsResponse,
+  type CoachWindow,
   type ErrorResponse,
   type FoodEstimateRequest,
   type FoodEstimateResponse,
@@ -229,6 +234,15 @@ export const api = {
       request<OkResponse>('POST', API.adminUserAiLimit, { userId, limit }),
     setAiLimits: ({ perUser, global }: { perUser: number; global: number }) =>
       request<OkResponse>('POST', API.adminAiLimits, { perUser, global }),
+  },
+
+  /**
+   * «Клієнти» (admins only; 403 `forbidden` for everyone else, 404 `not_found` for an id that is not a client).
+   * GET only: the coach reads clients' records and never changes them. Online only, never cached on the device.
+   */
+  coach: {
+    clients: (w: CoachWindow) => request<CoachClientsResponse>('GET', coachClientsPath(w)),
+    client: (id: string) => request<CoachClientResponse>('GET', coachClientPath(id)),
   },
 
   pushPublicKey: () => request<PushKeyResponse>('GET', API.pushKey),

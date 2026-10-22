@@ -67,6 +67,33 @@ export interface DataRepos {
   forUser(id: UserId): DataRepo;
 }
 
+/**
+ * A user id that `coach/access.ts#resolveClient` checked to be an existing role-'user' account (docs/coach-cabinet.md
+ * §2.2). Minted nowhere else (coach lint): an admin's `UserId` does not reach a reader.
+ */
+export type ClientId = UserId & { readonly __coachClient: true };
+
+/** Read-only view of one client's records. There is no write method on it (the coach tests pin the key list). */
+export interface DataReader {
+  /** Days, weights, measures and settings — never foods (the foods statement is not run). */
+  read(): Omit<AppData, 'foods'>;
+  /** Same as `DataRepo.settings()`. */
+  settings(): Settings;
+  /** All weigh-ins, oldest first. */
+  weights(): WeightEntry[];
+  /** All measurements, oldest first. */
+  measures(): MeasureEntry[];
+  /** Days with from <= date <= to, oldest first. */
+  daysBetween(from: ISODate, to: ISODate): { date: ISODate; entry: DayEntry }[];
+  /** Earliest / latest date <= `to` that has a day, a weigh-in or a measurement; null when none. */
+  recordSpan(to: ISODate): { first: ISODate | null; last: ISODate | null };
+}
+
+/** Not part of `RouteDeps`: `createApp` hands it only to `createCoachAccess`. */
+export interface DataReaders {
+  readerFor(id: ClientId): DataReader;
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -139,15 +166,48 @@ function foodFromRow(row: Row): FoodItem {
   return food;
 }
 
+/** `createDataAccess(...).repos`: unchanged signature and behaviour (backup, CLI, reminders, tests). */
 export function createDataRepos(
   db: Database,
   now: () => number = Date.now,
   logger: Logger = silentLogger,
 ): DataRepos {
+  return createDataAccess(db, now, logger).repos;
+}
+
+/** The earlier / later of two optional dates. */
+const minDate = (a: ISODate | null, b: ISODate | null): ISODate | null =>
+  a === null ? b : b === null ? a : a < b ? a : b;
+const maxDate = (a: ISODate | null, b: ISODate | null): ISODate | null =>
+  a === null ? b : b === null ? a : a > b ? a : b;
+
+/**
+ * The read-write repos and the read-only readers, on ONE set of prepared statements (docs/coach-cabinet.md §2.2).
+ * `readers` never leaves `createApp` except into `createCoachAccess`.
+ */
+export function createDataAccess(
+  db: Database,
+  now: () => number = Date.now,
+  logger: Logger = silentLogger,
+): { repos: DataRepos; readers: DataReaders } {
   // Prepared once for every user; each statement binds the user id first.
   const q = {
     allDays: db.prepare(
       'SELECT date, food, kcal, trained, types, notes, photos, meals FROM days WHERE user_id = ? ORDER BY date',
+    ),
+    daysBetween: db.prepare(
+      `SELECT date, food, kcal, trained, types, notes, photos, meals FROM days
+       WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date`,
+    ),
+    // Three statements on purpose: a UNION over per-user tables would need a scope-lint exemption.
+    daySpan: db.prepare(
+      'SELECT MIN(date) AS first, MAX(date) AS last FROM days WHERE user_id = ? AND date <= ?',
+    ),
+    weightSpan: db.prepare(
+      'SELECT MIN(date) AS first, MAX(date) AS last FROM weights WHERE user_id = ? AND date <= ?',
+    ),
+    measureSpan: db.prepare(
+      'SELECT MIN(date) AS first, MAX(date) AS last FROM measures WHERE user_id = ? AND date <= ?',
     ),
     getDay: db.prepare(
       'SELECT date, food, kcal, trained, types, notes, photos, meals FROM days WHERE user_id = ? AND date = ?',
@@ -198,22 +258,36 @@ export function createDataRepos(
     clearFoods: db.prepare('DELETE FROM foods WHERE user_id = ?'),
   };
 
-  function forUser(id: UserId): DataRepo {
-    function readSettings(): Settings {
-      const row = q.getSettings.get(id);
-      if (!row) return normalizeSettings(null);
-      try {
-        const parsed: unknown = JSON.parse(text(row, 'value'));
-        // Older rows may miss newer fields: fill them in first, then validate the result.
-        const candidate = normalizeSettings(isRecord(parsed) ? (parsed as Partial<Settings>) : null);
-        const result = settingsSchema.safeParse(candidate);
-        if (result.success) return result.data;
-      } catch {
-        // fall through to defaults
-      }
-      logger.warn(`Stored settings of user ${id} are invalid, serving defaults until the next settings.put`);
-      return normalizeSettings(null);
+  function readSettings(id: UserId): Settings {
+    const row = q.getSettings.get(id);
+    if (!row) return normalizeSettings(null);
+    try {
+      const parsed: unknown = JSON.parse(text(row, 'value'));
+      // Older rows may miss newer fields: fill them in first, then validate the result.
+      const candidate = normalizeSettings(isRecord(parsed) ? (parsed as Partial<Settings>) : null);
+      const result = settingsSchema.safeParse(candidate);
+      if (result.success) return result.data;
+    } catch {
+      // fall through to defaults
     }
+    logger.warn(`Stored settings of user ${id} are invalid, serving defaults until the next settings.put`);
+    return normalizeSettings(null);
+  }
+
+  const readWeights = (id: UserId): WeightEntry[] =>
+    q.allWeights.all(id).map((row) => ({ date: text(row, 'date'), kg: num(row, 'kg') }));
+
+  const readMeasures = (id: UserId): MeasureEntry[] => q.allMeasures.all(id).map(measureFromRow);
+
+  /** Everything of `AppData` but «Часті страви»: what both `forUser().read()` and `reader.read()` start from. */
+  function readCore(id: UserId): Omit<AppData, 'foods'> {
+    const days: Record<ISODate, DayEntry> = {};
+    for (const row of q.allDays.all(id)) days[text(row, 'date')] = dayFromRow(row, logger);
+    return { days, weights: readWeights(id), measures: readMeasures(id), settings: readSettings(id) };
+  }
+
+  function forUser(id: UserId): DataRepo {
+    const ownSettings = (): Settings => readSettings(id);
 
     const writeSettings = (s: Settings): void => {
       q.putSettings.run(id, JSON.stringify(s), now());
@@ -291,22 +365,17 @@ export function createDataRepos(
           return;
         case 'settings.put':
           // An absent mealTypes / macroGoals (old clients) keeps the stored value.
-          return writeSettings(mergeSettingsPut(readSettings(), op.value));
+          return writeSettings(mergeSettingsPut(ownSettings(), op.value));
       }
     }
 
     return {
       read(): AppData {
-        const days: Record<ISODate, DayEntry> = {};
-        for (const row of q.allDays.all(id)) days[text(row, 'date')] = dayFromRow(row, logger);
-        const weights: WeightEntry[] = q.allWeights
-          .all(id)
-          .map((row) => ({ date: text(row, 'date'), kg: num(row, 'kg') }));
-        const measures = q.allMeasures.all(id).map(measureFromRow);
-        return { days, weights, measures, foods: readFoods(), settings: readSettings() };
+        const { days, weights, measures, settings } = readCore(id);
+        return { days, weights, measures, foods: readFoods(), settings };
       },
 
-      settings: readSettings,
+      settings: ownSettings,
 
       apply(ops) {
         const at = now();
@@ -350,7 +419,7 @@ export function createDataRepos(
       setTimezone(timeZone) {
         const zone = canonicalTimeZone(timeZone);
         return transaction(db, () => {
-          const current = readSettings();
+          const current = ownSettings();
           if (canonicalTimeZone(current.timezone) === zone) return null;
           writeSettings({ ...current, timezone: zone });
           return zone;
@@ -372,5 +441,31 @@ export function createDataRepos(
     };
   }
 
-  return { forUser };
+  /** Read-only: nothing here writes, and foods are never read (docs/coach-cabinet.md C11). */
+  function readerFor(id: ClientId): DataReader {
+    function recordSpan(to: ISODate): { first: ISODate | null; last: ISODate | null } {
+      let first: ISODate | null = null;
+      let last: ISODate | null = null;
+      for (const statement of [q.daySpan, q.weightSpan, q.measureSpan]) {
+        const row = statement.get(id, to);
+        if (!row) continue;
+        first = minDate(first, textOrNull(row, 'first'));
+        last = maxDate(last, textOrNull(row, 'last'));
+      }
+      return { first, last };
+    }
+    return Object.freeze({
+      read: (): Omit<AppData, 'foods'> => readCore(id),
+      settings: (): Settings => readSettings(id),
+      weights: (): WeightEntry[] => readWeights(id),
+      measures: (): MeasureEntry[] => readMeasures(id),
+      daysBetween: (from: ISODate, to: ISODate): { date: ISODate; entry: DayEntry }[] =>
+        q.daysBetween
+          .all(id, from, to)
+          .map((row) => ({ date: text(row, 'date'), entry: dayFromRow(row, logger) })),
+      recordSpan,
+    });
+  }
+
+  return { repos: { forUser }, readers: { readerFor } };
 }
