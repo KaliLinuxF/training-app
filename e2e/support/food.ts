@@ -59,7 +59,37 @@ export interface FoodMocks {
   estimates: Record<string, unknown>[];
 }
 
+/**
+ * Why a mocked status is one the server could never send, or null when it is fine. The server answers
+ * `remainingToday = max(0, min(own limit − used, global ceiling − used))`, so the count is a whole number ≥ 0 and
+ * never above `limitToday` (when that is sent). A spec that wants a malformed answer on purpose routes
+ * `/api/food/status` itself instead of going through `mockFood`.
+ */
+export function foodStatusProblem(status: FoodStatusResponse): string | null {
+  const { remainingToday: left, limitToday: limit } = status;
+  if (!Number.isInteger(left) || left < 0) return `remainingToday must be a whole number ≥ 0, got ${left}`;
+  if (limit === undefined) return null;
+  if (!Number.isInteger(limit) || limit < 0) return `limitToday must be a whole number ≥ 0, got ${limit}`;
+  if (left > limit) return `remainingToday (${left}) is above limitToday (${limit})`;
+  return null;
+}
+
+function checkedStatus(status: FoodStatusResponse): FoodStatusResponse {
+  const problem = foodStatusProblem(status);
+  if (problem) throw new Error(`mockFood: impossible food status: ${problem}`);
+  return status;
+}
+
+/**
+ * The default mocked status: AI on, 3 of the default 40 per-user estimates used (`DEFAULT_AI_LIMITS.perUser`), the
+ * same pair the «Акаунт» specs show as «Сьогодні ще 37 з 40». Above 10 left, the meal editor shows no hint.
+ */
+export const DEFAULT_FOOD_STATUS: Readonly<FoodStatusResponse> = Object.freeze(
+  checkedStatus({ enabled: true, remainingToday: 37, limitToday: 40 }),
+);
+
 export interface FoodMockOptions {
+  /** Must be a status the server could send (see `foodStatusProblem`); `mockFood` throws otherwise. */
   status?: FoodStatusResponse;
   /** Answer for the estimate endpoint: a response body, or an error `{ status, body }`. */
   estimate?: FoodEstimateResponse | { status: number; body: { error: string; message: string } };
@@ -72,7 +102,7 @@ const isError = (
 
 export async function mockFood(page: Page, opts: FoodMockOptions = {}): Promise<FoodMocks> {
   const mocks: FoodMocks = { estimates: [] };
-  const status = opts.status ?? { enabled: true, remainingToday: 42 };
+  const status = opts.status ? checkedStatus(opts.status) : { ...DEFAULT_FOOD_STATUS };
   const estimate = opts.estimate ?? TEXT_ESTIMATE;
 
   await page.route('**/api/food/status', (route) => route.fulfill({ json: status }));

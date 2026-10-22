@@ -59,6 +59,14 @@ async function expectInViewport(page: Page, locator: Locator, what: string): Pro
   expect(box.y + box.height, `${what}: bottom`).toBeLessThanOrEqual(view.height);
 }
 
+/**
+ * A sheet that just opened has stopped moving: even with reduced motion its entry keeps the panel translated for a
+ * frame or two after it is «visible» (a stacked sheet starts ~650px down), so anything measured earlier is off.
+ */
+async function settled(sheet: Locator): Promise<void> {
+  await expect.poll(() => sheet.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+}
+
 /** The item editor stacked over the meal editor. */
 const itemEditor = (page: Page, heading: 'Позиція' | 'Нова позиція' = 'Позиція') =>
   page.getByRole('dialog', { name: heading, exact: true });
@@ -559,6 +567,7 @@ for (const width of [390, 320]) {
       // A new meal: the four default chips scroll, «+ Свій» stays at the end of the line.
       const sheet = await app.newMeal();
       await expect(addTypeButton(sheet)).toBeVisible();
+      await settled(sheet);
       await expectInViewport(page, addTypeButton(sheet), '«+ Свій» of a new meal');
       await page.keyboard.press('Escape');
       await app.expectSheetClosed();
@@ -570,6 +579,7 @@ for (const width of [390, 320]) {
       await expect(editor).toBeVisible();
       const chip = app.mealType(editor, 'Перекус');
       await expect(chip).toHaveAttribute('aria-pressed', 'true');
+      await settled(editor);
       await expectInViewport(page, addTypeButton(editor), '«+ Свій» of a saved meal');
       // The scrolling row (the group's parent) shows chips whole between its 18px / 20px paddings.
       const scroller = editor.getByRole('group', { name: 'Тип прийому їжі' }).locator('xpath=..');

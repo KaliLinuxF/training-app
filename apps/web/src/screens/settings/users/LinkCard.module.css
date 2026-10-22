@@ -1,0 +1,67 @@
+/*
+ * A fresh one-time link: a lavender-edged card, so it reads as «new, act on it» next to the plain ones. The element
+ * part outranks Card's one-class border in any bundle order.
+ */
+section.card {
+  border-color: var(--accLine);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r12);
+  background: var(--accT);
+  color: var(--accD);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.title:focus {
+  outline: none;
+}
+
+.title:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The whole URL in one line; it scrolls inside the field, never past the card. */
+.url {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+}
+
+/* «Посилання видно тільки зараз…» and «Готово» beside it (under it on a narrow card). */
+.foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 12px;
+}
+
+.foot > p {
+  flex: 1 1 180px;
+  min-width: 0;
+}

@@ -60,6 +60,11 @@ describe('static web app', () => {
       '/progress',
       '/settings',
       '/settings/reminders',
+      '/settings/account',
+      '/settings/users',
+      // One-time links: the token is in the fragment, which never reaches the server.
+      '/invite',
+      '/reset',
       // Old bookmarks and delivered test notifications: the client redirects to /settings/reminders.
       '/reminders/',
       '/calendar?date=2026-10-10',

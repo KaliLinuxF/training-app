@@ -1,4 +1,5 @@
 import {
+  API,
   applyOps,
   defaultSettings,
   emptyData,
@@ -21,7 +22,7 @@ import {
   type Weekday,
 } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { createTestServer, json, seededRandom, type TestServer } from './helpers';
+import { createTestServer, json, PASSWORD, seededRandom, sessionCookie, type TestServer } from './helpers';
 
 const day = (patch: Partial<DayEntry> = {}): DayEntry => ({
   food: 'Омлет',
@@ -142,6 +143,37 @@ describe('POST /api/ops', () => {
     const res = await postOps(s, cookie, ops);
     expect(res.status).toBe(400);
     expect(await json(res)).toMatchObject({ error: 'invalid_op', index: 0 });
+  });
+
+  it('an old cached client (password-only login, no X-Legko-User) still syncs into anna’s own data', async () => {
+    const s = await createTestServer();
+    // The pre-v4 bundle: no username (the `legko` alias, D24) → a legacy session that may sync without the header.
+    const login = await s.call(API.login, { body: { password: PASSWORD } });
+    expect(login.status).toBe(200);
+    const cookie = sessionCookie(login) ?? '';
+    const ops: Op[] = [{ kind: 'weight.put', date: '2026-10-10', kg: 65.4 }];
+    const res = await s.call(API.ops, { cookie, body: { ops }, userHeader: null });
+    expect(res.status).toBe(200);
+    const read = await s.call(API.data, { cookie, userHeader: null });
+    expect((await json<AppData>(read)).weights).toEqual([{ date: '2026-10-10', kg: 65.4 }]);
+    expect(s.data.forUser(s.anna.id).read().weights).toEqual([{ date: '2026-10-10', kg: 65.4 }]);
+    expect(s.data.forUser(s.admin.id).read().weights).toEqual([]);
+  });
+
+  it('applies to the signed-in account: the same ops by two users land in two separate copies', async () => {
+    const s = await createTestServer();
+    const anna = await s.login('anna');
+    const olya = await s.createUser('olya');
+    const ops: Op[] = [
+      { kind: 'day.put', date: '2026-10-10', value: day() },
+      { kind: 'food.use', date: '2026-10-10', value: { name: 'Борщ', portion: '', kcal: 180 } },
+    ];
+    await postOps(s, anna, ops);
+    await postOps(s, olya.cookie, ops);
+    await postOps(s, olya.cookie, [{ kind: 'day.delete', date: '2026-10-10' }]);
+    expect(await getData(s, anna)).toEqual(applyOps(emptyData(), ops));
+    expect((await getData(s, olya.cookie)).days).toEqual({});
+    expect((await getData(s, olya.cookie)).foods).toEqual(applyOps(emptyData(), ops).foods);
   });
 
   it('rejects malformed batches with bad_request', async () => {

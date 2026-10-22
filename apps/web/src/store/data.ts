@@ -5,10 +5,11 @@
  * - `useAppData()` / `useSettings()` / `useSyncState()` — React hooks.
  * - `dataActions.*` — every change goes through here: it is applied optimistically,
  *   persisted on the device (IndexedDB) and queued for the server (works offline).
- * - `startSync()` — called by `AuthGate` after login; loads the device cache, then the server
- *   copy, and keeps flushing the queue. Returns a cleanup function.
- * - `flushNow()`, `resetLocal()`, `onUnauthorized()`, `hasDeviceCache()`, `refreshFromServer()`,
- *   `clearSyncError()` — used by the auth layer and settings screens.
+ * - `startSync(id)` — called by `AuthGate` once the device user is known; loads that user's device cache, then
+ *   the server copy, and keeps flushing the queue (every request carries `X-Legko-User: id`). Returns a cleanup.
+ * - `flushNow()`, `resetLocal()`, `onUnauthorized()`, `onUserMismatch()`, `hasDeviceCache()`,
+ *   `refreshFromServer()`, `clearSyncError()` — used by the auth layer and settings screens; `bindOwner()`,
+ *   `adoptLegacy()`, `rehydrate()`, `resumeSync()`, `stopSync()` — by the auth layer only.
  *
  * Implementation: `state.ts` (zustand), `cache.ts` (IndexedDB), `sync.ts` (outbox + server).
  */
@@ -31,13 +32,21 @@ import { commitOps, importAll } from './sync';
 
 export { useDataStore, type DataStore, type SyncState } from './state';
 export {
+  adoptLegacy,
+  bindOwner,
+  boundOwner,
   clearSyncError,
   flushNow,
   hasDeviceCache,
+  isSyncPaused,
   onUnauthorized,
+  onUserMismatch,
   refreshFromServer,
+  rehydrate,
   resetLocal,
+  resumeSync,
   startSync,
+  stopSync,
 } from './sync';
 
 export const useAppData = (): AppData => useDataStore((s) => s.data);

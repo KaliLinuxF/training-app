@@ -3,8 +3,15 @@
 export const PORT = 3399;
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
 
-/** Local test credential: the e2e server applies it as `DEV_PASSWORD` (development mode only). */
+/**
+ * Local test accounts, created by the e2e server's dev bootstrap (development mode only) from `DEV_USERNAME` /
+ * `DEV_PASSWORD` (the ordinary user «anna», the legacy owner) and `DEV_ADMIN_USERNAME` / `DEV_ADMIN_PASSWORD` (the
+ * one admin). Specs never change the password, name, role or state of either: use `createUser()` for that.
+ */
+export const USERNAME = 'anna';
 export const PASSWORD = 'e2e-pass';
+export const ADMIN_USERNAME = 'admin';
+export const ADMIN_PASSWORD = 'e2e-admin-pass';
 
 export const TIMEZONE = 'Europe/Kyiv';
 

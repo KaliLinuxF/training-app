@@ -1,20 +1,40 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { backupFileName, createBackupJob, pruneBackups, writeBackup } from './backup';
-import { createDataRepo } from './db/data';
+import {
+  backupFileName,
+  createBackupJob,
+  numberedSnapshotName,
+  pruneBackups,
+  writeBackup,
+  writeSnapshotOnce,
+} from './backup';
+import { createDataRepos, type DataRepo } from './db/data';
 import { openDatabase } from './db/open';
 import { sqlite, type Database } from './db/sqlite';
+import { createUserRepo } from './db/users';
 import { createLogger, type Logger } from './logger';
 
 let dir: string;
 let db: Database;
+/** One account's data (backups hold the whole database). */
+let repo: DataRepo;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'legko-backup-'));
   db = openDatabase(':memory:');
-  createDataRepo(db).apply([{ kind: 'weight.put', date: '2026-10-10', kg: 65.4 }]);
+  const anna = createUserRepo(db).create({ username: 'anna', role: 'user', passwordHash: null, now: 0 }).id;
+  repo = createDataRepos(db).forUser(anna);
+  repo.apply([{ kind: 'weight.put', date: '2026-10-10', kg: 65.4 }]);
 });
 
 afterEach(() => {
@@ -44,7 +64,7 @@ describe('writeBackup', () => {
 
   it('replaces an existing backup for the same date', () => {
     writeBackup(db, dir, '2026-10-10');
-    createDataRepo(db).apply([{ kind: 'weight.put', date: '2026-10-11', kg: 65 }]);
+    repo.apply([{ kind: 'weight.put', date: '2026-10-11', kg: 65 }]);
     const file = writeBackup(db, dir, '2026-10-10');
     const copy = new (sqlite().DatabaseSync)(file, { readOnly: true });
     try {
@@ -53,6 +73,54 @@ describe('writeBackup', () => {
       copy.close();
     }
     expect(readdirSync(dir)).toEqual(['legko-2026-10-10.db']);
+  });
+});
+
+describe('writeSnapshotOnce (pre-migration / pre-downgrade snapshots)', () => {
+  const weights = (file: string): number => {
+    const copy = new (sqlite().DatabaseSync)(file, { readOnly: true });
+    try {
+      return Number(copy.prepare('SELECT COUNT(*) AS n FROM weights').get()?.n);
+    } finally {
+      copy.close();
+    }
+  };
+
+  it('never replaces an existing file: later copies get -2, -3, … and the first stays as it was', () => {
+    const name = join(dir, 'backups', 'legko-pre-v4-2026-10-22.db');
+    expect(writeSnapshotOnce(db, name)).toBe(name);
+    const firstBytes = readFileSync(name);
+    repo.apply([{ kind: 'weight.put', date: '2026-10-11', kg: 65 }]);
+    expect(writeSnapshotOnce(db, name)).toBe(join(dir, 'backups', 'legko-pre-v4-2026-10-22-2.db'));
+    repo.apply([{ kind: 'weight.put', date: '2026-10-12', kg: 64.8 }]);
+    expect(writeSnapshotOnce(db, name)).toBe(join(dir, 'backups', 'legko-pre-v4-2026-10-22-3.db'));
+
+    expect(readFileSync(name).equals(firstBytes)).toBe(true);
+    expect(weights(name)).toBe(1);
+    expect(weights(numberedSnapshotName(name, 2))).toBe(2);
+    expect(weights(numberedSnapshotName(name, 3))).toBe(3);
+    // No temp file is left behind.
+    expect(readdirSync(join(dir, 'backups')).sort()).toEqual([
+      'legko-pre-v4-2026-10-22-2.db',
+      'legko-pre-v4-2026-10-22-3.db',
+      'legko-pre-v4-2026-10-22.db',
+    ]);
+  });
+
+  it('fills the first free number and keeps the copies out of the daily prune', () => {
+    const name = join(dir, 'legko-pre-down-v4-2026-10-22.db');
+    writeFileSync(name, 'not mine');
+    writeFileSync(numberedSnapshotName(name, 2), 'not mine either');
+    expect(writeSnapshotOnce(db, name)).toBe(join(dir, 'legko-pre-down-v4-2026-10-22-3.db'));
+    expect(readFileSync(name, 'utf8')).toBe('not mine');
+    expect(pruneBackups(dir, 0)).toEqual([]);
+    expect(readdirSync(dir)).toHaveLength(3);
+  });
+
+  it('numbers names', () => {
+    expect(numberedSnapshotName('/b/legko-pre-v4-2026-10-22.db', 1)).toBe('/b/legko-pre-v4-2026-10-22.db');
+    expect(numberedSnapshotName('/b/legko-pre-v4-2026-10-22.db', 2)).toBe('/b/legko-pre-v4-2026-10-22-2.db');
+    expect(numberedSnapshotName('/b/snapshot', 3)).toBe('/b/snapshot-3');
   });
 });
 

@@ -57,6 +57,35 @@ describe('export / import', () => {
     expect(await json(await other.call('/api/data', { cookie: otherCookie }))).toEqual(sample);
   });
 
+  it('export is a plain download link (no X-Legko-User) named after the day in the user’s own zone', async () => {
+    const s = await createTestServer();
+    const anna = await s.login('anna');
+    const olya = await s.createUser('olya');
+    const zone = (cookie: string, timezone: string) =>
+      s.call('/api/ops', {
+        cookie,
+        body: { ops: [{ kind: 'settings.put', value: { ...defaultSettings(), timezone } }] },
+      });
+    await zone(anna, 'Pacific/Kiritimati');
+    await zone(olya.cookie, 'Pacific/Pago_Pago');
+    // 11:00 UTC: already 10 October on Kiritimati (UTC+14), still 9 October in Pago Pago (UTC−11).
+    s.clock.now = Date.UTC(2026, 9, 9, 11, 0);
+    const disposition = async (cookie: string) =>
+      (await s.call('/api/export', { cookie, userHeader: null })).headers.get('Content-Disposition');
+    expect(await disposition(anna)).toBe('attachment; filename="legko-2026-10-10.json"');
+    expect(await disposition(olya.cookie)).toBe('attachment; filename="legko-2026-10-09.json"');
+  });
+
+  it('import replaces the importer’s data only', async () => {
+    const s = await createTestServer();
+    const anna = await s.login('anna');
+    const olya = await s.createUser('olya');
+    expect((await s.call('/api/import', { cookie: anna, body: sample })).status).toBe(200);
+    expect((await s.call('/api/import', { cookie: olya.cookie, body: emptyData() })).status).toBe(200);
+    expect(await json(await s.call('/api/export', { cookie: anna }))).toEqual(sample);
+    expect(await json(await s.call('/api/export', { cookie: olya.cookie }))).toEqual(emptyData());
+  });
+
   it('replaces existing data instead of merging', async () => {
     const s = await createTestServer();
     const cookie = await s.login();

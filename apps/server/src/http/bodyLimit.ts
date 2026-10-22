@@ -8,10 +8,11 @@ import type { AppEnv } from './types';
  * (`app.post(path, auth, limitBody(…), handler)`): Hono's bodyLimit reads a body that has no
  * Content-Length (chunked, or HTTP/2 through Caddy) into memory up to the cap before the next
  * handler runs, so a cap in front of `auth` would let anyone make the server buffer that much.
- * Login is the only body read without a session, and it is tiny.
+ * Login and the four one-time-link endpoints are the only bodies read without a session; they are tiny and sit
+ * behind a per-address throttle.
  */
 export const BODY_LIMITS = {
-  /** `{ password }` (≤ 200 characters). */
+  /** `{ username?, password }`, `{ token, username?, password? }` (≤ 64 / 200 / 43 characters). */
   login: 4 * 1024,
   /**
    * A full import of years of data, or 500 ops at the schema's limits: ≈ 10.5 MB for `day.put` (which never
@@ -20,7 +21,7 @@ export const BODY_LIMITS = {
   bulk: 16 * 1024 * 1024,
   /** Full photo (≤ 2.8 M base64 chars) + thumbnail (≤ 0.4 M) + text, as JSON: ≈ 3.3 MB at most. */
   foodEstimate: 4 * 1024 * 1024,
-  /** Push subscribe / unsubscribe (≈ 2.5 KB at the schema limits). */
+  /** Push subscribe / unsubscribe (≈ 2.5 KB at the schema limits), account and admin requests (< 1 KB). */
   small: 64 * 1024,
 } as const;
 

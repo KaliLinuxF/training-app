@@ -19,6 +19,7 @@
  * Line icons of the kit: 24×24 grid, content inside 3–21, drawn with `stroke="currentColor"` (1.8px, round caps and
  * joins — soft like the 1b shapes). `home`, `calendar`, `chart` and `bell` are the tab-bar glyphs from
  * `shell/NavIcon.tsx`; `gear` is the ISC-licensed lucide «settings» cog scaled into the 3–21 box (no dependency).
+ * `user`, `users`, `link` and `key` are the account glyphs («Акаунт», «Користувачі», one-time links).
  */
 export type IconName =
   | 'home'
@@ -35,6 +36,10 @@ export type IconName =
   | 'theme'
   | 'data'
   | 'logout'
+  | 'user'
+  | 'users'
+  | 'link'
+  | 'key'
   | 'chevronRight'
   | 'chevronLeft';
 
@@ -106,6 +111,26 @@ export const ICON_PATHS: Readonly<Record<IconName, readonly string[]>> = {
   data: ['M7 18.5h10a3.75 3.75 0 0 0 0-7.5 5 5 0 0 0-10 0 3.75 3.75 0 0 0 0 7.5Z'],
   /** Door frame and an arrow leaving through it. */
   logout: ['M14 4H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7', 'M10.5 12H20', 'M16.5 8.5 20 12l-3.5 3.5'],
+
+  // Accounts («Акаунт», «Користувачі», one-time links)
+  /** Head and shoulders. */
+  user: ['M15.8 8a3.8 3.8 0 1 1-7.6 0 3.8 3.8 0 0 1 7.6 0Z', 'M4.8 20a7.2 7.2 0 0 1 14.4 0'],
+  /** Two people: one in front, the other half behind it on the right. */
+  users: [
+    'M12.7 8.5a3.2 3.2 0 1 1-6.4 0 3.2 3.2 0 0 1 6.4 0Z',
+    'M3.5 19.5a6 6 0 0 1 12 0',
+    'M15.4 5.4a3.1 3.1 0 0 1 0 6.2',
+    'M17.6 13.9a5.6 5.6 0 0 1 3.2 5.6',
+  ],
+  /** Two chain halves joined by a bar. */
+  link: ['M9.6 8.2H7.4a3.8 3.8 0 0 0 0 7.6h2.2', 'M14.4 8.2h2.2a3.8 3.8 0 0 1 0 7.6h-2.2', 'M8.6 12h6.8'],
+  /** Round bow at the lower left, a shaft to the upper right with two teeth. */
+  key: [
+    'M12 16a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
+    'M10.9 13.1 19.5 4.5',
+    'M16.5 7.5l2.5 2.5',
+    'M14.2 9.8l1.8 1.8',
+  ],
 
   // Navigation
   chevronRight: ['M9.5 6l6 6-6 6'],

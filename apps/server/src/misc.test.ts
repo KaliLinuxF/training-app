@@ -21,9 +21,15 @@ describe('loadConfig', () => {
       production: false,
       trustProxy: false,
       logLevel: 'info',
-      devPassword: null,
+      devUsers: [],
       vapid: { subject: DEFAULT_PUBLIC_ORIGIN, publicKey: null, privateKey: null },
-      foodAi: { apiKey: null, model: 'claude-opus-5-5', dailyLimit: 60 },
+      foodAi: {
+        apiKey: null,
+        model: 'claude-opus-5-5',
+        dailyLimit: 150,
+        userDailyLimit: 40,
+        sources: { dailyLimit: 'default', userDailyLimit: 'default' },
+      },
     });
   });
 
@@ -32,9 +38,26 @@ describe('loadConfig', () => {
       { ANTHROPIC_API_KEY: ' sk-ant-test ', FOOD_AI_MODEL: 'claude-sonnet-5-5', FOOD_DAILY_LIMIT: '10' },
       cwd,
     );
-    expect(c.foodAi).toEqual({ apiKey: 'sk-ant-test', model: 'claude-sonnet-5-5', dailyLimit: 10 });
+    expect(c.foodAi).toEqual({
+      apiKey: 'sk-ant-test',
+      model: 'claude-sonnet-5-5',
+      dailyLimit: 10,
+      userDailyLimit: 40,
+      sources: { dailyLimit: 'env', userDailyLimit: 'default' },
+    });
     expect(loadConfig({ ANTHROPIC_API_KEY: '  ' }, cwd).foodAi.apiKey).toBeNull();
     expect(loadConfig({ FOOD_DAILY_LIMIT: '0' }, cwd).foodAi.dailyLimit).toBe(0);
+  });
+
+  it('FOOD_DAILY_LIMIT is the global ceiling (default 150), FOOD_USER_DAILY_LIMIT the per-user one (default 40)', () => {
+    const c = loadConfig({ FOOD_DAILY_LIMIT: '10000', FOOD_USER_DAILY_LIMIT: '1000' }, cwd).foodAi;
+    expect(c).toMatchObject({
+      dailyLimit: 10_000,
+      userDailyLimit: 1000,
+      sources: { dailyLimit: 'env', userDailyLimit: 'env' },
+    });
+    expect(loadConfig({ FOOD_USER_DAILY_LIMIT: '0' }, cwd).foodAi.userDailyLimit).toBe(0);
+    expect(loadConfig({}, cwd).foodAi).toMatchObject({ dailyLimit: 150, userDailyLimit: 40 });
   });
 
   it('reads the environment', () => {
@@ -62,9 +85,32 @@ describe('loadConfig', () => {
     });
   });
 
-  it('honours DEV_PASSWORD only outside production', () => {
-    expect(loadConfig({ DEV_PASSWORD: 'dev-password' }, cwd).devPassword).toBe('dev-password');
-    expect(loadConfig({ DEV_PASSWORD: 'dev-password', NODE_ENV: 'production' }, cwd).devPassword).toBeNull();
+  it('builds the dev accounts from DEV_* only outside production', () => {
+    expect(loadConfig({ DEV_PASSWORD: 'dev-password' }, cwd).devUsers).toEqual([
+      { username: 'anna', password: 'dev-password', role: 'user' },
+    ]);
+    expect(
+      loadConfig(
+        {
+          DEV_USERNAME: 'olya',
+          DEV_PASSWORD: 'dev-password',
+          DEV_ADMIN_USERNAME: 'boss',
+          DEV_ADMIN_PASSWORD: 'dev-admin-password',
+        },
+        cwd,
+      ).devUsers,
+    ).toEqual([
+      { username: 'olya', password: 'dev-password', role: 'user' },
+      { username: 'boss', password: 'dev-admin-password', role: 'admin' },
+    ]);
+    expect(loadConfig({ DEV_ADMIN_PASSWORD: 'x' }, cwd).devUsers).toEqual([
+      { username: 'admin', password: 'x', role: 'admin' },
+    ]);
+    expect(
+      loadConfig({ DEV_PASSWORD: 'dev-password', DEV_ADMIN_PASSWORD: 'x', NODE_ENV: 'production' }, cwd)
+        .devUsers,
+    ).toEqual([]);
+    expect(loadConfig({}, cwd).devUsers).toEqual([]);
   });
 
   it.each([
@@ -77,6 +123,10 @@ describe('loadConfig', () => {
     [{ FOOD_DAILY_LIMIT: 'many' }],
     [{ FOOD_DAILY_LIMIT: '-1' }],
     [{ FOOD_DAILY_LIMIT: '2.5' }],
+    [{ FOOD_DAILY_LIMIT: '10001' }],
+    [{ FOOD_USER_DAILY_LIMIT: '1001' }],
+    [{ FOOD_USER_DAILY_LIMIT: '-1' }],
+    [{ FOOD_USER_DAILY_LIMIT: 'lots' }],
   ])('rejects %o', (env) => {
     expect(() => loadConfig(env, cwd)).toThrow(ConfigError);
   });

@@ -1,23 +1,27 @@
 import type { ReactNode, Ref } from 'react';
+import { useCurrentUser } from '@/auth/auth';
 import type { ThemePref } from '@/lib/theme';
 import { useSettings, useSyncState } from '@/store/data';
 import { cx, fullRowClass, ListGroup, ListRow, Pill, ScreenHeader } from '@/ui';
 import {
+  accountSummary,
   goalsSummary,
   mealTypesSummary,
   notifBadge,
   remindersSummary,
   SECTION_ICONS,
   SECTION_TITLES,
-  SETTINGS_GROUPS,
+  settingsGroups,
   settingsPath,
+  showsCaption,
   syncShort,
   themeSummary,
   typesSummary,
+  usersSummary,
   type SettingsSectionId,
 } from './listModel';
-import { LogoutRow } from './LogoutRow';
 import { SyncDot } from './SyncDot';
+import { useAdminOverview } from './users/adminOverview';
 import type { PushStatusState } from './usePushStatus';
 import s from './SettingsList.module.css';
 
@@ -35,9 +39,11 @@ export interface SettingsListProps {
 export const SETTINGS_CAPTION = 'Легко · трекер схуднення';
 
 /**
- * «Налаштування» list: the header (phone), two groups of section links with a one-line summary each, «Вийти» in its
- * own group and the app caption. Renders grid / flex items for its parent: the phone's ContentGrid (classic layout,
- * right under the header, gap 14) or the desktop's sticky left column.
+ * «Налаштування» list: the header (phone), the groups of section links with a one-line summary each — the last
+ * group is the account («Акаунт» = the username; «Користувачі» = how many accounts, admins only), where the
+ * «Вийти» card used to be (D30; «Вийти» is on the «Акаунт» page now) — and the app caption (hidden while the
+ * «Користувачі» row shows, so the list still fits one iPhone screen). Renders grid / flex items for its parent: the
+ * phone's ContentGrid (classic layout, right under the header, gap 14) or the desktop's sticky left column.
  *
  * Desktop: the row of the section on screen is `current` and `replace`s, so clicking it again adds no history entry
  * (like a plain link to the page you are on). Its push badge is lifted onto the card colour there (see the CSS).
@@ -46,6 +52,10 @@ export function SettingsList({ current, push, themePref, showHeader, ref }: Sett
   const settings = useSettings();
   const sync = syncShort(useSyncState());
   const badge = notifBadge(push.status);
+  const user = useCurrentUser();
+  const isAdmin = user?.role === 'admin';
+  const { overview } = useAdminOverview(isAdmin ? user.id : null);
+  const groups = settingsGroups(isAdmin);
 
   const values: Record<SettingsSectionId, ReactNode> = {
     reminders: remindersSummary(settings.rem),
@@ -59,13 +69,15 @@ export function SettingsList({ current, push, themePref, showHeader, ref }: Sett
         {sync.text}
       </span>
     ),
+    account: accountSummary(user),
+    users: usersSummary(overview),
   };
 
   return (
     <>
       {showHeader && <ScreenHeader title="Налаштування" />}
       <nav ref={ref} aria-label="Розділи налаштувань" className={cx(s.nav, fullRowClass)}>
-        {SETTINGS_GROUPS.map((group) => (
+        {groups.map((group) => (
           <ListGroup key={group.join()}>
             {group.map((id) => (
               <ListRow
@@ -90,10 +102,7 @@ export function SettingsList({ current, push, themePref, showHeader, ref }: Sett
           </ListGroup>
         ))}
       </nav>
-      <ListGroup full>
-        <LogoutRow />
-      </ListGroup>
-      <p className={cx(s.caption, fullRowClass)}>{SETTINGS_CAPTION}</p>
+      {showsCaption(groups) && <p className={cx(s.caption, fullRowClass)}>{SETTINGS_CAPTION}</p>}
     </>
   );
 }

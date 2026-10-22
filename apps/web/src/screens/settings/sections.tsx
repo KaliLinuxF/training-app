@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { ISODate, Settings } from '@legko/shared';
 import type { ThemePref } from '@/lib/theme';
+import { AccountPage } from './account/AccountPage';
 import { AppearanceCard } from './AppearanceCard';
 import { DataCard } from './DataCard';
 import { GoalsCard } from './GoalsCard';
@@ -11,6 +12,7 @@ import { REMINDER_ORDER } from './model';
 import { NotificationsCard } from './NotificationsCard';
 import { ReminderCard } from './ReminderCard';
 import type { PushStatusState } from './usePushStatus';
+import { UsersPage } from './users/UsersPage';
 import { WorkoutTypesCard } from './WorkoutTypesCard';
 
 /** What every section body gets from SettingsScreen (the per-device state is lifted there, see D27). */
@@ -47,4 +49,8 @@ export const SECTION_BODIES: Readonly<Record<SettingsSectionId, (props: SectionB
     <AppearanceCard pref={themePref} onChange={setThemePref} inPane={headingLevel === 'h3'} />
   ),
   data: () => <DataCard />,
+  // The signed-in account: profile, password, login name, AI left today and «Вийти» (moved off the list, D30).
+  account: ({ headingLevel }) => <AccountPage headingLevel={headingLevel} />,
+  // Admins only (SettingsScreen redirects everyone else): only the admin API, never anyone's records.
+  users: ({ headingLevel }) => <UsersPage headingLevel={headingLevel} />,
 };

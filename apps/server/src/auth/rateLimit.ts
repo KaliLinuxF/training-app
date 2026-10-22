@@ -34,7 +34,43 @@ export const LOGIN_GLOBAL_LIMIT: Pick<RateLimiterOptions, 'maxFailures' | 'windo
   windowMs: 15 * 60_000,
 };
 
+/**
+ * Failed logins per username key (in memory, also for names that do not exist), so many addresses cannot take turns
+ * guessing one account's password (docs/multi-user.md §3.5).
+ */
+export const USERNAME_LIMIT: RateLimiterOptions = { maxFailures: 10, windowMs: 15 * 60_000 };
+
+/**
+ * Failures per client address (IPv6 per /64, via `byAddress`) on the four public link endpoints (`410` answers and
+ * taken names on accept); a successful accept / complete resets that address.
+ */
+export const LINK_LIMIT: RateLimiterOptions = { maxFailures: 10, windowMs: 15 * 60_000 };
+
+/** Wrong current passwords per user id on `/api/account/*` (counted before the hash check, reset after a right one). */
+export const PASSWORD_LIMIT: RateLimiterOptions = { maxFailures: 5, windowMs: 15 * 60_000 };
+
+/**
+ * Attempts per user id on `/api/account/*`, successful or not: a caller who knows the password cannot loop scrypt or
+ * probe names.
+ */
+export const ACCOUNT_CHANGE_LIMIT: RateLimiterOptions = { maxFailures: 10, windowMs: 3600_000 };
+
+/**
+ * SUCCESSFUL logins, counted separately per username key and per client address (IPv6 per /64): someone who knows a
+ * password cannot loop correct logins to keep the shared scrypt gate busy for everybody or mint sessions without end
+ * (each user also keeps at most `MAX_SESSIONS_PER_USER` sessions). Checked before the hash check, recorded after a
+ * match. The production default; development (the e2e suite signs in hundreds of times per run) has no such limit.
+ */
+export const LOGIN_SUCCESS_LIMIT: RateLimiterOptions = { maxFailures: 30, windowMs: 3600_000 };
+
 const NOT_LIMITED: RateLimitDecision = { limited: false, retryAfter: 0 };
+
+/** A limiter that never limits (the development default of the login success limit). */
+export const UNLIMITED: RateLimiter = {
+  check: () => NOT_LIMITED,
+  fail() {},
+  reset() {},
+};
 
 /** Limited when `times` (ascending, all within the window) holds `maxFailures` entries. */
 function decide(
@@ -123,6 +159,18 @@ export function addressKey(ip: string): string {
     .map((g) => g.toString(16))
     .join(':');
   return `${prefix}::/64`;
+}
+
+/**
+ * `limiter` keyed by `addressKey(ip)`: check, fail and reset all group an IPv6 client by its /64, so rotating
+ * addresses inside it gets no fresh budget. Wrapping twice is harmless (an address key maps to itself).
+ */
+export function byAddress(limiter: RateLimiter): RateLimiter {
+  return {
+    check: (ip, now) => limiter.check(addressKey(ip), now),
+    fail: (ip, now) => limiter.fail(addressKey(ip), now),
+    reset: (ip) => limiter.reset(addressKey(ip)),
+  };
 }
 
 /** Where the global failure times live between restarts. */

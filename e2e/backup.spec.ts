@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import type { Download, Page } from '@playwright/test';
 import { addDays, DEFAULT_MEAL_TYPES, type AppData } from '../packages/shared/src/index';
-import { demo, MEALS_GOALS, MEALS_TODAY, onboarded } from './fixtures/data';
-import type { App } from './support/app';
+import { demo, meals, MEALS_GOALS, MEALS_TODAY, onboarded } from './fixtures/data';
+import { USERNAME_LABEL, type App } from './support/app';
 import { TODAY } from './support/env';
+import { createUser } from './support/server';
 import { expect, test } from './support/test';
 
 /** 13 October: a day of the demo seed logged as three typed meals (the first with an AI position). */
@@ -187,7 +188,9 @@ test.describe('backup', () => {
 
     // Declining the confirmation changes nothing.
     await backupInput(page).setInputFiles(file(backup()));
-    await expect(ask).toContainText('Усі поточні записи буде замінено даними з файлу.');
+    await expect(ask).toContainText(
+      'Усі твої поточні записи буде замінено даними з файлу. Інших акаунтів це не торкнеться.',
+    );
     // A destructive question starts on the safe answer.
     await expect(ask.getByRole('button', { name: 'Скасувати' })).toBeFocused();
     await ask.getByRole('button', { name: 'Скасувати' }).click();
@@ -230,6 +233,39 @@ test.describe('backup', () => {
       'true',
     );
     expect(native).toEqual([]);
+  });
+
+  test('the copy and the restore are per account: another account is never in the file and is not touched', async ({
+    app,
+    page,
+    server,
+    admin,
+    playwright,
+  }) => {
+    const other = await createUser(playwright, admin);
+    try {
+      const theirs = meals();
+      theirs.settings.goal = 66.5;
+      theirs.weights = [...theirs.weights, { date: '2026-09-30', kg: 91.3 }];
+      await other.api.importData(theirs);
+      const before = await other.api.getData();
+
+      // Her download holds her data only.
+      await app.gotoSettings('Дані і копія');
+      await expect(app.region('Дані')).toContainText('Усе синхронізовано');
+      const copy = await downloaded(page);
+      expect(copy).toEqual(await server.getData());
+      expect(copy.settings.goal).not.toBe(66.5);
+      expect(copy.weights.some((w) => w.kg === 91.3)).toBe(false);
+
+      // Her restore replaces her data only.
+      await restore(app, backup());
+      expect((await server.getData()).days).toEqual(backup().days);
+      expect(await other.api.getData()).toEqual(before);
+      expect(await other.api.exportData()).toEqual(before);
+    } finally {
+      await other.dispose();
+    }
   });
 
   test('a file that is not a backup is refused without asking or touching the data', async ({
@@ -333,11 +369,14 @@ test.describe('backup', () => {
 });
 
 test.describe('account', () => {
-  /** The «Вийти» row of the settings list (only touched while no dialog is open: the dialog has its own «Вийти»). */
+  /** «Вийти» at the bottom of «Акаунт» (only touched while no dialog is open: the dialog has its own «Вийти»). */
   const logoutButton = (page: Page) => page.getByRole('button', { name: 'Вийти', exact: true });
 
-  test('«Вийти» asks, then returns to the login screen and wipes this device', async ({ app, page }) => {
-    await app.goto('/settings');
+  test('«Вийти» (in «Акаунт») asks, then reloads to the login screen and wipes this device', async ({
+    app,
+    page,
+  }) => {
+    await app.gotoSettings('Акаунт');
     const native = watchNativeDialogs(page);
     expect((await app.deviceCache()).data).toBeTruthy();
     const ask = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
@@ -351,10 +390,12 @@ test.describe('account', () => {
 
     await logoutButton(page).click();
     await ask.getByRole('button', { name: 'Вийти', exact: true }).click();
+    // A reload to the start page: nothing of the account stays in memory either.
+    await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toBeVisible();
     await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
     await expect(app.nav).toBeHidden();
-    await expect.poll(async () => (await app.deviceCache()).data).toBeUndefined();
-    expect((await app.deviceCache()).outbox).toBeUndefined();
+    await expect.poll(() => app.deviceKeys()).toEqual([]);
 
     // The session is gone on the server too.
     const me = await page.context().request.get('/api/auth/me');
@@ -364,10 +405,11 @@ test.describe('account', () => {
     expect(native).toEqual([]);
   });
 
-  test('with unsynced changes offline, «Вийти» warns that they will be lost', async ({
+  test('with unsynced changes, «Вийти» warns that they will be lost — and they are', async ({
     app,
     page,
     context,
+    server,
   }) => {
     await app.goto('/');
     await context.setOffline(true);
@@ -378,6 +420,8 @@ test.describe('account', () => {
     await app.settingsRow('Дані і копія').click();
     await expect(app.region('Дані')).toContainText('Офлайн — 1 зміна чекає на інтернет');
     await app.go('Налаштування');
+    await app.settingsRow('Акаунт').click();
+    await expect(page.getByRole('heading', { name: 'Акаунт', exact: true }).first()).toBeVisible();
     const native = watchNativeDialogs(page);
     const ask = page.getByRole('alertdialog', { name: 'Деякі зміни ще не синхронізовано' });
 
@@ -390,9 +434,17 @@ test.describe('account', () => {
     await expect(app.nav).toBeVisible();
 
     await logoutButton(page).click();
+    await expect(ask).toBeVisible();
+    // Back online for the logout itself (it ends the session and reloads), while the change still cannot get out.
+    await page.route('**/api/ops', (route) => route.abort('connectionrefused'));
+    await context.setOffline(false);
     await ask.getByRole('button', { name: 'Усе одно вийти' }).click();
-    await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
-    await expect.poll(async () => (await app.deviceCache()).outbox).toBeUndefined();
+    // The login screen shows for a moment, then the page reloads to `/`.
+    await page.waitForURL((url) => url.pathname === '/');
+    await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toBeVisible();
+    await expect.poll(() => app.deviceKeys()).toEqual([]);
+    expect((await server.getData()).days[TODAY]?.trained ?? null).toBeNull();
+    expect((await page.context().request.get('/api/auth/me')).status()).toBe(401);
     expect(native).toEqual([]);
   });
 });

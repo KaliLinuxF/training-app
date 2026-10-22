@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { DEFAULT_AI_LIMITS, type UserRole } from '@legko/shared';
 import { isLogLevel, type LogLevel } from './logger';
 
 export interface VapidEnv {
@@ -8,14 +9,30 @@ export interface VapidEnv {
   privateKey: string | null;
 }
 
-/** AI calorie estimate (SPEC §3.7). */
+/** Where a configured value came from (logged at start-up next to the effective AI limits). */
+export type ValueSource = 'env' | 'default';
+
+/** AI calorie estimate (SPEC §3.7, docs/multi-user.md §5.3). */
 export interface FoodAiEnv {
   /** `ANTHROPIC_API_KEY`; null disables the feature (the UI hides it). Never log it. */
   apiKey: string | null;
   /** `FOOD_AI_MODEL`. */
   model: string;
-  /** `FOOD_DAILY_LIMIT`: model calls allowed per local day. */
+  /**
+   * `FOOD_DAILY_LIMIT`: the GLOBAL ceiling — model calls for everybody together per Kyiv day (default 150; 0 turns
+   * AI off). Limits an admin saved (`kv.ai_limits`) win over it.
+   */
   dailyLimit: number;
+  /** `FOOD_USER_DAILY_LIMIT`: model calls per user per Kyiv day (default 40). */
+  userDailyLimit: number;
+  sources: { dailyLimit: ValueSource; userDailyLimit: ValueSource };
+}
+
+/** A development account applied at start-up (`auth/devUsers.ts`). */
+export interface DevUser {
+  username: string;
+  password: string;
+  role: UserRole;
 }
 
 export interface Config {
@@ -31,14 +48,23 @@ export interface Config {
   trustProxy: boolean;
   vapid: VapidEnv;
   logLevel: LogLevel;
-  /** Development only: password applied at start-up when none is set yet. */
-  devPassword: string | null;
+  /**
+   * Development only (always empty in production): `DEV_USERNAME` (default anna, role user) with `DEV_PASSWORD`, and
+   * `DEV_ADMIN_USERNAME` (default admin, role admin) with `DEV_ADMIN_PASSWORD`; an entry exists only when its
+   * password is set.
+   */
+  devUsers: DevUser[];
   foodAi: FoodAiEnv;
 }
 
 export const DEFAULT_PUBLIC_ORIGIN = 'https://fit.triple-a.dev';
 export const DEFAULT_FOOD_AI_MODEL = 'claude-opus-5-5';
-export const DEFAULT_FOOD_DAILY_LIMIT = 60;
+/** Global ceiling per Kyiv day (`FOOD_DAILY_LIMIT`). */
+export const DEFAULT_FOOD_DAILY_LIMIT = DEFAULT_AI_LIMITS.global;
+/** Per user per Kyiv day (`FOOD_USER_DAILY_LIMIT`). */
+export const DEFAULT_FOOD_USER_DAILY_LIMIT = DEFAULT_AI_LIMITS.perUser;
+export const DEFAULT_DEV_USERNAME = 'anna';
+export const DEFAULT_DEV_ADMIN_USERNAME = 'admin';
 
 export class ConfigError extends Error {
   override name = 'ConfigError';
@@ -103,20 +129,58 @@ function parseLogLevel(raw: string | undefined): LogLevel {
   return level;
 }
 
-function parseDailyLimit(raw: string | undefined): number {
-  if (raw === undefined) return DEFAULT_FOOD_DAILY_LIMIT;
+function parseLimit(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  max: number,
+): { value: number; source: ValueSource } {
+  if (raw === undefined) return { value: fallback, source: 'default' };
   const limit = Number(raw);
-  if (!Number.isInteger(limit) || limit < 0 || limit > 10_000)
-    throw new ConfigError(`FOOD_DAILY_LIMIT must be an integer 0–10000, got "${raw}"`);
-  return limit;
+  if (!Number.isInteger(limit) || limit < 0 || limit > max)
+    throw new ConfigError(`${name} must be an integer 0–${max}, got "${raw}"`);
+  return { value: limit, source: 'env' };
 }
 
 function parseFoodAi(env: Env): FoodAiEnv {
+  const global = parseLimit(
+    'FOOD_DAILY_LIMIT',
+    value(env, 'FOOD_DAILY_LIMIT'),
+    DEFAULT_FOOD_DAILY_LIMIT,
+    10_000,
+  );
+  const perUser = parseLimit(
+    'FOOD_USER_DAILY_LIMIT',
+    value(env, 'FOOD_USER_DAILY_LIMIT'),
+    DEFAULT_FOOD_USER_DAILY_LIMIT,
+    1000,
+  );
   return {
     apiKey: value(env, 'ANTHROPIC_API_KEY') ?? null,
     model: value(env, 'FOOD_AI_MODEL') ?? DEFAULT_FOOD_AI_MODEL,
-    dailyLimit: parseDailyLimit(value(env, 'FOOD_DAILY_LIMIT')),
+    dailyLimit: global.value,
+    userDailyLimit: perUser.value,
+    sources: { dailyLimit: global.source, userDailyLimit: perUser.source },
   };
+}
+
+/** Never honoured in production, even if the variables leak into the environment. */
+function parseDevUsers(env: Env, production: boolean): DevUser[] {
+  if (production) return [];
+  const users: DevUser[] = [];
+  const password = env.DEV_PASSWORD || null;
+  if (password) {
+    users.push({ username: value(env, 'DEV_USERNAME') ?? DEFAULT_DEV_USERNAME, password, role: 'user' });
+  }
+  const adminPassword = env.DEV_ADMIN_PASSWORD || null;
+  if (adminPassword) {
+    users.push({
+      username: value(env, 'DEV_ADMIN_USERNAME') ?? DEFAULT_DEV_ADMIN_USERNAME,
+      password: adminPassword,
+      role: 'admin',
+    });
+  }
+  return users;
 }
 
 const truthy = (raw: string | undefined): boolean => raw === '1' || raw?.toLowerCase() === 'true';
@@ -134,8 +198,7 @@ export function loadConfig(env: Env = process.env, cwd: string = process.cwd()):
     trustProxy: truthy(value(env, 'TRUST_PROXY')),
     vapid: parseVapid(env, publicOrigin),
     logLevel: parseLogLevel(value(env, 'LOG_LEVEL')),
-    // Never honoured in production, even if the variable leaks into the environment.
-    devPassword: production ? null : (env.DEV_PASSWORD ?? null) || null,
+    devUsers: parseDevUsers(env, production),
     foodAi: parseFoodAi(env),
   };
 }

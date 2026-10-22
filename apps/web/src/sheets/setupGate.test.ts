@@ -1,6 +1,12 @@
 import { emptyData, type AppData } from '@legko/shared';
-import { afterEach, describe, expect, it } from 'vitest';
+import { cleanup, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { useAuthStore } from '@/auth/auth';
+import { useDataStore } from '@/store/data';
 import { initialSyncState, type SyncState } from '@/store/state';
+import { sessionUser } from '@/store/test-utils';
+import { useUiStore } from '@/store/ui';
+import { useSetupAutoOpen } from './useSetupAutoOpen';
 import {
   readSetupShown,
   resetSetupShownForTests,
@@ -9,6 +15,8 @@ import {
   syncSettled,
   writeSetupShown,
 } from './setupGate';
+
+vi.mock('idb-keyval', async () => (await import('@/store/test-utils')).fakeIdb());
 
 const fresh = (): AppData => emptyData();
 
@@ -37,6 +45,15 @@ describe('setupGateAction', () => {
     const withDay = fresh();
     withDay.days['2026-10-05'] = { food: 'Борщ', kcal: null, trained: null, types: [], notes: '' };
     expect(setupGateAction(withDay, true, false)).toBe('mark-onboarded');
+  });
+
+  it('never opens by itself for an admin, nor marks the admin’s account (D23)', () => {
+    expect(setupGateAction(fresh(), true, false, 'admin')).toBe('none');
+    const withWeight = fresh();
+    withWeight.weights = [{ date: '2026-10-05', kg: 65 }];
+    expect(setupGateAction(withWeight, true, false, 'admin')).toBe('none');
+    // An ordinary account still gets it.
+    expect(setupGateAction(fresh(), true, false, 'user')).toBe('open');
   });
 });
 
@@ -69,5 +86,36 @@ describe('session flag', () => {
     writeSetupShown();
     sessionStorage.clear();
     expect(readSetupShown()).toBe(true);
+  });
+});
+
+describe('useSetupAutoOpen', () => {
+  afterEach(() => {
+    cleanup();
+    sessionStorage.clear();
+    resetSetupShownForTests();
+    useUiStore.setState({ sheet: null });
+    useAuthStore.setState({ status: 'checking', offline: false, user: null });
+  });
+
+  function settledFreshAccount(role: 'admin' | 'user') {
+    useAuthStore.setState({ status: 'authed', offline: false, user: sessionUser({ role }) });
+    useDataStore.setState({
+      data: fresh(),
+      sync: { ...initialSyncState(), loaded: true, online: true, lastSyncedAt: 1 },
+    });
+  }
+
+  it('offers «Перші кроки» to a new ordinary account', () => {
+    settledFreshAccount('user');
+    renderHook(() => useSetupAutoOpen());
+    expect(useUiStore.getState().sheet?.mode).toBe('setup');
+  });
+
+  it('leaves a new admin account alone (the Home banner still offers it)', () => {
+    settledFreshAccount('admin');
+    renderHook(() => useSetupAutoOpen());
+    expect(useUiStore.getState().sheet).toBeNull();
+    expect(readSetupShown()).toBe(false);
   });
 });

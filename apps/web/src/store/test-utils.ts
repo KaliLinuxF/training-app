@@ -1,7 +1,7 @@
 /**
  * Test helpers for the data layer (imported by `*.test.ts(x)` only, never by app code).
  */
-import { emptyData, type AppData } from '@legko/shared';
+import { emptyData, type AppData, type SessionUser } from '@legko/shared';
 
 /** Captured before any test installs fake timers. */
 const realSetTimeout = globalThis.setTimeout;
@@ -33,6 +33,8 @@ export interface FakeIdb {
   getMany: (keys: string[]) => Promise<unknown[]>;
   setMany: (entries: [string, unknown][]) => Promise<void>;
   delMany: (keys: string[]) => Promise<void>;
+  /** Every key (the device wipe lists them before deleting `legko.*`). */
+  keys: () => Promise<string[]>;
 }
 
 export function fakeIdb(): FakeIdb {
@@ -46,6 +48,20 @@ export function fakeIdb(): FakeIdb {
     delMany: async (keys) => {
       for (const k of keys) store.delete(k);
     },
+    keys: async () => [...store.keys()],
+  };
+}
+
+/** A signed-in account as the server describes it (`GET /api/auth/me`); `patch` overrides fields. */
+export function sessionUser(patch: Partial<SessionUser> = {}): SessionUser {
+  return {
+    id: 'a1'.padEnd(32, '0'),
+    username: 'anna',
+    role: 'user',
+    createdAt: Date.UTC(2026, 8, 1),
+    legacyOwner: false,
+    passwordChange: null,
+    ...patch,
   };
 }
 

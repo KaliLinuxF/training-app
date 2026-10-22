@@ -7,7 +7,15 @@
 #   deploy/deploy.sh rollback            switch back to the image that ran before the last deploy
 #   deploy/deploy.sh logs [args…]        follow container logs (default: app); args go to `docker compose logs`
 #   deploy/deploy.sh status              containers, health and deployed versions
-#   deploy/deploy.sh set-password        set or rotate the app password (interactive)
+#   deploy/deploy.sh cli <command> [args…]
+#                                        runs the server CLI (node /app/server/cli.js) in the app container, with
+#                                        a TTY: create-admin <username>, create-invite [--admin] [--note <text>],
+#                                        reset-password-link <username>, set-password <username>,
+#                                        set-role <username> <admin|user>, rename-user <old> <new>, list-users,
+#                                        list-links, revoke-links --by <username> | --all (`cli help` lists them)
+#   deploy/deploy.sh set-password <username>
+#                                        set or rotate that account's password (interactive, hidden input);
+#                                        same as `cli set-password <username>`
 #
 # Environment (all optional):
 #   DEPLOY_HOST      ssh target                    default deploy@64.176.75.160
@@ -191,10 +199,23 @@ cmd_status() {
   remote status
 }
 
-cmd_set_password() {
-  (($# == 0)) || die "set-password takes no arguments"
+# The server CLI inside the running app container (links are printed with PUBLIC_ORIGIN; nothing is logged).
+readonly REMOTE_CLI='docker compose exec app node /app/server/cli.js'
+
+cmd_cli() {
+  (($# >= 1)) || die "usage: deploy/deploy.sh cli <command> [args…] (e.g. cli create-admin admin; cli help lists the commands)"
+  # The downgrade needs the app stopped (exec runs inside the live container): docs/DEPLOY.md has the steps.
+  [[ "$1" != downgrade-schema ]] ||
+    die "downgrade-schema runs with the app stopped: docker compose stop app && docker compose run --rm --no-deps app node /app/server/cli.js downgrade-schema … (docs/DEPLOY.md, Rollback)"
   require ssh
-  remote_tty "docker compose exec app node /app/server/cli.js set-password"
+  remote_tty "${REMOTE_CLI} $(quote "$@")"
+}
+
+cmd_set_password() {
+  (($# == 1)) || die "usage: deploy/deploy.sh set-password <username>"
+  [[ -n "$1" && "$1" != -* ]] || die "usage: deploy/deploy.sh set-password <username>"
+  require ssh
+  remote_tty "${REMOTE_CLI} set-password $(quote "$1")"
 }
 
 main() {
@@ -209,6 +230,7 @@ main() {
     rollback) cmd_rollback "$@" ;;
     logs) cmd_logs "$@" ;;
     status) cmd_status "$@" ;;
+    cli) cmd_cli "$@" ;;
     set-password) cmd_set_password "$@" ;;
     -h | --help | help) usage ;;
     *)

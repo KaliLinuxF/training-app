@@ -49,6 +49,16 @@ async function currentSubscription(): Promise<PushSubscription | null> {
 
 const timezone = (): string => deviceTimeZone() ?? DEFAULT_TIMEZONE;
 
+/** The browser subscription's `keys.auth` (proof of possession for the server, D15); undefined when unreadable. */
+function subscriptionAuth(subscription: PushSubscription): string | undefined {
+  try {
+    const auth = subscription.toJSON().keys?.auth;
+    return typeof auth === 'string' && auth.length > 0 && auth.length <= 100 ? auth : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function serverKey(): Promise<Uint8Array<ArrayBuffer>> {
   const { key } = await api.pushPublicKey();
   return urlBase64ToUint8Array(key);
@@ -63,8 +73,9 @@ async function subscriptionFor(reg: ServiceWorkerRegistration, key: Uint8Array<A
   if (existing && sameKey(existing.options.applicationServerKey, key)) return existing;
   if (existing) {
     const staleEndpoint = existing.endpoint;
+    const staleAuth = subscriptionAuth(existing);
     await existing.unsubscribe();
-    void api.pushUnsubscribe(staleEndpoint).catch(() => undefined);
+    void api.pushUnsubscribe(staleEndpoint, staleAuth).catch(() => undefined);
   }
   return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
 }
@@ -101,14 +112,18 @@ export async function enablePush(): Promise<PushStatus> {
   return 'enabled';
 }
 
-/** Unsubscribes this device. The server forgets it now, or on the next send (410) if offline. */
+/**
+ * Unsubscribes this device. The server forgets it now, or on the next send (410) if offline. The subscription's own
+ * `keys.auth` goes along (D15), so the row is removed even when it is still another account's (a switch).
+ */
 export async function disablePush(): Promise<void> {
   if (!isPushSupported()) return;
   const subscription = await currentSubscription();
   if (!subscription) return;
   const { endpoint } = subscription;
+  const auth = subscriptionAuth(subscription);
   await subscription.unsubscribe();
-  await api.pushUnsubscribe(endpoint).catch(() => undefined);
+  await api.pushUnsubscribe(endpoint, auth).catch(() => undefined);
 }
 
 /** Re-sends the existing subscription after start-up (server DB reset, rotated endpoint, new time zone). */

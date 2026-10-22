@@ -88,6 +88,12 @@
   box-shadow: 0 0 0 1px var(--focus);
 }
 
+/* The border above is the focus ring; without this the global :focus-visible outline would add a second one
+   (text fields match :focus-visible after a tap too). 0,2,0 beats the global 0,1,0 in any load order. */
+.input:focus-visible {
+  outline: none;
+}
+
 .input[aria-invalid='true'] {
   border-color: var(--accD);
 }
@@ -155,4 +161,137 @@
   font-size: 13px;
   line-height: 1.4;
   color: var(--muted);
+}
+
+/* A field without the eye button (username, link, repeat password). */
+.plain {
+  padding-right: 16px;
+}
+
+/* Muted line under a field («3–32 символи…», «Щонайменше 8 символів», the forgotten-password hint). */
+.fieldHint {
+  margin: -2px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* Unsent changes of the device user (after a session expiry), above the form. Neutral like the «Офлайн · зміни
+   збережено на телефоні» pill on Home: mint (acc2) means «done» in this app, and these changes are not. */
+.pending {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r14);
+  background: var(--card);
+  color: var(--ink2);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pending::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  /* Centred on the first line: (14px × 1.4 − 6px) / 2. */
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Text button («Маю посилання», «Скопіювати посилання»): a 44px target. */
+.ghost {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r12);
+  background: transparent;
+  color: var(--accD);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghost:hover {
+  background: var(--accT);
+}
+
+/* Outline button next to the solid one («Повернутися в застосунок», «Відкрити»). */
+.secondary {
+  width: 100%;
+  min-height: 56px;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.12s var(--ease-out);
+}
+
+.secondary:active {
+  transform: scale(0.98);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}
+
+/* «Імʼя для входу: olya» of the «Готово» state; the name selects as a whole. */
+.doneName {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.selectAll {
+  user-select: all;
+  -webkit-user-select: all;
+}
+
+/* The link as text when the clipboard refused it. */
+.linkUrl {
+  margin: 4px 0 0;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r14);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  user-select: all;
+  -webkit-user-select: all;
 }

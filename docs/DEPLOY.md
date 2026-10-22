@@ -41,7 +41,11 @@ Files on the server:
     legko.db  legko.db-wal  legko.db-shm
     backups/legko-YYYY-MM-DD.db    daily, newest 30 kept
     backups/legko-pre-v3-YYYY-MM-DD.db       written once, right before the schema v3 (meals) migration; never pruned
-    backups/legko-pre-down-v3-YYYY-MM-DD.db  written by `cli.js downgrade-schema` (rollback); never pruned
+    backups/legko-pre-v4-YYYY-MM-DD.db       written once, right before the schema v4 (accounts) migration; never pruned
+    backups/legko-pre-down-v3-YYYY-MM-DD.db  written by `cli.js downgrade-schema` v3 → v2 (rollback); never pruned
+    backups/legko-pre-down-v4-YYYY-MM-DD.db  written by `cli.js downgrade-schema` v4 → v3 (rollback); never pruned
+    backups/legko-pre-v4-YYYY-MM-DD-2.db     …-2, -3: a second migration / downgrade on the same Kyiv day — these
+                                             snapshots are never replaced, so the un-suffixed file is the first one
     photos/<id>.jpg  <id>_t.jpg    food photo diary (full + thumbnail)
   deploys.log                      one line per deploy / rollback (UTC)
 ```
@@ -55,14 +59,15 @@ Only Caddy publishes ports — Docker-published ports bypass ufw, so the app mus
 `/opt/training-app/.env` is read by the app container if it exists; the file is optional for the stack to start.
 `PUBLIC_ORIGIN` is set in `compose.yaml`; everything else has a default.
 
-| Variable                                 | Purpose                                                                    |
-| ---------------------------------------- | -------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`                      | enables the AI calorie estimate (text / photo); without it the UI hides it |
-| `FOOD_AI_MODEL`                          | optional model override for the estimate (default `claude-opus-5-5`)       |
-| `FOOD_DAILY_LIMIT`                       | estimates per day, Kyiv time (default `60`; `0` switches them off)         |
-| `LOG_LEVEL`                              | `debug`, `info` (default), `warn`, `error` or `silent`                     |
-| `VAPID_SUBJECT`                          | Web Push contact (`https:` URL or `mailto:`), default `PUBLIC_ORIGIN`      |
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | only to pin keys; by default they are generated once and kept in the DB    |
+| Variable                                 | Purpose                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                      | enables the AI calorie estimate (text / photo); without it the UI hides it                                                                                                                                                                                           |
+| `FOOD_AI_MODEL`                          | optional model override for the estimate (default `claude-opus-5-5`)                                                                                                                                                                                                 |
+| `FOOD_DAILY_LIMIT`                       | **global** ceiling: estimates for everybody together per Kyiv day (default `150`; `0` switches them off for everyone). Before the users release it meant «estimates per day» (default 60) — see [step 0](#first-deploy-of-the-users-release-and-the-admin-bootstrap) |
+| `FOOD_USER_DAILY_LIMIT`                  | estimates per account per Kyiv day (default `40`, `0`–`1000`)                                                                                                                                                                                                        |
+| `LOG_LEVEL`                              | `debug`, `info` (default), `warn`, `error` or `silent`                                                                                                                                                                                                               |
+| `VAPID_SUBJECT`                          | Web Push contact (`https:` URL or `mailto:`), default `PUBLIC_ORIGIN`                                                                                                                                                                                                |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | only to pin keys; by default they are generated once and kept in the DB                                                                                                                                                                                              |
 
 Edit it on the server (the key never goes into git, chat or shell history), then apply:
 
@@ -73,7 +78,10 @@ ssh deploy@64.176.75.160 'cd /opt/training-app && docker compose up -d'      # r
 
 `docker compose config` (without `--quiet`) prints values from `.env` — don't paste its output anywhere.
 Changing the VAPID keys invalidates every push subscription (notifications must be re-enabled on the phone).
-The app password is **not** an env variable — it lives in the database (see below).
+Passwords are **not** env variables — each account's scrypt hash lives in the database (see
+[Accounts and the admin](#accounts-and-the-admin)). The `DEV_*` variables of `apps/server/.env.example` (local dev
+accounts) are ignored in production. AI limits an admin saves in «Користувачі» (stored in the database) win over
+`FOOD_DAILY_LIMIT` / `FOOD_USER_DAILY_LIMIT`; `FOOD_DAILY_LIMIT=0` still switches the estimate off entirely.
 
 ## One-time server setup (already done — for the record)
 
@@ -108,42 +116,150 @@ so the first check comes after 30 s), compose ≥ 2.24 (optional `env_file`), `f
      and run the deploy again. If `deploy` itself has uid 1000 this never happens.
    - The new `compose.yaml` replaces the placeholder one; Caddy is recreated with the same volumes and switches
      to the new `Caddyfile` as soon as the app is healthy (the old placeholder config may answer for a few seconds).
-3. Set the password (next section).
+3. Bootstrap the admin (`deploy/deploy.sh cli create-admin admin`, see [Accounts and the admin](#accounts-and-the-admin)),
+   then invite the people who use the app from «Користувачі».
 4. Put `ANTHROPIC_API_KEY` into `.env` and apply it (see [`.env`](#env-secrets-and-overrides)); until then the
    AI calorie estimate is simply hidden.
-5. Open https://fit.triple-a.dev, log in, complete the first-run setup. On the iPhone: Safari → Share →
-   «На початковий екран», open the installed app, log in there and enable notifications.
+5. Each person opens their invite, chooses a name and a password and completes «Перші кроки». On the iPhone:
+   Safari → Share → «На початковий екран», open the installed app, log in there and enable notifications.
 6. Optional clean-up of the placeholder: `ssh deploy@64.176.75.160 'rm -rf /opt/training-app/placeholder'`.
 
-## Setting the app password
+## Accounts and the admin
+
+Since the users release (schema v4, `docs/multi-user.md`) every person has an account — a username and a password —
+and completely separate data. There is no open sign-up: an **admin** creates one-time links in Settings →
+«Користувачі» (or with the CLI). The server CLI runs inside the app container:
 
 ```bash
-ssh -t deploy@64.176.75.160 'cd /opt/training-app && docker compose exec app node /app/server/cli.js set-password'
-# same thing: deploy/deploy.sh set-password
+deploy/deploy.sh cli <command> [args…]        # = ssh -t … 'docker compose exec app node /app/server/cli.js <command> …'
+deploy/deploy.sh cli help                     # every command
 ```
 
-It asks twice with hidden input, stores a scrypt hash in the database and **revokes all sessions**.
-For scripting, `set-password --stdin` reads the password from one line of stdin (use `docker compose exec -T`).
+| Command                                   | Does                                                                                                                                                          |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create-admin <username>`                 | creates an admin **without a password** and prints a one-time setup link (24 h). Refuses when the name exists (an existing admin → use `reset-password-link`) |
+| `create-invite [--admin] [--note <text>]` | prints a one-time invite link (7 days); role user, or admin with `--admin` (the app only makes user invites)                                                  |
+| `reset-password-link <username>`          | prints a one-time password link (24 h; a setup link when the account has no password yet); older pending links for that account are revoked                   |
+| `set-password <username> [--stdin]`       | hidden prompt twice (or the first line of stdin); signs that account out on every device                                                                      |
+| `set-role <username> <admin\|user>`       | never removes the last usable admin; a demotion signs the account out and revokes the links it created                                                        |
+| `rename-user <old> <new>`                 | sessions are kept (`admin` may be used here, `legko` never)                                                                                                   |
+| `list-users`                              | username · role · status (active / disabled / no password) · created · last activity · AI estimates today                                                     |
+| `list-links`                              | pending invite / reset / setup links: id, kind, role, for whom, created by, expiry (never the links themselves)                                               |
+| `revoke-links --by <username>` / `--all`  | revokes the pending links that account created, or every pending link                                                                                         |
+
+Links are printed once, to your terminal only, with `PUBLIC_ORIGIN` (`https://fit.triple-a.dev`, set in
+`compose.yaml`); the server never logs a token (logs carry link and user **ids** only). A link carries its secret in
+the `#…` fragment, which never reaches the server, Caddy or link previews. Every command opens the live database
+(WAL, safe while the app runs) and writes nothing to the app logs. The account commands **never migrate**: on a
+database at an older schema they refuse (exit 1, nothing changed — «start the server once»), so run them after the
+new image has started (only a missing or empty database is created, for a first install).
+
+### First deploy of the users release and the admin bootstrap
+
+0. **Before deploying**, check `/opt/training-app/.env` for `FOOD_DAILY_LIMIT`:
+   `ssh deploy@64.176.75.160 'grep -n FOOD_ /opt/training-app/.env'`. It now means the **global** daily ceiling for
+   everybody together (default 150); per account it is `FOOD_USER_DAILY_LIMIT` (default 40). Remove an old override
+   such as `FOOD_DAILY_LIMIT=60` (it would cap everyone together at 60), or set it to the new meaning. After the
+   deploy the start-up log line shows the limits in force and where they come from
+   (`AI calorie estimate enabled (model …, per user 40, global 150; limits from defaults)`).
+1. `deploy/deploy.sh` — on its first start the app migrates the database to schema **v4** in one transaction (log
+   `database schema v3 → v4: saved legko-pre-v4-<date>.db first`). Anna's account becomes the ordinary user
+   **«anna»** (role user, the fixed id `00000000000000000000000000000001`) with her current password, sessions (no
+   re-login), data, photos, reminders and push subscriptions. No admin exists yet: the log says
+   `No admin account: run node /app/server/cli.js create-admin <name>`.
+2. Bootstrap the admin **after** step 1 has finished (the new image's first start migrates; the CLI refuses a v3
+   database). Nothing secret is typed, stored in shell history or logged:
+
+   ```bash
+   deploy/deploy.sh cli list-users          # optional check: exactly one line, «anna  user  active …»
+   deploy/deploy.sh cli create-admin admin
+   ```
+
+   It prints `https://fit.triple-a.dev/reset#<token>` — single use, valid 24 h — together with the expiry in Kyiv
+   time. `create-admin` refuses (exit 1, nothing created) when the name already exists: an existing admin →
+   `reset-password-link admin`; an existing regular user → pick another name. The admin has its own, empty data and
+   sees only the list of accounts (names, role, created, last activity, AI counts) — never anyone's records. Until
+   anna's app makes its first request after the deploy her row reads «Ще не входили» (v3 kept no activity time).
+
+3. Open the link (on the device you will manage from), choose the password on «Створення пароля»; you are signed in
+   as «admin» and land on «Користувачі». If the link expired: `deploy/deploy.sh cli reset-password-link admin`
+   prints a new one (the old one stops working). On an iPhone the link opens in Safari, which then shows «Готово»;
+   the home-screen app has its own login (or paste the link there: login screen → «Маю посилання»).
+   Right after this deploy, browsers that opened the app before still run the **old** version until the page reloads:
+   such a browser opens the link in the old app (Anna's data, or the old password-only login) and drops the `#…` part
+   instead of showing «Створення пароля». So open the link in a private window, or in a browser that has already
+   loaded the new version (it asks for a username at login). If it opened the old app anyway, reload that page once,
+   then open the same printed link again: the old app never checked it, so it stays valid until a password is set.
+4. **If the link says «Це посилання вже використали»** and you did not use it, someone else did. Recover:
+
+   ```bash
+   deploy/deploy.sh cli revoke-links --all              # every pending invite / reset link, whoever made it
+   deploy/deploy.sh cli reset-password-link admin       # a new link; completing it signs every «admin» device out
+   deploy/deploy.sh cli list-users                      # then demote / delete anything you do not expect:
+   deploy/deploy.sh cli list-links                      #   set-role <name> user, or the «Користувачі» sheet
+   ```
+
+   Completing a reset for an admin also revokes every invite and reset link that admin created (D27), so what the
+   intruder made dies with it.
+
+5. Invites: «Користувачі» → «Створити запрошення» (optional note «для Олі») → «Поділитися» / «Скопіювати». The
+   person chooses their own name and password and gets «Перші кроки». Pending invites are listed there and can be
+   revoked; at most 20 can be pending at once.
+
+Everyday account work happens in «Користувачі» (admins only): a password link for someone who forgot theirs (24 h;
+their old password works until the link is used; using it signs all their devices out and shows «Пароль задано …
+за посиланням від admin» in their «Акаунт»), the role, disable / enable (signs them out, stops their reminders, keeps
+their records), delete (typed name; removes all their records and photos), their own AI limit and the global limits.
+The last usable admin can be neither demoted, disabled nor deleted, and nobody can disable or delete themselves.
+Every person changes their own password and name in Settings → «Акаунт», where «Вийти» lives too.
+
+### Setting a password
+
+Prefer a link — the person types the password themselves:
+
+```bash
+deploy/deploy.sh cli reset-password-link anna     # prints https://fit.triple-a.dev/reset#… (24 h)
+```
+
+On the server directly (hidden prompt twice; signs that account out on every device and revokes its pending reset
+links; for an admin also the links it created):
+
+```bash
+deploy/deploy.sh set-password <username>           # = deploy/deploy.sh cli set-password <username>
+ssh -t deploy@64.176.75.160 'cd /opt/training-app && docker compose exec app node /app/server/cli.js set-password anna'
+```
+
+For scripting, `set-password <username> --stdin` reads the password from one line of stdin (use
+`docker compose exec -T`). `set-password` without a username is refused (usage, exit 2).
 
 ## AI calorie estimate
 
 - **Off until `ANTHROPIC_API_KEY` is in `.env`** (then `docker compose up -d`). Without it `GET /api/food/status`
   answers `enabled: false` and the UI hides «✨ Порахувати» / «📷 Фото». The start-up log says which:
-  `AI calorie estimate enabled (model claude-opus-5-5, 60 per day)` or `… disabled (…)`.
+  `AI calorie estimate enabled (model claude-opus-5-5, per user 40, global 150; limits from defaults)` (or
+  `… from env` / `… from kv.ai_limits` once an admin saved them) or `AI calorie estimate disabled (…)`.
 - The app container calls the Anthropic API (outbound HTTPS) with Claude Opus 5.5 (`FOOD_AI_MODEL`): structured JSON
   output, effort `low`, server-side refusal fallback; 60 s timeout, one retry. An estimate usually takes 5–20 s.
-- **Cost guard:** at most `FOOD_DAILY_LIMIT` model calls (default 60) per day; the day is counted in Kyiv time
-  (`Europe/Kyiv`) whatever time zone the app is set to, so changing the zone cannot reset it. The counter is in the
-  database (survives restarts). Over the limit → «Ліміт підрахунків на сьогодні вичерпано» until midnight Kyiv time.
+- **Cost guard:** two limits per Kyiv day (`Europe/Kyiv`, whatever time zone an account is set to, so changing the
+  zone cannot reset them): **per account** (`FOOD_USER_DAILY_LIMIT`, default 40; an admin can give one account its
+  own limit, 0 = off for that account) and a **global ceiling** for everybody together (`FOOD_DAILY_LIMIT`, default
+  150). Values an admin saves in «Користувачі» → «Підрахунки калорій» win over the env defaults. Both counters
+  are in the database (survive restarts); the per-account counts are pruned after 90 days. Over a limit → 429 with
+  «Ліміт підрахунків на сьогодні вичерпано» (own limit) or «Підрахунки на сьогодні закінчилися. Спробуй завтра»
+  (global) until midnight Kyiv time. Each person sees what is left in «Акаунт» → «Підрахунки калорій»; the admin
+  sees per-account usage (today / 30 days) in «Користувачі». Recalculation counts as one estimate, as before.
 - **Photos** arrive with the estimate (downscaled JPEG + thumbnail, made on the phone) and are stored in
-  `data/photos/` before the model is called. Photos that no day and no meal references 24 h later are deleted daily
-  at ~03:40 Kyiv time (log line `photo gc: …`; the run is skipped while a day's meal data is unreadable).
+  `data/photos/` before the model is called. Each photo belongs to the account that took it (`photos.user_id`;
+  files stay flat in `data/photos/`): another account asking for its id gets a 404. Photos that none of **their
+  owner's** days and meals references 24 h later are deleted daily at ~03:40 Kyiv time (log line `photo gc: …`); an
+  account with an unreadable `days.meals` row keeps all its photos for that run (log line
+  `photo gc: kept the photos of N account(s) with unreadable meal data`).
 - **Б · Ж · В**: every estimate and «✨ Перерахувати» also returns protein / fat / carbs per position (grams, 0.5 g
   steps, 0–1 000, checked on the server); one model call each, as before — the budget is unchanged.
 - **Logs** never contain the description, the photo or the key. A failed estimate logs one line such as
   `food estimate failed: HTTP 529 overloaded_error: …`, `request timed out` or `refusal (category: …)`; a rejected
   key logs `Anthropic key rejected (HTTP 401): check ANTHROPIC_API_KEY` once, and estimates answer 503 until the key
-  is replaced (see [Rotating](#rotating-the-password-and-the-api-key)).
+  is replaced (see [Rotating](#rotating-a-password-and-the-api-key)).
 
 ## Routine deploys
 
@@ -179,6 +295,68 @@ Retags `training-app:previous` as `latest`, recreates the app and waits for it t
 `compose.yaml` / `Caddyfile` are not rolled back (their previous versions are `*.bak` on the server — or revert the
 commit and deploy). If the bad release already migrated the database (`PRAGMA user_version`), the old code may not
 understand it: restore the backup taken before the deploy (see below). For risky releases make a manual backup first.
+
+### Rollback after the users release (schema v4)
+
+The users release (accounts, `docs/multi-user.md`) migrates the database to schema **v4** on its first start: new
+tables `users`, `user_settings`, `ai_usage`, `invites`, `password_resets`, and every per-person table (`days`,
+`weights`, `measures`, `foods`, `photos`, `sessions`, `push_subscriptions`, `reminder_log`) rebuilt with a `user_id`
+in its key; the pre-accounts password, settings and AI counter move from `kv` into anna's account. Just before
+migrating it saves `data/backups/legko-pre-v4-<deploy day>.db`. **The previous build refuses a v4 database**
+(`Database schema v4 is newer than this build (v3)`), so `deploy/deploy.sh rollback` alone crash-loops: downgrade the
+schema with the **new** image first.
+
+0. **Check what you would roll back to**: `deploy/deploy.sh status`. Downgrade only when the `training-app:previous`
+   line shows a version from **before** the users release. If `previous` is already a v4 build (a hotfix was deployed
+   since), just run `deploy/deploy.sh rollback` and do **not** downgrade — it would delete every other account for
+   nothing (a v4 build reads the v4 database as it is).
+1. Ask anna to open the app once **while online**, so her installed app sends what is still in its outbox: the old
+   bundle cannot see the per-account device copy (`legko.outbox.<id>`).
+2. Downgrade with the app stopped, then roll back:
+
+   ```bash
+   ssh deploy@64.176.75.160
+   cd /opt/training-app
+   docker compose stop app
+   docker compose run --rm --no-deps app node /app/server/cli.js downgrade-schema --keep anna
+   exit
+   deploy/deploy.sh rollback          # from your machine
+   ```
+
+   Run no other CLI command of the new image between `downgrade-schema` and `deploy/deploy.sh rollback` (its account
+   commands refuse a v3 database anyway; only the server would migrate it back).
+
+   `downgrade-schema` opens the database **without** migrating and refuses (nothing changed) unless it is at v4. It
+   keeps **one** account (`--keep <username>`, or the only one) with its password hash, sessions, settings, records,
+   photos, push subscriptions and reminder log, and parks its identity in `kv.legacy_user` (id, name, role, created),
+   so a later upgrade gives it **the same id** again. While **another** account owns records (days, weights,
+   measures, dishes or photos) it refuses and lists each such account with per-table counts, naming the flag:
+   read the counts, then (only if those records may go) re-run with `--drop-others`. Accounts without records (a
+   fresh «admin») are always dropped; their settings and push subscriptions are listed as dropped. It saves
+   `backups/legko-pre-down-v4-<Kyiv date>.db` (`-2`, … for a second one that day; never replaced), then in one
+   transaction rebuilds the eight tables into the exact v3
+   shapes with only the kept account's rows, drops `ai_usage`, `invites`, `password_resets`, `user_settings` and
+   `users`, removes the admin-saved AI limits and sets `user_version` 3. It prints what it kept and dropped. Photo
+   files of dropped accounts stay on disk until the v3 photo clean-up removes them as stray files (a day later).
+   Running `downgrade-schema` again on the v3 database is the v3 → v2 step below — only to go back further.
+
+3. `deploy/deploy.sh rollback` — the previous build starts on the v3 database (anna's sessions still valid).
+
+What is lost: every other account and its records (with `--drop-others`), «admin» (bootstrap it again after a
+re-upgrade), pending invites and reset links, per-account AI counts (today's global count stays) and the
+admin-saved AI limits. Good to know:
+
+- **Logging out under the rolled-back app** does not clear the per-account device copy (`legko.user`,
+  `legko.data.<id>`) the new bundle wrote; after a re-upgrade that copy is shown offline-first until `me` answers 401. What the old app writes meanwhile goes to the legacy keys (`legko.data` / `legko.outbox`) and is merged into
+  anna's copy (and sent once) by the next v4 start.
+- **Fallback** (the downgrade failed or something looks wrong): stop the app and restore
+  `backups/legko-pre-v4-<deploy day>.db` — the un-suffixed one, the first snapshot of that day (`-2`, `-3` are later
+  re-migrations) — exactly as in [Restore from a backup file](#restore-from-a-backup-file),
+  then `deploy/deploy.sh rollback`. This **loses everything logged after the deploy** (and every account made since);
+  re-migrating that file later gives anna the same id (`LEGACY_OWNER_ID`), so her devices keep their copy.
+- **Never lower `user_version` by hand**: only `downgrade-schema` rebuilds the tables into shapes the old build reads.
+- `docker compose exec` (and so `deploy/deploy.sh cli`) runs inside the live container: the downgrade must use
+  `docker compose run --rm --no-deps` with the app stopped (`deploy.sh cli downgrade-schema` refuses for that reason).
 
 ### Rollback after the meals release (schema v3)
 
@@ -227,9 +405,10 @@ Good to know:
 - **Upgrading again** later simply re-runs the v3 migration (a new `legko-pre-v3-…` snapshot first): every day then
   starts as a day without meals (one block «Їжа за день», kcal and photos intact), and dishes without macros.
 - A day whose `days.meals` cannot be read (hand-edited or corrupt JSON) is served as a day without meals (log
-  `days.meals of <date> is not valid meal data …`), and the daily photo clean-up **pauses** while such a row exists
-  (log `photo gc: skipped, a day has unreadable meal data …`) so no photo of that day is deleted. Saving any meal of
-  that day in the app rewrites the row and ends both warnings.
+  `days.meals of <date> is not valid meal data …`), and since the users release the daily photo clean-up **keeps that
+  account's photos** while such a row exists (log `photo gc: kept the photos of N account(s) with unreadable meal
+data`), so no photo of that day is deleted. Saving any meal of that day in the app rewrites the row and ends both
+  warnings.
 
 ## Logs and status
 
@@ -244,27 +423,64 @@ Logs are Docker `json-file`, rotated at 10 MB × 3 files per container. Caddy wr
 one line per request (method, path, status, ms) and never bodies or cookies.
 
 Log lines of the meals release worth knowing: `database schema v2 → v3: saved legko-pre-v3-… first` (once, on the
-first start), `days.meals of <date> is not valid meal data …` and `photo gc: skipped, a day has unreadable meal
-data …` (see [Rollback after the meals release](#rollback-after-the-meals-release-schema-v3)).
+first start), `days.meals of <date> is not valid meal data …` (see
+[Rollback after the meals release](#rollback-after-the-meals-release-schema-v3)).
+
+Log lines of the users release:
+
+- Start-up: `database schema v3 → v4: saved legko-pre-v4-… first` (once); `No accounts yet: run … create-admin
+<name>` (empty database), `No admin account: run … create-admin <name>`, or `No usable admin account (no password
+yet or disabled): run … reset-password-link <name>` — until the admin bootstrap is done; the AI line with the limits
+  in force and their source (`per user 40, global 150; limits from defaults | env | kv.ai_limits`).
+- Account events carry **ids only** (never a name, token, password or hash): `invite <id> (user) created by <user
+id | cli>`, `user <id> created via invite <id> (user)`, `reset link <id> for user <id> created by <user id | cli>`,
+  `reset link <id> used for user <id>` (`setup link …` for a first password), `user <id> changed their password (all
+sessions revoked)`, `user <id> role set to … by …`, `links revoked: N (created by user <id>, …)`,
+  `user <id> signed in without a username (legacy session)` (the pre-accounts app on anna's phone). An admin reset
+  of someone's password is therefore always visible in the log (and to that person in «Акаунт»). Reminder lines are
+  prefixed `user <id>:`.
+- `photo gc: kept the photos of N account(s) with unreadable meal data` — that account's photos are kept until its
+  bad `days.meals` row is saved again from the app.
 
 ## Limits and abuse protection
 
 - **Login throttle** — 5 failed logins per client address in 15 minutes (an IPv6 client counts as its whole /64),
-  and 20 failed logins in 15 minutes from all addresses together. Over either limit, logins answer 429
-  «Забагато спроб» until the oldest failure is 15 minutes old. Successful logins do not count. Devices that are
-  already signed in are not affected (sessions last 400 days), only new logins. When the overall limit is hit the
-  app logs `WARN 20 failed logins within 15 min from all addresses: every login is refused until they age out`.
-  The overall counter lives in the database, so a restart or a deploy does not clear it (the per-address one is in
-  memory). To lift the overall limit at once:
+  10 failed logins per **username** in 15 minutes (also for names that do not exist), and 20 failed logins in 15
+  minutes from all addresses together. Over any limit, logins answer 429 «Забагато спроб» until the oldest failure
+  is 15 minutes old; a successful login clears that address's and that name's failures. An unknown name, an account
+  without a password and a wrong password get the identical 401 «Неправильне імʼя або пароль» (the same hashing
+  work too), so a login never tells whether a name exists; a disabled account with the right password gets 403
+  «Акаунт вимкнено». Devices that are already signed in are not affected (sessions last 400 days), only new logins.
+  When the overall limit is hit the app logs `WARN 20 failed logins within 15 min from all addresses: every login is
+refused until they age out`. The overall counter lives in the database, so a restart or a deploy does not clear it
+  (the per-address and per-name ones are in memory). To lift the overall limit at once:
 
   ```bash
   ssh deploy@64.176.75.160 'cd /opt/training-app && docker compose exec -T app node -e "new (require(\"node:sqlite\").DatabaseSync)(\"/data/legko.db\").prepare(\"DELETE FROM kv WHERE key = ?\").run(\"login_failures\")"'
   ```
 
+- **Successful logins** — at most 30 per hour per username and per address (IPv6 per /64), checked before any
+  hashing → 429; and at most 20 live sessions per account (a new login drops that account's least recently used
+  session). Both only in production. A correct password therefore cannot be looped into unbounded work or sessions.
+- **One-time links** — 10 failed link attempts per address (an IPv6 client counts as its whole /64) in 15 minutes on
+  the four public link endpoints (an unusable link and a taken name count; a successful invite / reset resets it) →
+  429. A token that is already being processed answers 429 to a second, concurrent request.
+- **Push** — subscriptions are accepted only for the browsers' push services (Apple, Google FCM, Mozilla, Windows;
+  https, default port), otherwise 400 «Цей сервіс сповіщень не підтримується»; at most 10 devices per account (the
+  oldest is forgotten); the test push («Тест» in «Нагадування») 5 times per 10 minutes per account; each delivery
+  has a 20 s deadline and reads at most 4 KiB of a refusal. Reminders and maintenance (backups, photo clean-up,
+  purges) run as separate loops, with a 30 s budget per account in each reminder round, so one slow push service
+  delays nobody else.
+- **Account changes** — on «Акаунт» (password change, rename): 5 wrong current passwords per account in 15 minutes,
+  and 10 attempts of any kind per account per hour → 429.
+- **Password hashing** — every scrypt hash / verify (≈ 32 MiB, on libuv's thread pool, which photo file I/O shares)
+  goes through one gate: at most 2 at a time and 16 waiting; beyond that the request answers 429 with
+  `Retry-After: 5`. Every endpoint counts an attempt before it hashes.
 - **Request size** — Caddy refuses bodies over 17 MB (`request_body` in the `Caddyfile`). The app has its own cap per
-  route and answers 413 «Завеликий запит» above it: login 4 KiB, push subscription 64 KiB, AI estimate 4 MiB (photo),
-  sync ops and JSON import 16 MiB. Every other body is read only after the session check, so without a session a
-  client can make the app read no more than the 4 KiB of a login (and nothing once it is throttled).
+  route and answers 413 «Завеликий запит» above it: login and the public link endpoints 4 KiB, push subscription
+  64 KiB, AI estimate 4 MiB (photo), sync ops and JSON import 16 MiB. Every other body is read only after the session
+  check, so without a session a client can make the app read no more than the 4 KiB of a login or link request (and
+  nothing once it is throttled).
 - **Memory** — the app container has `mem_limit: 512m` (Node sizes its heap from it, ≈ 260 MB; a 16 MB import peaks
   at ≈ 180 MB). If it is ever exceeded, the kernel kills the app and Docker restarts it; the host keeps running.
   To check: `docker inspect --format '{{.State.OOMKilled}} restarts={{.RestartCount}}' training-app-app-1` on the server.
@@ -293,8 +509,9 @@ data …` (see [Rollback after the meals release](#rollback-after-the-meals-rele
 
 ## Restore from a backup file
 
-The easiest data-level restore is the in-app JSON import of an export (it replaces everything). To restore a
-database file (this also restores the password hash, sessions and VAPID keys of that moment):
+The easiest data-level restore is the in-app JSON import of an export: it replaces only the **signed-in account's**
+records (every other account is untouched; photos are not in the export). To restore a database file (this restores
+**every** account, password hash, session, invite and the VAPID keys of that moment):
 
 ```bash
 ssh deploy@64.176.75.160
@@ -309,6 +526,12 @@ docker compose run --rm --no-deps --entrypoint sh app -c '
 docker compose start app && docker compose ps
 ```
 
+A file from **before the users release** (any daily backup from before it, or `legko-pre-v4-<date>.db`) is at schema
+v3: the app migrates it to v4 again on start (a new `legko-pre-v4-…` snapshot first). Anna keeps her id
+(`00000000000000000000000000000001`, or the one `downgrade-schema` parked in `kv.legacy_user`), so her devices keep
+their copy and unsent changes; other accounts, invites and «admin» are not in such a file — bootstrap the admin again
+(`deploy/deploy.sh cli create-admin admin`) and re-invite people. A v4 file restores all accounts as they were.
+
 Always delete `legko.db-wal` / `legko.db-shm` together with replacing `legko.db` — a stale WAL would be replayed
 onto the restored file. Commands run inside the container so the files stay owned by uid 1000. `photos/` is left
 as it is; photos deleted from the diary more than a day before the restore may already be gone (daily clean-up).
@@ -319,10 +542,13 @@ To restore a `.db` file from your machine, upload it into `data/` first, then us
 ssh deploy@64.176.75.160 'cd /opt/training-app && docker compose run --rm --no-deps -T --entrypoint sh app -c "cat > /data/restore.db"' < legko-2026-10-08.db
 ```
 
-## Rotating the password and the API key
+## Rotating a password and the API key
 
-Run the same `set-password` command. Every session is revoked, so log in again in the browser **and** inside the
-installed iPhone app (it keeps its own cookies). Push subscriptions are not affected.
+Each person changes their own password in Settings → «Акаунт» (current + new; their other devices are signed out,
+this one stays signed in). For someone else's account use a link (`deploy/deploy.sh cli reset-password-link <name>`
+or the «Користувачі» sheet) or `deploy/deploy.sh set-password <name>` (see [Setting a password](#setting-a-password)):
+every session of that account is revoked, so they log in again in the browser **and** inside the installed iPhone app
+(it keeps its own cookies). Push subscriptions are not affected.
 
 To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, replace it in `.env`,
 `docker compose up -d`, check that an estimate works, then revoke the old key.
@@ -342,20 +568,25 @@ To rotate `ANTHROPIC_API_KEY`: create the new key in the Anthropic Console, repl
 
 ## Troubleshooting
 
-| Symptom                            | Look at                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------ |
-| deploy fails at "not healthy"      | the printed app logs; `deploy/deploy.sh rollback`, fix, deploy again     |
-| rollback: "schema v3 is newer"     | run `downgrade-schema` first (Rollback after the meals release)          |
-| `photo gc: skipped …` every night  | a day with unreadable `days.meals`: open and save that day's meal        |
-| site answers 502                   | `deploy/deploy.sh status`, `deploy/deploy.sh logs`                       |
-| "data is not writable by uid 1000" | run the printed `chown` as root once                                     |
-| certificate / HTTPS errors         | `deploy/deploy.sh logs caddy`; DNS A record; ports 80/443 open in ufw    |
-| login always fails                 | password not set yet → `deploy/deploy.sh set-password` (the log says so) |
-| login says «Забагато спроб»        | too many failed logins: wait 15 min (see Limits and abuse protection)    |
-| app restarts on its own            | killed for memory? `OOMKilled` check in Limits and abuse protection      |
-| no «Порахувати» / «Фото» buttons   | `ANTHROPIC_API_KEY` missing in `.env` (or not applied with `up -d`)      |
-| AI estimates keep failing          | `deploy/deploy.sh logs` → `food estimate failed: …` / `key rejected`     |
-| disk filling up                    | `docker system df` on the server; deploys prune old images and cache     |
+| Symptom                                                   | Look at                                                                                                                                   |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| deploy fails at "not healthy"                             | the printed app logs; `deploy/deploy.sh rollback`, fix, deploy again                                                                      |
+| rollback: "schema v4 is newer"                            | `deploy.sh status`, then `downgrade-schema --keep anna` first (Rollback after the users release)                                          |
+| rollback: "schema v3 is newer"                            | run `downgrade-schema` first (Rollback after the meals release)                                                                           |
+| `photo gc: kept the photos of N account(s) …` every night | a day with unreadable `days.meals`: that person opens and saves the day's meal                                                            |
+| site answers 502                                          | `deploy/deploy.sh status`, `deploy/deploy.sh logs`                                                                                        |
+| "data is not writable by uid 1000"                        | run the printed `chown` as root once                                                                                                      |
+| certificate / HTTPS errors                                | `deploy/deploy.sh logs caddy`; DNS A record; ports 80/443 open in ufw                                                                     |
+| login says «Неправильне імʼя або пароль»                  | wrong name or password (the answer never says which); a password link: `deploy/deploy.sh cli reset-password-link <name>` or «Користувачі» |
+| nobody can manage accounts                                | no usable admin (the start-up log says so) → `deploy/deploy.sh cli create-admin admin`, or `cli reset-password-link admin`                |
+| setup / reset link «вже використали»                      | someone used it first: `cli revoke-links --all`, `cli reset-password-link admin`, `cli list-users` (Accounts and the admin, step 4)       |
+| setup link opens the old app (no «Створення пароля»)      | the browser still ran the pre-users version: reload the page once, open the same link again (still valid), or use a private window        |
+| login says «Акаунт вимкнено»                              | an admin disabled the account: «Користувачі» → the account → «Увімкнути акаунт»                                                           |
+| login says «Забагато спроб»                               | too many failed logins: wait 15 min (see Limits and abuse protection)                                                                     |
+| app restarts on its own                                   | killed for memory? `OOMKilled` check in Limits and abuse protection                                                                       |
+| no «Порахувати» / «Фото» buttons                          | `ANTHROPIC_API_KEY` missing in `.env` (or not applied with `up -d`)                                                                       |
+| AI estimates keep failing                                 | `deploy/deploy.sh logs` → `food estimate failed: …` / `key rejected`                                                                      |
+| disk filling up                                           | `docker system df` on the server; deploys prune old images and cache                                                                      |
 
 ## Other projects on this server
 

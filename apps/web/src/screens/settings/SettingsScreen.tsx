@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { Redirect, useParams } from 'wouter';
+import { useCurrentUser } from '@/auth/auth';
 import { useIsDesktop } from '@/lib/platform';
 import { useThemePref } from '@/lib/theme';
 import { useToday } from '@/lib/useToday';
 import { useSettings } from '@/store/data';
 import { ContentGrid, cx, fullRowClass, ScreenHeader } from '@/ui';
 import {
+  canOpenSection,
   DESKTOP_DEFAULT_SECTION,
   parseSettingsSection,
   SETTINGS_ROOT,
@@ -23,7 +25,8 @@ import s from './SettingsScreen.module.css';
  *   sub-page (the back link, the system back or the tab), the row that opened it gets the focus — only when the
  *   focus went away with the sub-page; a fresh visit to the list keeps the browser's focus, like the other tabs.
  * - Desktop: the list in a sticky left column, the section next to it (`/settings` shows the reminders).
- * - Unknown sections redirect to the list.
+ * - Unknown sections redirect to the list; so does «Користувачі» (`/settings/users`) for anyone but an admin,
+ *   before anything of it renders (the role comes from the device pointer at once, then from `me`).
  *
  * The per-device state that the list and the sections both show is read once here and passed down: the push
  * status (the «Нагадування» badge and the notifications panel) and the theme (the «Вигляд» row and its switch) —
@@ -31,7 +34,10 @@ import s from './SettingsScreen.module.css';
  */
 export function SettingsScreen() {
   const { section } = useParams<{ section?: string }>();
-  const parsed = parseSettingsSection(section);
+  const isAdmin = useCurrentUser()?.role === 'admin';
+  const raw = parseSettingsSection(section);
+  // A section this person may not open is handled like an unknown one: back to the list, nothing rendered.
+  const parsed = raw === null || raw === 'invalid' || canOpenSection(raw, isAdmin) ? raw : 'invalid';
   const isDesktop = useIsDesktop();
   const today = useToday();
   const settings = useSettings();

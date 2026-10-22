@@ -57,6 +57,23 @@ function steps(iconClass: string): ReactNode[] {
   ];
 }
 
+/**
+ * The numbered steps for adding Легко to the iPhone home screen (the sheet's list; also shown inline by the link
+ * pages' «Готово» state in iOS Safari, D29).
+ */
+export function InstallSteps({ className }: { className?: string }) {
+  return (
+    <ol className={className ? `${s.steps} ${className}` : s.steps}>
+      {steps(s.icon ?? '').map((text, i) => (
+        <li key={i} className={s.step}>
+          <span className={s.num}>{i + 1}</span>
+          <span className={s.text}>{text}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /** How to add the app to the iPhone home screen (push notifications only work there). */
 export function InstallSheet({ open }: { open: boolean }) {
   const installed = isStandalone();
@@ -78,16 +95,7 @@ export function InstallSheet({ open }: { open: boolean }) {
           <p className={s.intro}>
             На iPhone нагадування приходять лише в застосунок, доданий на початковий екран.
           </p>
-          <ol className={s.steps}>
-            {steps(s.icon ?? '').map((text, i) => (
-              <li key={i} className={s.step}>
-                <span className={s.num}>
-                  {i + 1}
-                </span>
-                <span className={s.text}>{text}</span>
-              </li>
-            ))}
-          </ol>
+          <InstallSteps />
         </>
       )}
     </Sheet>

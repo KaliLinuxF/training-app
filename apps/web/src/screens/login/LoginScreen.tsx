@@ -1,43 +1,96 @@
+import { LINK_PATHS, parseLink } from '@legko/shared';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { useAuth } from '../../auth/auth';
+import { authEnv } from '../../auth/env';
+import { storeLinkToken } from '../../auth/linkToken';
+import { useDataStore } from '../../store/data';
+import { describedBy, Field, PasswordInput, UsernameInput } from './fields';
+import { canAutofocus, FORGOT_HINT, LOGIN_ERRORS, loginErrorText, showsForgotHint } from './loginErrors';
 import s from './LoginScreen.module.css';
-import { canAutofocus, loginErrorText } from './loginErrors';
 import { LogoMark } from './LogoMark';
 
-/** Single-password login. On success `AuthGate` swaps this screen for the app. */
+export const PASTE_LINK = {
+  open: 'Маю посилання',
+  label: 'Встав посилання із запрошенням або для нового пароля',
+  submit: 'Відкрити',
+  invalid: 'Це не схоже на посилання з Легко',
+} as const;
+
+export const LOGIN_FOOTER =
+  'Немає акаунта або не памʼятаєш пароль? Попроси в адміністратора запрошення чи посилання для нового пароля.';
+
+/** Username + password login (§9.1). On success `AuthGate` swaps this screen for the app. */
 export function LoginScreen() {
-  const { login, offline } = useAuth();
+  const { login, offline, user } = useAuth();
+  const pending = useDataStore((st) => st.sync.pending);
   const id = useId();
-  const passwordId = `${id}-password`;
-  const errorId = `${id}-error`;
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ids = {
+    username: `${id}-username`,
+    password: `${id}-password`,
+    error: `${id}-error`,
+    forgot: `${id}-forgot`,
+    paste: `${id}-paste`,
+    pasteError: `${id}-paste-error`,
+  };
+  const usernameRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const pasteRef = useRef<HTMLInputElement>(null);
   const [autoFocus] = useState(canAutofocus);
+  // After a session expiry the device user's name is filled in.
+  const [username, setUsername] = useState(() => user?.username ?? '');
+  const [prefilled] = useState(() => (user?.username ?? '') !== '');
   const [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ text: string; credentials: boolean } | null>(null);
+  const [forgot, setForgot] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [pasteError, setPasteError] = useState(false);
 
   async function submit(): Promise<void> {
     setBusy(true);
     setError(null);
     try {
-      await login(password);
+      const result = await login(username.trim(), password);
+      // `cancelled`: the switch confirm was declined; `switched`: the page reloads.
+      if (result === 'cancelled') setBusy(false);
     } catch (err) {
-      setError(loginErrorText(err));
+      const text = loginErrorText(err);
+      setError({ text, credentials: text === LOGIN_ERRORS.badCredentials });
+      setForgot(showsForgotHint(err));
       setBusy(false);
-      if (autoFocus) inputRef.current?.select();
+      if (autoFocus) passwordRef.current?.select();
     }
   }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>): void {
     e.preventDefault();
     if (busy) return;
+    if (!username.trim()) {
+      usernameRef.current?.focus();
+      return;
+    }
     if (!password) {
-      inputRef.current?.focus();
+      passwordRef.current?.focus();
       return;
     }
     void submit();
   }
+
+  function openPasted(e: FormEvent<HTMLFormElement>): void {
+    e.preventDefault();
+    const link = parseLink(pasted, window.location.origin);
+    if (!link) {
+      setPasteError(true);
+      pasteRef.current?.focus();
+      return;
+    }
+    storeLinkToken(link);
+    authEnv().replace(LINK_PATHS[link.kind]);
+  }
+
+  const showPendingHint = user !== null && pending > 0;
 
   return (
     <main className={s.page}>
@@ -48,60 +101,59 @@ export function LoginScreen() {
           <p className={s.subtitle}>Твій персональний трекер</p>
         </header>
 
+        {/* Before the form: read before signing in (as someone else). */}
+        {showPendingHint ? (
+          <p className={s.pending}>
+            На цьому пристрої є зміни {user.username}, ще не надіслані на сервер. Увійди як {user.username},
+            щоб їх надіслати.
+          </p>
+        ) : null}
+
         <form className={s.card} onSubmit={handleSubmit} noValidate>
-          {/* Lets iOS Keychain / password managers store the password under a fixed account name. */}
-          <input
-            className="visually-hidden"
-            type="text"
-            name="username"
-            autoComplete="username"
-            defaultValue="legko"
-            tabIndex={-1}
-            aria-hidden="true"
-          />
-          <div className={s.field}>
-            <label className={s.label} htmlFor={passwordId}>
-              Пароль
-            </label>
-            <div className={s.control}>
-              <input
-                ref={inputRef}
-                id={passwordId}
-                className={s.input}
-                type={visible ? 'text' : 'password'}
-                name="password"
-                autoComplete="current-password"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                enterKeyHint="go"
-                autoFocus={autoFocus}
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value);
-                  setError(null);
-                }}
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? errorId : undefined}
-              />
-              <button
-                type="button"
-                className={s.toggle}
-                aria-label="Показати пароль"
-                aria-pressed={visible}
-                aria-controls={passwordId}
-                // Keep focus (and the iPhone keyboard) in the field.
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setVisible((v) => !v)}
-              >
-                <EyeIcon crossed={visible} />
-              </button>
-            </div>
-          </div>
+          <Field id={ids.username} label="Імʼя користувача">
+            <UsernameInput
+              ref={usernameRef}
+              id={ids.username}
+              autoComplete="username"
+              enterKeyHint="next"
+              autoFocus={autoFocus && !prefilled}
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError(null);
+              }}
+              aria-invalid={error?.credentials ? true : undefined}
+              aria-describedby={error?.credentials ? ids.error : undefined}
+            />
+          </Field>
+          <Field id={ids.password} label="Пароль">
+            <PasswordInput
+              ref={passwordRef}
+              id={ids.password}
+              name="password"
+              autoComplete="current-password"
+              enterKeyHint="go"
+              autoFocus={autoFocus && prefilled}
+              visible={visible}
+              onToggle={() => setVisible((v) => !v)}
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError(null);
+              }}
+              aria-invalid={error ? true : undefined}
+              aria-describedby={describedBy(error && ids.error, forgot && ids.forgot)}
+            />
+          </Field>
 
           {error ? (
-            <p id={errorId} className={s.error} role="alert">
-              {error}
+            <p id={ids.error} className={s.error} role="alert">
+              {error.text}
+            </p>
+          ) : null}
+          {forgot ? (
+            <p id={ids.forgot} className={s.fieldHint}>
+              {FORGOT_HINT}
             </p>
           ) : null}
 
@@ -113,28 +165,56 @@ export function LoginScreen() {
         {offline ? (
           <p className={s.hint}>Немає зʼєднання з сервером. Увійти можна, щойно зʼявиться інтернет.</p>
         ) : null}
+        {/* After a failed login the hint in the card says the same: show the advice once. Nothing left to show →
+            no empty footer (it would double the column gap above the paste field). */}
+        {forgot && pasteOpen ? null : (
+          <div className={s.footer}>
+            {forgot ? null : <p className={s.hint}>{LOGIN_FOOTER}</p>}
+            {pasteOpen ? null : (
+              <button type="button" className={s.ghost} onClick={() => setPasteOpen(true)}>
+                {PASTE_LINK.open}
+              </button>
+            )}
+          </div>
+        )}
+
+        {pasteOpen ? (
+          <form className={s.card} onSubmit={openPasted} noValidate>
+            <Field id={ids.paste} label={PASTE_LINK.label}>
+              <input
+                ref={pasteRef}
+                id={ids.paste}
+                className={`${s.input} ${s.plain}`}
+                type="url"
+                inputMode="url"
+                name="link"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                autoFocus
+                placeholder="https://…"
+                value={pasted}
+                onChange={(e) => {
+                  setPasted(e.target.value);
+                  setPasteError(false);
+                }}
+                aria-invalid={pasteError ? true : undefined}
+                aria-describedby={pasteError ? ids.pasteError : undefined}
+              />
+            </Field>
+            {pasteError ? (
+              <p id={ids.pasteError} className={s.error} role="alert">
+                {PASTE_LINK.invalid}
+              </p>
+            ) : null}
+            <button type="submit" className={s.secondary}>
+              {PASTE_LINK.submit}
+            </button>
+          </form>
+        ) : null}
       </div>
     </main>
-  );
-}
-
-function EyeIcon({ crossed }: { crossed: boolean }) {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
-      <circle cx="12" cy="12" r="3" />
-      {crossed ? <path d="M4 4l16 16" /> : null}
-    </svg>
   );
 }

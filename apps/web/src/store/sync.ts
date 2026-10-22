@@ -5,10 +5,17 @@
  * A single worker talks to the server, so a `GET /api/data` and a `POST /api/ops` never
  * overlap: a server copy can never miss ops that were acknowledged while it was in flight,
  * and replaying the still-pending outbox on top of it is always correct.
+ *
+ * Accounts (docs/multi-user.md §8.3): the engine works for one **owner** at a time — the device user, bound with
+ * `bindOwner(id)` / `startSync(id)`. Every request carries the owner (`X-Legko-User`), so a session that belongs to
+ * someone else answers 409 `user_mismatch` and nothing of this copy reaches their account; the worker then stops and
+ * tells the auth layer (`onUserMismatch`). The worker only runs for a real user id: with the legacy owner bound (the
+ * provisional legacy copy) or no owner at all (unit tests of other screens) changes are applied and persisted
+ * locally only.
  */
 import { appDataSchema, applyOps, emptyData, opSchema, type AppData, type Op } from '@legko/shared';
 import { api, ApiError } from '../lib/api';
-import { CACHE_KEYS, clearCache, loadCache, persist } from './cache';
+import { adoptLegacyCache, bindCache, LEGACY_OWNER, loadCache, persist, wipeDevice } from './cache';
 import { newOutboxId, normalizeAppData, parseCachedData, parseOutbox, type OutboxItem } from './normalize';
 import { initialSyncState, patchSync, useDataStore, type SyncState } from './state';
 
@@ -33,6 +40,9 @@ export const SYNC_ERRORS = {
   importInvalid: 'Файл не схожий на резервну копію «Легко»',
 } as const;
 
+/** Thrown by `importAll` when no account is bound to this copy (nothing is uploaded). */
+export const NO_OWNER_MESSAGE = 'На цьому пристрої ввійдено в інший акаунт';
+
 /** Delay before retry number `attempt` (1-based): 2 s, 4 s, 8 s … capped at 60 s. */
 export function retryDelay(attempt: number): number {
   return Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.max(0, attempt - 1));
@@ -40,8 +50,13 @@ export function retryDelay(attempt: number): number {
 
 // ---- module state ----------------------------------------------------------------------
 
+/** Whose copy memory holds: a user id, `LEGACY_OWNER` (the provisional legacy copy) or null (none bound). */
+let owner: string | null = null;
+/** Set by a 409 `user_mismatch`: nothing is sent until `resumeSync()` or another owner is bound. */
+let paused = false;
+
 let outbox: readonly OutboxItem[] = [];
-/** Bumped by `resetLocal()`; async results that started under an older generation are dropped. */
+/** Bumped by `resetLocal()` and by binding another owner; async results that started under an older one are dropped. */
 let generation = 0;
 let hydrated = false;
 let hydrating: Promise<void> | null = null;
@@ -68,18 +83,22 @@ let retryTimer: ReturnType<typeof setTimeout> | undefined;
 let errorKind: 'notice' | 'retry' | null = null;
 
 const unauthorizedListeners = new Set<() => void>();
+const mismatchListeners = new Set<() => void>();
+
+/** The owner requests are made for: a real user id only (never the legacy owner, never none). */
+const syncOwner = (): string | null => (owner !== null && owner !== LEGACY_OWNER ? owner : null);
 
 // ---- local state helpers ---------------------------------------------------------------
 
 function setOutbox(next: readonly OutboxItem[]): void {
   outbox = next;
-  persist(CACHE_KEYS.outbox, next);
+  persist('outbox', next);
   patchSync({ pending: next.length });
 }
 
 function setData(data: AppData, sync: Partial<SyncState> = {}): void {
   useDataStore.setState((s) => ({ data, sync: { ...s.sync, ...sync } }));
-  persist(CACHE_KEYS.data, data);
+  persist('data', data);
 }
 
 function setError(message: string, kind: 'notice' | 'retry'): void {
@@ -116,8 +135,8 @@ function hydrate(): Promise<void> {
         sync: { ...s.sync, loaded: s.sync.loaded || cachedData !== null, pending: merged.length },
       }));
       if (fresh.length > 0) {
-        persist(CACHE_KEYS.data, data);
-        persist(CACHE_KEYS.outbox, merged);
+        persist('data', data);
+        persist('outbox', merged);
       }
     })
     .catch((err: unknown) => {
@@ -132,9 +151,30 @@ function hydrate(): Promise<void> {
   return run;
 }
 
+/** Forgets everything in memory (not on the device): another owner, or a logout. */
+function resetMemory(): void {
+  stopSession();
+  generation += 1;
+  outbox = [];
+  hydrated = false;
+  hydrating = null;
+  worker = null;
+  rekick = false;
+  rekickForced = false;
+  blocked = false;
+  attempt = 0;
+  retryAt = 0;
+  lastLoadAt = 0;
+  errorKind = null;
+  paused = false;
+  useDataStore.setState({ data: emptyData(), sync: initialSyncState() });
+}
+
 // ---- worker ----------------------------------------------------------------------------
 
 function kick(force = false): void {
+  const who = syncOwner();
+  if (who === null || paused) return;
   if (!active && !force) return;
   if (worker) {
     rekick = true;
@@ -143,7 +183,7 @@ function kick(force = false): void {
   }
   const gen = generation;
   const run: Promise<void> = Promise.resolve()
-    .then(() => work(gen))
+    .then(() => work(gen, who))
     .catch((err: unknown) => console.error('[legko] sync worker crashed', err))
     .finally(() => {
       if (worker === run) worker = null;
@@ -157,14 +197,14 @@ function kick(force = false): void {
   worker = run;
 }
 
-async function work(gen: number): Promise<void> {
+async function work(gen: number, who: string): Promise<void> {
   await hydrate();
   try {
-    while (gen === generation && !blocked && Date.now() >= retryAt) {
+    while (gen === generation && !blocked && !paused && Date.now() >= retryAt) {
       if (active && wantLoad && (!loadedThisSession || outbox.length === 0)) {
-        if (!(await loadFromServer(gen))) return;
+        if (!(await loadFromServer(gen, who))) return;
       } else if (outbox.length > 0) {
-        if (!(await sendNextBatch(gen))) return;
+        if (!(await sendNextBatch(gen, who))) return;
       } else {
         return;
       }
@@ -174,14 +214,14 @@ async function work(gen: number): Promise<void> {
   }
 }
 
-async function loadFromServer(gen: number): Promise<boolean> {
+async function loadFromServer(gen: number, who: string): Promise<boolean> {
   patchSync({ syncing: true });
   // Cleared before the request: a refresh asked for while it is in flight needs a newer copy.
   wantLoad = false;
   lastLoadAt = Date.now();
   let server: AppData;
   try {
-    server = await api.getData();
+    server = await api.getData(who);
   } catch (err) {
     if (gen === generation) {
       wantLoad = true;
@@ -197,11 +237,14 @@ async function loadFromServer(gen: number): Promise<boolean> {
   return true;
 }
 
-async function sendNextBatch(gen: number): Promise<boolean> {
+async function sendNextBatch(gen: number, who: string): Promise<boolean> {
   const batch = outbox.slice(0, MAX_BATCH);
   patchSync({ syncing: true });
   try {
-    await api.sendOps(batch.map((item) => item.op));
+    await api.sendOps(
+      batch.map((item) => item.op),
+      who,
+    );
   } catch (err) {
     if (gen !== generation) return false;
     const rejected =
@@ -241,9 +284,15 @@ function markSuccess(): void {
   patchSync(patch);
 }
 
+const isMismatch = (err: unknown): boolean => err instanceof ApiError && err.code === 'user_mismatch';
+
 function handleFailure(err: unknown): void {
   if (err instanceof ApiError && err.status === 401) {
     handleUnauthorized();
+    return;
+  }
+  if (isMismatch(err)) {
+    handleMismatch();
     return;
   }
   if (!(err instanceof ApiError && err.isNetwork)) {
@@ -279,6 +328,18 @@ function retryNow(force = false): void {
 function handleUnauthorized(): void {
   stopSession();
   for (const listener of [...unauthorizedListeners]) listener();
+}
+
+/**
+ * The session belongs to another account than this copy (another tab signed in, D11). Nothing was applied, and
+ * nothing is sent again (no retry) until the auth layer has decided whose device this is.
+ */
+function handleMismatch(): void {
+  paused = true;
+  wantLoad = false;
+  clearTimeout(retryTimer);
+  retryTimer = undefined;
+  for (const listener of [...mismatchListeners]) listener();
 }
 
 // ---- session ---------------------------------------------------------------------------
@@ -377,20 +438,37 @@ function enqueue(ops: readonly Op[]): boolean {
   outbox = [...outbox, ...valid.map((op) => ({ id: newOutboxId(), op }))];
   const data = applyOps(useDataStore.getState().data, valid);
   useDataStore.setState((s) => ({ data, sync: { ...s.sync, pending: outbox.length } }));
-  persist(CACHE_KEYS.data, data);
-  persist(CACHE_KEYS.outbox, outbox);
+  persist('data', data);
+  persist('outbox', outbox);
   kick();
   return true;
 }
 
 /**
- * Starts syncing (after login): device cache → `GET /api/data` → pending ops replayed on top,
- * then keeps the outbox flowing. Returns a cleanup that stops this session.
+ * Makes `next` the owner of the in-memory copy and of the device cache keys: a user id, `LEGACY_OWNER` (the
+ * provisional legacy copy) or null (none). Binding another owner stops the session and forgets the memory copy
+ * (never another person's data on screen or in a request); binding the same owner again changes nothing.
  */
-export function startSync(): () => void {
+export function bindOwner(next: string | null): void {
+  if (next === owner) return;
+  resetMemory();
+  owner = next;
+  bindCache(next);
+}
+
+/** The owner bound now (null = none). */
+export const boundOwner = (): string | null => owner;
+
+/**
+ * Starts syncing for `id` (the device user, after login): device cache → `GET /api/data` → pending ops replayed on
+ * top, then keeps the outbox flowing. Returns a cleanup that stops this session.
+ */
+export function startSync(id: string): () => void {
+  bindOwner(id);
   stopSession();
-  const id = ++sessionSeq;
-  sessionId = id;
+  paused = false;
+  const session = ++sessionSeq;
+  sessionId = session;
   active = true;
   loadedThisSession = false;
   wantLoad = true;
@@ -399,8 +477,51 @@ export function startSync(): () => void {
   detachTriggers = attachTriggers();
   kick();
   return () => {
-    if (sessionId === id) stopSession();
+    if (sessionId === session) stopSession();
   };
+}
+
+/** Stops the running session (listeners, retries); memory and the device copy stay. */
+export function stopSync(): void {
+  stopSession();
+}
+
+/** Whether a 409 `user_mismatch` stopped the worker (cleared by `resumeSync`, `startSync` or another owner). */
+export const isSyncPaused = (): boolean => paused;
+
+/** After a 409 `user_mismatch` the auth layer found the session is the device user's after all: carry on. */
+export function resumeSync(): void {
+  if (!paused) return;
+  paused = false;
+  wantLoad = true;
+  retryNow();
+}
+
+/**
+ * The legacy owner signed in on a device with the legacy copy: the legacy keys become `id`'s (merged with anything
+ * already stored for `id`), memory is kept (it is the same person's copy) and merged with the cache again.
+ */
+export async function adoptLegacy(id: string): Promise<void> {
+  if (owner !== null && owner !== LEGACY_OWNER && owner !== id) bindOwner(id);
+  await adoptLegacyCache(id);
+  owner = id;
+  paused = false;
+  bindCache(id);
+  await rehydrate();
+}
+
+/**
+ * Re-reads the bound owner's device copy and merges it with memory (after `mergeLegacyCache` / an adoption changed
+ * it under a running app), then refreshes from the server when a session runs.
+ */
+export async function rehydrate(): Promise<void> {
+  hydrated = false;
+  hydrating = null;
+  await hydrate();
+  if (active) {
+    wantLoad = true;
+    retryNow();
+  }
 }
 
 /**
@@ -419,6 +540,11 @@ export function refreshFromServer(): void {
  */
 export async function flushNow(): Promise<boolean> {
   if (hydrated && outbox.length === 0) return true;
+  if (syncOwner() === null || paused) {
+    // Nobody to send for (or the session is someone else's): report what is waiting.
+    await hydrate();
+    return outbox.length === 0;
+  }
   retryNow(true);
   while (worker) await worker;
   return hydrated && outbox.length === 0;
@@ -428,6 +554,8 @@ export async function flushNow(): Promise<boolean> {
 export async function importAll(input: AppData): Promise<void> {
   const parsed = appDataSchema.safeParse(input);
   if (!parsed.success) throw new ApiError(400, 'bad_request', SYNC_ERRORS.importInvalid);
+  const who = syncOwner();
+  if (who === null || paused) throw new ApiError(409, 'user_mismatch', NO_OWNER_MESSAGE);
   await flushNow();
   blocked = true;
   try {
@@ -436,9 +564,12 @@ export async function importAll(input: AppData): Promise<void> {
     // Whatever is still queued now predates the backup and is replaced by it.
     const superseded = new Set(outbox.map((item) => item.id));
     try {
-      await api.importData(parsed.data);
+      await api.importData(parsed.data, who);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401 && gen === generation) handleUnauthorized();
+      if (gen === generation) {
+        if (err instanceof ApiError && err.status === 401) handleUnauthorized();
+        else if (isMismatch(err)) handleMismatch();
+      }
       throw err;
     }
     if (gen !== generation) return;
@@ -465,23 +596,14 @@ export async function importAll(input: AppData): Promise<void> {
   }
 }
 
-/** Forgets everything on this device: stops syncing, clears memory and IndexedDB (logout). */
-export async function resetLocal(): Promise<void> {
-  stopSession();
-  generation += 1;
-  outbox = [];
-  hydrated = false;
-  hydrating = null;
-  worker = null;
-  rekick = false;
-  rekickForced = false;
-  blocked = false;
-  attempt = 0;
-  retryAt = 0;
-  lastLoadAt = 0;
-  errorKind = null;
-  useDataStore.setState({ data: emptyData(), sync: initialSyncState() });
-  await clearCache();
+/**
+ * Forgets everything on this device (logout, a switch to another account): stops syncing, clears memory and wipes
+ * the device cache of every account (`wipeDevice`; `keepLegacy` keeps the legacy keys). Resolves `true` once the
+ * wipe is verified; never throws.
+ */
+export async function resetLocal(opts: { keepLegacy?: boolean } = {}): Promise<boolean> {
+  resetMemory();
+  return wipeDevice(opts);
 }
 
 /** Called when the server says the session is gone (401). Returns an unsubscribe function. */
@@ -492,7 +614,18 @@ export function onUnauthorized(listener: () => void): () => void {
   };
 }
 
-/** Whether there is data to work with offline (device cache or an earlier server load). */
+/**
+ * Called when the server says the session belongs to another account (409 `user_mismatch`); the worker has stopped
+ * and sends nothing more. Returns an unsubscribe function.
+ */
+export function onUserMismatch(listener: () => void): () => void {
+  mismatchListeners.add(listener);
+  return () => {
+    mismatchListeners.delete(listener);
+  };
+}
+
+/** Whether there is data of the bound owner to work with offline (device cache or an earlier server load). */
 export async function hasDeviceCache(): Promise<boolean> {
   await hydrate();
   return useDataStore.getState().sync.loaded;

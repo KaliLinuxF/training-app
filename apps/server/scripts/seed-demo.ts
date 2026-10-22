@@ -1,15 +1,18 @@
 /**
- * Dev only: fills a running local server with ~10 weeks of realistic demo data
- * (port of the design prototype's `seed()`), via login + POST /api/import.
+ * Dev only: fills ONE account of a running local server with ~10 weeks of realistic demo data
+ * (port of the design prototype's `seed()`), via login + POST /api/import. Only that account's data is replaced.
  *
- *   pnpm --filter @legko/server exec tsx scripts/seed-demo.ts --port 3000 --password <DEV_PASSWORD>
+ *   pnpm --filter @legko/server exec tsx scripts/seed-demo.ts --port 3000 [--username anna] --password <DEV_PASSWORD>
  */
 import {
   addDays,
+  API,
   defaultSettings,
+  meResponseSchema,
   normalizeDay,
   parse,
   todayISO,
+  USER_HEADER,
   type AppData,
   type DayEntry,
   type Meal,
@@ -170,6 +173,49 @@ export function demoData(today: string): AppData {
   return data;
 }
 
+export const DEFAULT_SEED_USERNAME = 'anna';
+
+export interface SeedOptions {
+  /** `http://127.0.0.1:<port>`: also sent as `Origin` (the server's mutation guard). */
+  origin: string;
+  username: string;
+  password: string;
+  today: string;
+  /** Injectable for tests (the app's `request`). */
+  fetch?: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+/**
+ * Logs in as `username` (a v4 session) and imports the demo data with `X-Legko-User` = the id from the login response
+ * (D11). Returns that id.
+ */
+export async function seedDemo({
+  origin,
+  username,
+  password,
+  today,
+  fetch: request = fetch,
+}: SeedOptions): Promise<string> {
+  const headers = { 'Content-Type': 'application/json', Origin: origin };
+  const login = await request(`${origin}${API.login}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ username, password }),
+  });
+  if (!login.ok) throw new Error(`Login failed: ${login.status} ${await login.text()}`);
+  const me = meResponseSchema.safeParse(await login.json());
+  if (!me.success)
+    throw new Error('Login answered without an account: is the server older than this script?');
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
+  const res = await request(`${origin}${API.import}`, {
+    method: 'POST',
+    headers: { ...headers, Cookie: cookie, [USER_HEADER]: me.data.user.id },
+    body: JSON.stringify(demoData(today)),
+  });
+  if (!res.ok) throw new Error(`Import failed: ${res.status} ${await res.text()}`);
+  return me.data.user.id;
+}
+
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);
   const v = i >= 0 ? process.argv[i + 1] : fallback;
@@ -179,22 +225,14 @@ function arg(name: string, fallback?: string): string {
 
 async function main(): Promise<void> {
   const origin = `http://127.0.0.1:${arg('port', '3000')}`;
-  const password = arg('password', process.env.DEV_PASSWORD);
-  const headers = { 'Content-Type': 'application/json', Origin: origin };
-  const login = await fetch(`${origin}/api/auth/login`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ password }),
+  const username = arg('username', process.env.DEV_USERNAME || DEFAULT_SEED_USERNAME);
+  await seedDemo({
+    origin,
+    username,
+    password: arg('password', process.env.DEV_PASSWORD),
+    today: arg('today', todayISO()),
   });
-  if (!login.ok) throw new Error(`Login failed: ${login.status} ${await login.text()}`);
-  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-  const res = await fetch(`${origin}/api/import`, {
-    method: 'POST',
-    headers: { ...headers, Cookie: cookie },
-    body: JSON.stringify(demoData(arg('today', todayISO()))),
-  });
-  if (!res.ok) throw new Error(`Import failed: ${res.status} ${await res.text()}`);
-  console.log(`Seeded demo data into ${origin}`);
+  console.log(`Seeded demo data into ${username} at ${origin}`);
 }
 
 if (process.argv[1]?.includes('seed-demo')) {

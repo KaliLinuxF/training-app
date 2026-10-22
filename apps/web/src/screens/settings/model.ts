@@ -453,10 +453,10 @@ export const BACKUP_COPY = {
   safariOnly: 'На цьому iPhone копію можна завантажити лише в Safari',
 } as const;
 
-/** Asked before a backup replaces everything. */
+/** Asked before a backup replaces everything of this account (an import never touches another account). */
 export const RESTORE_CONFIRM = {
   title: 'Відновити з резервної копії?',
-  body: 'Усі поточні записи буде замінено даними з файлу.',
+  body: 'Усі твої поточні записи буде замінено даними з файлу. Інших акаунтів це не торкнеться.',
   confirmLabel: 'Відновити',
   destructive: true,
 } as const satisfies ConfirmOptions;

@@ -4,6 +4,16 @@ import { z } from 'zod';
 z.config({ jitless: true });
 import { DEFAULT_MEAL_TYPES, emptyMacroGoals, normalizeTypeNames } from './defaults';
 import { isValidHM, isValidISODate, isValidTimeZone } from './dates';
+import type { MeResponse } from './api';
+import {
+  AI_LIMIT_BOUNDS,
+  INVITE_NOTE_MAX,
+  PASSWORD_LIMITS,
+  USER_ROLES,
+  usernameProblem,
+  type AiLimits,
+  type SessionUser,
+} from './users';
 import type {
   AppData,
   DayEntry,
@@ -246,8 +256,6 @@ export const appDataSchema = z.object({
   settings: settingsSchema,
 }) satisfies z.ZodType<AppData>;
 
-export const loginRequestSchema = z.object({ password: z.string().min(1).max(200) });
-
 export const pushSubscribeRequestSchema = z.object({
   subscription: z.object({
     endpoint: z.url().max(2000),
@@ -257,7 +265,14 @@ export const pushSubscribeRequestSchema = z.object({
   timezone: z.string().max(64).refine(isValidTimeZone, 'Unknown time zone').optional(),
 });
 
-export const pushUnsubscribeRequestSchema = z.object({ endpoint: z.url().max(2000) });
+/**
+ * `auth` = the browser subscription's own `keys.auth` (D15): with it the row is removed whoever owns it; without it
+ * (old clients) only the caller's own row.
+ */
+export const pushUnsubscribeRequestSchema = z.object({
+  endpoint: z.url().max(2000),
+  auth: z.string().min(1).max(100).optional(),
+});
 
 const base64 = (max: number) => z.string().min(16).max(max).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Expected base64');
 
@@ -303,4 +318,84 @@ export const foodEstimateResultSchema = z.object({
     )
     .max(LIMITS.mealItems),
   comment: z.string().trim().max(300),
+});
+
+// ── Accounts (docs/multi-user.md §6.1) ──────────────────────────────────────────────────────────────────────────
+// Username / new-password rules are checked in the routes with `usernameProblem` / `passwordProblem`, so they map to
+// `invalid_username` / `weak_password` instead of a generic `bad_request`: the request schemas only cap the sizes.
+
+/** User ids (and invite / reset link ids): 32 lowercase hex characters. */
+export const userIdSchema = z.string().regex(/^[0-9a-f]{32}$/, 'Invalid id');
+/** One-time link token: 32 random bytes in base64url (43 characters). */
+export const linkTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/, 'Invalid link token');
+/** A username someone may register or rename to (trimmed; `admin` and `legko` are reserved). */
+export const usernameSchema = z
+  .string()
+  .trim()
+  .refine((v) => usernameProblem(v) === null, 'Invalid username');
+export const newPasswordSchema = z.string().min(PASSWORD_LIMITS.min).max(PASSWORD_LIMITS.max);
+
+/**
+ * `POST /api/auth/login`. The name is not format-checked (an invalid name answers exactly like a wrong one); an absent
+ * `username` (the pre-v4 bundle sends only the password) means the alias `legko` = the legacy owner (D24).
+ */
+export const loginRequestSchema = z.object({
+  username: z.string().trim().min(1).max(64).optional(),
+  password: z.string().min(1).max(200),
+});
+
+const passwordChangeViaSchema = z.enum(['self', 'reset', 'setup', 'cli']);
+
+export const sessionUserSchema = z.object({
+  id: userIdSchema,
+  username: z.string().min(1).max(64),
+  role: z.enum(USER_ROLES),
+  createdAt: z.number(),
+  legacyOwner: z.boolean(),
+  passwordChange: z
+    .object({ at: z.number(), via: passwordChangeViaSchema, by: z.string().nullable() })
+    .nullable(),
+}) satisfies z.ZodType<SessionUser>;
+
+/**
+ * The client validates every `MeResponse` / `LoginResponse` with this: a 2xx without a valid `user` (an old v3 server
+ * during a rollback answers `{ ok: true }`) is the client's `outdated_server`.
+ */
+export const meResponseSchema = z.object({
+  ok: z.literal(true),
+  user: sessionUserSchema,
+}) satisfies z.ZodType<MeResponse>;
+
+/** `POST /api/auth/invite/check`, `POST /api/auth/reset/check`. */
+export const linkCheckRequestSchema = z.object({ token: linkTokenSchema });
+export const inviteAcceptRequestSchema = z.object({
+  token: linkTokenSchema,
+  username: z.string().max(64),
+  password: z.string().max(200),
+});
+export const resetCompleteRequestSchema = z.object({ token: linkTokenSchema, password: z.string().max(200) });
+
+export const changePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: z.string().max(200),
+});
+export const renameRequestSchema = z.object({ username: z.string().max(64), password: z.string().min(1).max(200) });
+
+export const createInviteRequestSchema = z.object({ note: z.string().trim().max(INVITE_NOTE_MAX).default('') });
+/** Invite ids use the same 32-hex format as user ids. */
+export const inviteIdRequestSchema = z.object({ id: userIdSchema });
+export const userTargetRequestSchema = z.object({ userId: userIdSchema });
+export const setRoleRequestSchema = z.object({ userId: userIdSchema, role: z.enum(USER_ROLES) });
+export const setDisabledRequestSchema = z.object({ userId: userIdSchema, disabled: z.boolean() });
+/** `confirmUsername` must equal the target's username (case-insensitive; checked in the route). */
+export const deleteUserRequestSchema = z.object({ userId: userIdSchema, confirmUsername: z.string().max(64) });
+
+export const aiLimitsSchema = z.object({
+  perUser: z.number().int().min(AI_LIMIT_BOUNDS.perUser.min).max(AI_LIMIT_BOUNDS.perUser.max),
+  global: z.number().int().min(AI_LIMIT_BOUNDS.global.min).max(AI_LIMIT_BOUNDS.global.max),
+}) satisfies z.ZodType<AiLimits>;
+/** `limit` null = back to the default per-user limit. */
+export const userAiLimitRequestSchema = z.object({
+  userId: userIdSchema,
+  limit: z.number().int().min(AI_LIMIT_BOUNDS.perUser.min).max(AI_LIMIT_BOUNDS.perUser.max).nullable(),
 });

@@ -1,4 +1,5 @@
-import { PASSWORD } from './support/env';
+import { USERNAME_LABEL } from './support/app';
+import { USERNAME } from './support/env';
 import { expect, test } from './support/test';
 
 /** Push notification deep links (DEEP_LINKS in @legko/shared) open a sheet for today and clean the URL. */
@@ -181,9 +182,11 @@ test.describe('deep links', () => {
 
     test('the link survives the login screen and opens once she is in', async ({ app, page }) => {
       await page.goto('/?sheet=measure');
-      await page.getByLabel('Пароль', { exact: true }).fill(PASSWORD);
-      await page.getByRole('button', { name: 'Увійти' }).click();
+      await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toBeVisible();
+      // The login fills the name and the password (anna).
+      await app.loginUi();
       await app.ready();
+      expect((await app.deviceCache()).user?.username).toBe(USERNAME);
       await expect(app.sheet('Заміри тіла')).toBeVisible();
       await expect(page).toHaveURL(/\/$/);
     });

@@ -3,14 +3,15 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Router, Switch } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
-import { authActions } from '@/auth/auth';
+import type { AdminOverview, AdminUser } from '@legko/shared';
+import { authActions, useAuthStore } from '@/auth/auth';
 import type * as ApiModule from '@/lib/api';
 import { ApiError } from '@/lib/api';
 import { DESKTOP_QUERY } from '@/lib/platform';
 import type { PushStatus } from '@/lib/push';
 import { dataActions, useDataStore } from '@/store/data';
 import { initialSyncState } from '@/store/state';
-import { deferred, sampleData, settle } from '@/store/test-utils';
+import { deferred, sampleData, sessionUser, settle } from '@/store/test-utils';
 import type * as SyncModule from '@/store/sync';
 import { ui, useUiStore } from '@/store/ui';
 import { ConfirmHost } from '@/ui';
@@ -19,6 +20,7 @@ import { backupDevice, type ShareHost } from './backupFile';
 import { parseBackup } from './model';
 import listStyles from './SettingsList.module.css';
 import { SettingsScreen } from './SettingsScreen';
+import { resetAdminOverview } from './users/adminOverview';
 
 const mocks = vi.hoisted(() => ({
   push: {
@@ -28,14 +30,15 @@ const mocks = vi.hoisted(() => ({
     sendTestPush: vi.fn<() => Promise<number>>(),
     syncPushSubscription: vi.fn<() => Promise<void>>(),
   },
-  api: { sendOps: vi.fn(), getData: vi.fn(), importData: vi.fn(), logout: vi.fn() },
+  api: { sendOps: vi.fn(), getData: vi.fn(), importData: vi.fn(), logout: vi.fn(), foodStatus: vi.fn() },
+  admin: { overview: vi.fn<() => Promise<AdminOverview>>() },
   flushNow: vi.fn<() => Promise<boolean>>(),
 }));
 
 vi.mock('@/lib/push', () => mocks.push);
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof ApiModule>()),
-  api: { ...mocks.api, exportUrl: '/api/export' },
+  api: { ...mocks.api, admin: mocks.admin, exportUrl: '/api/export' },
 }));
 vi.mock('@/store/sync', async (importOriginal) => ({
   ...(await importOriginal<typeof SyncModule>()),
@@ -77,11 +80,38 @@ const nav = () => within(screen.getByRole('navigation', { name: 'Розділи 
 const row = (title: string) => nav().getByRole('link', { name: new RegExp(`^${title}`) });
 const desktop = () => installMatchMedia((query) => query === DESKTOP_QUERY);
 
+/** A row of the admin overview. */
+const adminUser = (username: string, patch: Partial<AdminUser> = {}): AdminUser => ({
+  id: Array.from(username, (c) => c.charCodeAt(0).toString(16))
+    .join('')
+    .padEnd(32, '0')
+    .slice(0, 32),
+  username,
+  role: 'user',
+  status: 'active',
+  createdAt: Date.UTC(2026, 9, 1),
+  lastSeenAt: null,
+  ai: { today: 0, last30Days: 0, limit: 40, customLimit: null },
+  self: false,
+  ...patch,
+});
+
+const OVERVIEW: AdminOverview = {
+  users: [adminUser('admin', { role: 'admin', self: true }), adminUser('anna'), adminUser('olya')],
+  invites: [],
+  limits: { perUser: 40, global: 150 },
+  aiToday: { used: 0, ceiling: 150 },
+};
+
 beforeEach(() => {
   installMatchMedia();
   for (const fn of Object.values(mocks.push)) fn.mockReset();
   for (const fn of Object.values(mocks.api)) fn.mockReset();
   mocks.api.sendOps.mockReturnValue(new Promise(() => undefined));
+  mocks.api.foodStatus.mockReturnValue(new Promise(() => undefined));
+  mocks.admin.overview.mockReset().mockResolvedValue(OVERVIEW);
+  resetAdminOverview();
+  useAuthStore.setState({ status: 'authed', offline: false, user: sessionUser() });
   mocks.flushNow.mockReset().mockResolvedValue(true);
   useDataStore.setState({ data: sampleData(), sync: { ...initialSyncState(), loaded: true, online: true } });
   useUiStore.setState({ sheet: null, toast: null, confirm: null });
@@ -97,7 +127,7 @@ afterEach(() => {
 });
 
 describe('SettingsScreen — the list (phone)', () => {
-  it('shows the header, the six sections with their summaries, «Вийти» and the caption', async () => {
+  it('shows the header, the sections with their summaries, «Акаунт» last and the caption — no «Вийти»', async () => {
     await renderReady('/settings', 'enabled');
     const h1 = screen.getByRole('heading', { level: 1, name: 'Налаштування' });
     const navEl = screen.getByRole('navigation', { name: 'Розділи налаштувань' });
@@ -112,6 +142,7 @@ describe('SettingsScreen — the list (phone)', () => {
       '/settings/meals',
       '/settings/appearance',
       '/settings/data',
+      '/settings/account',
     ]);
     expect(links.map((a) => plain(a.textContent))).toEqual([
       'Нагадування 3 увімк.',
@@ -120,21 +151,65 @@ describe('SettingsScreen — the list (phone)', () => {
       'Прийоми їжі 4 типи',
       'Вигляд Авто',
       'Дані і копія Синхронізовано',
+      'Акаунт anna',
     ]);
-    // Two groups: what she plans with, then the app.
+    // Three groups: what she plans with, the app, then the account (where the «Вийти» card was, D30).
     expect(
       within(navEl)
         .getAllByRole('list')
         .map((ul) => within(ul).getAllByRole('link').length),
-    ).toEqual([4, 2]);
+    ).toEqual([4, 2, 1]);
     for (const link of links) expect(link.getAttribute('aria-current')).toBeNull();
 
-    const logout = screen.getByRole('button', { name: 'Вийти' });
-    expect(navEl.compareDocumentPosition(logout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('Легко · трекер схуднення')).toBeTruthy();
+    // «Вийти» moved to the «Акаунт» page; «Користувачі» is for admins only; nobody asked for the overview.
+    expect(screen.queryByRole('button', { name: 'Вийти' })).toBeNull();
+    expect(screen.queryByRole('link', { name: /^Користувачі/ })).toBeNull();
+    expect(mocks.admin.overview).not.toHaveBeenCalled();
+    const caption = screen.getByText('Легко · трекер схуднення');
+    expect(navEl.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // No section content on the list itself.
     expect(screen.queryByRole('region', { name: 'Сповіщення на телефон' })).toBeNull();
     expect(screen.queryByRole('link', { name: 'Назад: Налаштування' })).toBeNull();
+  });
+
+  it('shows «…» for the account while the signed-in name is not known yet', async () => {
+    useAuthStore.setState({ user: null });
+    await renderReady('/settings', 'enabled');
+    expect(plain(row('Акаунт').textContent)).toBe('Акаунт …');
+    expect(screen.queryByRole('link', { name: /^Користувачі/ })).toBeNull();
+  });
+
+  it('gives an admin the «Користувачі» row with the account count, and drops the caption', async () => {
+    useAuthStore.setState({ user: sessionUser({ username: 'admin', role: 'admin' }) });
+    const answer = deferred<AdminOverview>();
+    mocks.admin.overview.mockReturnValue(answer.promise);
+    await renderReady('/settings', 'enabled');
+
+    const navEl = screen.getByRole('navigation', { name: 'Розділи налаштувань' });
+    const lists = within(navEl).getAllByRole('list');
+    expect(lists.map((ul) => within(ul).getAllByRole('link').length)).toEqual([4, 2, 2]);
+    // Nothing next to «Користувачі» while the overview loads.
+    expect(plain(row('Користувачі').textContent)).toBe('Користувачі');
+    expect(row('Користувачі').getAttribute('href')).toBe('/settings/users');
+    expect(plain(row('Акаунт').textContent)).toBe('Акаунт admin');
+    expect(within(lists[2] as HTMLElement).getAllByRole('link')).toEqual([row('Акаунт'), row('Користувачі')]);
+    expect(screen.queryByText('Легко · трекер схуднення')).toBeNull();
+
+    await act(async () => {
+      answer.resolve(OVERVIEW);
+      await settle();
+    });
+    expect(plain(row('Користувачі').textContent)).toBe('Користувачі 3 акаунти');
+    expect(mocks.admin.overview).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens «Акаунт» from its row', async () => {
+    const { memory } = await renderReady('/settings');
+    fireEvent.click(row('Акаунт'));
+    expect(memory.history).toEqual(['/settings', '/settings/account']);
+    expect(screen.getByRole('heading', { level: 1, name: 'Акаунт' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Профіль' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Вийти' })).toBeTruthy();
   });
 
   it('puts a push problem badge inside the «Нагадування» link (part of its name)', async () => {
@@ -286,6 +361,28 @@ describe('SettingsScreen — the list (phone)', () => {
     }
   });
 
+  it('sends anyone but an admin from «Користувачі» back to the list, asking the admin API nothing', async () => {
+    for (const user of [sessionUser(), null]) {
+      useAuthStore.setState({ user });
+      const { memory } = await renderReady('/settings/users');
+      expect(memory.history, String(user?.role)).toEqual(['/settings']);
+      expect(screen.getByRole('heading', { level: 1, name: 'Налаштування' })).toBeTruthy();
+      expect(screen.queryByRole('heading', { name: 'Користувачі' })).toBeNull();
+      cleanup();
+    }
+    expect(mocks.admin.overview).not.toHaveBeenCalled();
+  });
+
+  it('leaves «Користувачі» as soon as the role turns out to be «user»', async () => {
+    useAuthStore.setState({ user: sessionUser({ username: 'admin', role: 'admin' }) });
+    const { memory } = await renderReady('/settings/users');
+    expect(screen.getByRole('heading', { level: 1, name: 'Користувачі' })).toBeTruthy();
+    act(() => useAuthStore.setState({ user: sessionUser({ username: 'admin', role: 'user' }) }));
+    // Replaced, not pushed: Back does not lead into the page again.
+    expect(memory.history).toEqual(['/settings']);
+    expect(screen.queryByRole('heading', { level: 1, name: 'Користувачі' })).toBeNull();
+  });
+
   it('shares one push status between the sub-page and the list', async () => {
     mocks.push.enablePush.mockResolvedValue('enabled');
     await renderReady('/settings/reminders', 'default');
@@ -311,7 +408,9 @@ describe('SettingsScreen — desktop (list + detail)', () => {
     // The cards' own titles sit one level below the pane's <h2>.
     expect(pane.getByRole('heading', { level: 3, name: 'Сповіщення на телефон' })).toBeTruthy();
     expect(pane.getByRole('heading', { level: 3, name: 'Контрольне зважування' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Вийти' })).toBeTruthy();
+    // «Вийти» is on the «Акаунт» pane now, not under the list.
+    expect(screen.queryByRole('button', { name: 'Вийти' })).toBeNull();
+    expect(plain(row('Акаунт').textContent)).toBe('Акаунт anna');
     // No back link and no second <h1> on desktop.
     expect(screen.queryByRole('link', { name: 'Назад: Налаштування' })).toBeNull();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
@@ -680,7 +779,7 @@ describe('Дані і копія (/settings/data)', () => {
 
     expect(confirm).toHaveBeenCalledWith({
       title: 'Відновити з резервної копії?',
-      body: 'Усі поточні записи буде замінено даними з файлу.',
+      body: 'Усі твої поточні записи буде замінено даними з файлу. Інших акаунтів це не торкнеться.',
       confirmLabel: 'Відновити',
       destructive: true,
     });
@@ -868,15 +967,17 @@ describe('Дані і копія (/settings/data)', () => {
   });
 });
 
-describe('«Вийти» (/settings)', () => {
+describe('«Вийти» (/settings/account)', () => {
   const logoutButton = (name: string) => screen.getByRole<HTMLButtonElement>('button', { name });
 
   it('logs out from its own row', async () => {
     const logout = vi.spyOn(authActions, 'logout').mockResolvedValue(true);
-    await renderReady('/settings');
+    await renderReady('/settings/account');
     const button = logoutButton('Вийти');
-    // Its own group, after the section links.
+    // On the «Акаунт» page (D30), after the account's own cards.
     expect(button.closest('nav')).toBeNull();
+    const nameCard = screen.getByRole('region', { name: 'Імʼя для входу' });
+    expect(nameCard.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(button);
     expect(logout).toHaveBeenCalledTimes(1);
     await act(settle);
@@ -888,7 +989,7 @@ describe('«Вийти» (/settings)', () => {
     vi.spyOn(authActions, 'logout').mockImplementation(async () =>
       (await ui.confirm({ title: 'Вийти з Легко на цьому пристрої?' })) ? leaving.promise : false,
     );
-    await renderReady('/settings');
+    await renderReady('/settings/account');
 
     fireEvent.click(logoutButton('Вийти'));
     await act(settle);
@@ -915,7 +1016,7 @@ describe('«Вийти» (/settings)', () => {
   describe('focus after the dialog', () => {
     /** The real `authActions.logout()` and the real dialog (the shell mounts `ConfirmHost` once). */
     async function openLogoutDialog() {
-      await renderReady('/settings');
+      await renderReady('/settings/account');
       render(<ConfirmHost />);
       const button = logoutButton('Вийти');
       button.focus();
@@ -949,7 +1050,7 @@ describe('«Вийти» (/settings)', () => {
     });
 
     it('takes no focus after a tap that never focused the row (iPhone Safari)', async () => {
-      await renderReady('/settings');
+      await renderReady('/settings/account');
       render(<ConfirmHost />);
       fireEvent.click(logoutButton('Вийти'));
       await act(settle);
@@ -962,7 +1063,7 @@ describe('«Вийти» (/settings)', () => {
 
   it('says so when the logout fails', async () => {
     vi.spyOn(authActions, 'logout').mockRejectedValue(new Error('offline'));
-    await renderReady('/settings');
+    await renderReady('/settings/account');
     fireEvent.click(logoutButton('Вийти'));
     await act(settle);
     expect(toast()).toBe('Не вдалося вийти. Спробуй ще раз');

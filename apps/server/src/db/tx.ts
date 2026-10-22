@@ -12,3 +12,11 @@ export function transaction<T>(db: Database, fn: () => T): T {
     throw err;
   }
 }
+
+/**
+ * `fn` as one atomic unit: inside the caller's transaction when one is open (so a repository method can be composed
+ * into a larger `BEGIN IMMEDIATE`), otherwise in its own `transaction()`.
+ */
+export function atomic<T>(db: Database, fn: () => T): T {
+  return db.isTransaction ? fn() : transaction(db, fn);
+}

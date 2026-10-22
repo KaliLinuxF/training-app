@@ -1,0 +1,147 @@
+/*
+ * Form parts of «Акаунт» and «Користувачі» (docs/multi-user.md §9): 54px fields with 16px text (iOS zooms into
+ * anything smaller), 13/600 labels like the kit's Field, the login screen's error box.
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  height: 54px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  transition: border-color 150ms ease;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+/* The border above is the focus ring; without this the global :focus-visible outline would add a second one
+   (text fields match :focus-visible after a tap or a scripted focus too). 0,2,0 beats the global 0,1,0. */
+.input:focus-visible {
+  outline: none;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--accD);
+}
+
+/* A field on the --paper of a sheet (not inside a card): the card colour, like the kit's TextArea. */
+.input.onPaper {
+  background: var(--card);
+}
+
+/* Muted line under a field («Щонайменше 8 символів», the username rule). */
+.hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+/* role=alert: the login screen's box. */
+.error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--r14);
+  background: var(--accT);
+  color: var(--accD);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+/* Explanations under a card's controls («Інші пристрої вийдуть з акаунта, цей — ні.»). */
+.note {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Two buttons side by side («Зберегти імʼя» · «Скасувати»). */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+/*
+ * A destructive solid button («Видалити назавжди») and a destructive text button («Видалити акаунт…»). The element
+ * part outranks the kit Button's one-class variant in any bundle order.
+ */
+button.danger {
+  background: var(--accD);
+  color: var(--card);
+}
+
+/* Disabled (until the name is typed): the kit's grey disabled solid, not a pale accent that reads as «soft». */
+button.danger:disabled {
+  background: var(--solid);
+  color: var(--onSolid);
+}
+
+button.dangerGhost {
+  color: var(--accD);
+  font-weight: 600;
+}
+
+/*
+ * A heading the focus is put on after its card's control went away or got disabled (../focus.ts): a place to go on
+ * from, not a control — no ring, like LinkCard's title. On a CardHeader (the class sits on its wrapper) or directly
+ * on a SectionTitle.
+ */
+.focusSpot:focus,
+.focusSpot h2:focus,
+.focusSpot h3:focus {
+  outline: none;
+}
+
+/* One muted status line in a card («Завантажую…», «Потрібен інтернет»). */
+.status {
+  margin: 0;
+  padding: 0 2px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink2);
+}

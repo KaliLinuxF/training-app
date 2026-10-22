@@ -81,6 +81,9 @@ afterEach(() => {
   rmSync(photosRoot, { recursive: true, force: true });
 });
 
+/** The default AI limits of the server (config `FOOD_USER_DAILY_LIMIT` / `FOOD_DAILY_LIMIT`). */
+const limits = (perUser: number, global = 150): TestServerOptions => ({ aiLimits: { perUser, global } });
+
 async function setup(options: TestServerOptions = {}) {
   const estimator = fakeEstimator();
   const photosDir = join(photosRoot, 'photos');
@@ -88,7 +91,8 @@ async function setup(options: TestServerOptions = {}) {
   const cookie = await s.login();
   const estimate = (body: unknown, extra: { cookie?: string | null; origin?: string | null } = {}) =>
     s.call(ESTIMATE, { cookie, body, ...extra });
-  const status = async () => json<FoodStatusResponse>(await s.call(STATUS, { cookie }));
+  const status = async (as: string = cookie) =>
+    json<FoodStatusResponse>(await s.call(STATUS, { cookie: as }));
   const photoRows = (): number => Number(s.db.prepare('SELECT COUNT(*) AS n FROM photos').get()?.n);
   return { s, cookie, estimator, photosDir, estimate, status, photoRows };
 }
@@ -96,14 +100,25 @@ async function setup(options: TestServerOptions = {}) {
 describe('GET /api/food/status', () => {
   it('is disabled without an API key (no estimator)', async () => {
     const { status } = await setup({ estimator: null });
-    expect(await status()).toEqual({ enabled: false, remainingToday: 60 });
+    expect(await status()).toEqual({ enabled: false, remainingToday: 40, limitToday: 40 });
   });
 
-  it('is enabled with an estimator and reports the remaining budget', async () => {
-    const { status, estimate } = await setup({ foodDailyLimit: 5 });
-    expect(await status()).toEqual({ enabled: true, remainingToday: 5 });
+  it('is enabled with an estimator and reports her remaining budget and her limit', async () => {
+    const { status, estimate } = await setup(limits(5));
+    expect(await status()).toEqual({ enabled: true, remainingToday: 5, limitToday: 5 });
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
-    expect(await status()).toEqual({ enabled: true, remainingToday: 4 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 4, limitToday: 5 });
+  });
+
+  it('limitToday is her own limit: a per-user override, else the admin-saved default, else the config', async () => {
+    const { s, status } = await setup(limits(5));
+    s.budget.setLimits({ perUser: 7, global: 150 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 7, limitToday: 7 });
+    s.users.setAiLimit(s.anna.id, 3);
+    expect(await status()).toEqual({ enabled: true, remainingToday: 3, limitToday: 3 });
+    // remainingToday is the smaller of hers and everybody's.
+    s.budget.setLimits({ perUser: 7, global: 2 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 2, limitToday: 3 });
   });
 
   it('requires a session', async () => {
@@ -161,6 +176,10 @@ describe('POST /api/food/estimate', () => {
       expect(photo.status).toBe(200);
       expect(photo.headers.get('Content-Type')).toBe('image/jpeg');
       expect(photo.headers.get('Cache-Control')).toBe('private, max-age=31536000, immutable');
+      // Cached per session cookie; no validators, so a cookie mismatch is never answered with a 304.
+      expect(photo.headers.get('Vary')).toBe('Cookie');
+      expect(photo.headers.get('ETag')).toBeNull();
+      expect(photo.headers.get('Last-Modified')).toBeNull();
       expect(photo.headers.get('X-Content-Type-Options')).toBe('nosniff');
       expect(Buffer.from(await photo.arrayBuffer()).equals(bytes)).toBe(true);
     }
@@ -186,7 +205,7 @@ describe('POST /api/food/estimate', () => {
     expect(res.status).toBe(400);
     expect(await json(res)).toMatchObject({ error: 'bad_request' });
     expect(estimator.inputs).toHaveLength(0);
-    expect((await status()).remainingToday).toBe(60);
+    expect((await status()).remainingToday).toBe(40);
   });
 
   it('rejects invalid JSON', async () => {
@@ -223,7 +242,7 @@ describe('POST /api/food/estimate', () => {
 
     expect(estimator.inputs).toHaveLength(0);
     expect(photoRows()).toBe(0);
-    expect((await status()).remainingToday).toBe(60);
+    expect((await status()).remainingToday).toBe(40);
   });
 
   it('allows ~3.5 MB request bodies (largest photo the schema accepts)', async () => {
@@ -379,7 +398,7 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
       expect(res.status).toBe(502);
       expect(await json(res)).toEqual({ error: 'ai_failed', message: expect.any(String) });
     }
-    expect((await status()).remainingToday).toBe(58);
+    expect((await status()).remainingToday).toBe(38);
   });
 
   it.each([
@@ -403,7 +422,22 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
     expect(await json(res)).toEqual({ error: 'not_found', message: 'Фото не знайдено' });
     expect(estimator.recalcInputs).toHaveLength(0);
     expect(photoRows()).toBe(0);
-    expect((await status()).remainingToday).toBe(60);
+    expect((await status()).remainingToday).toBe(40);
+  });
+
+  it('404 not_found (the same answer) for another user’s photo, without calling the model or spending', async () => {
+    const { s, estimate, estimator, status } = await setup();
+    const id = (await json<FoodEstimateResponse>(await estimate({ date: DATE, image }))).photoId ?? '';
+    const olya = await s.createUser('olya');
+    const before = await status(olya.cookie);
+
+    const res = await estimate({ date: DATE, items: corrected, photoId: id }, { cookie: olya.cookie });
+    expect(res.status).toBe(404);
+    expect(await json(res)).toEqual({ error: 'not_found', message: 'Фото не знайдено' });
+    expect(estimator.recalcInputs).toHaveLength(0);
+    expect(await status(olya.cookie)).toEqual(before);
+    // Still hers: the owner recalculates with it as usual.
+    expect((await estimate({ date: DATE, items: corrected, photoId: id })).status).toBe(200);
   });
 
   it('404 once the daily clean-up has removed the photo', async () => {
@@ -438,7 +472,7 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
     expect(estimator.inputs).toHaveLength(0);
     expect(estimator.recalcInputs).toHaveLength(0);
     expect(photoRows()).toBe(0);
-    expect((await status()).remainingToday).toBe(60);
+    expect((await status()).remainingToday).toBe(40);
   });
 
   it('answers 503 ai_unavailable when the feature is disabled', async () => {
@@ -460,15 +494,15 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
   });
 
   it('counts each recalculation as one estimate, failed ones too, then 429', async () => {
-    const { estimate, estimator, status, photoRows } = await setup({ foodDailyLimit: 3 });
+    const { estimate, estimator, status, photoRows } = await setup(limits(3));
     const id = (await json<FoodEstimateResponse>(await estimate({ date: DATE, image }))).photoId ?? '';
     expect((await estimate({ date: DATE, items: corrected, photoId: id })).status).toBe(200);
-    expect(await status()).toEqual({ enabled: true, remainingToday: 1 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 1, limitToday: 3 });
     estimator.nextRecalc = () => {
       throw new FoodAiError('ai_failed', 'test');
     };
     expect((await estimate({ date: DATE, items: corrected, photoId: id })).status).toBe(502);
-    expect(await status()).toEqual({ enabled: true, remainingToday: 0 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 0, limitToday: 3 });
 
     const res = await estimate({ date: DATE, items: corrected, photoId: id });
     expect(res.status).toBe(429);
@@ -484,13 +518,13 @@ describe('POST /api/food/estimate (recalculate mode)', () => {
 
 describe('daily estimate budget', () => {
   it('429 rate_limited once the limit is used, counting failed calls too', async () => {
-    const { estimate, estimator, status, photoRows } = await setup({ foodDailyLimit: 2 });
+    const { estimate, estimator, status, photoRows } = await setup(limits(2));
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
     estimator.next = () => {
       throw new FoodAiError('ai_failed', 'test');
     };
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(502);
-    expect(await status()).toEqual({ enabled: true, remainingToday: 0 });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 0, limitToday: 2 });
 
     const res = await estimate({ date: '2026-10-09', text: 'борщ', image });
     expect(res.status).toBe(429);
@@ -505,19 +539,19 @@ describe('daily estimate budget', () => {
   });
 
   it('renews at midnight Kyiv time', async () => {
-    const { s, estimate, status } = await setup({ foodDailyLimit: 1 });
+    const { s, estimate, status } = await setup(limits(1, 1));
     s.clock.now = Date.UTC(2026, 9, 9, 20, 59); // 23:59 in Kyiv
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
     const limited = await estimate({ date: '2026-10-09', text: 'борщ' });
     expect(limited.status).toBe(429);
     expect(limited.headers.get('Retry-After')).toBe('60');
-    s.clock.now = Date.UTC(2026, 9, 9, 21, 1); // 00:01 on Oct 10 in Kyiv
-    expect(await status()).toEqual({ enabled: true, remainingToday: 1 });
+    s.clock.now = Date.UTC(2026, 9, 9, 21, 1); // 00:01 on Oct 10 in Kyiv: both counters renewed
+    expect(await status()).toEqual({ enabled: true, remainingToday: 1, limitToday: 1 });
     expect((await estimate({ date: '2026-10-10', text: 'борщ' })).status).toBe(200);
   });
 
   it('changing settings.timezone (ops or push subscribe) does not open a fresh budget', async () => {
-    const { s, cookie, estimate, estimator, status } = await setup({ foodDailyLimit: 1 });
+    const { s, cookie, estimate, estimator, status } = await setup(limits(1));
     s.clock.now = Date.UTC(2026, 9, 9, 20, 0); // 23:00 in Kyiv
     expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status).toBe(200);
 
@@ -528,7 +562,7 @@ describe('daily estimate budget', () => {
         body: { ops: [{ kind: 'settings.put', value: { ...defaultSettings(), timezone } }] },
       });
       expect(put.status).toBe(200);
-      expect(await status(), timezone).toEqual({ enabled: true, remainingToday: 0 });
+      expect(await status(), timezone).toEqual({ enabled: true, remainingToday: 0, limitToday: 1 });
       expect((await estimate({ date: '2026-10-09', text: 'борщ' })).status, timezone).toBe(429);
     }
     await s.call('/api/push/subscribe', {
@@ -543,7 +577,173 @@ describe('daily estimate budget', () => {
   });
 });
 
+describe('per-user and global AI limits (docs/multi-user.md §5.3, D16)', () => {
+  const GLOBAL_MESSAGE = 'Підрахунки на сьогодні закінчилися. Спробуй завтра';
+  const USER_MESSAGE = 'Ліміт підрахунків на сьогодні вичерпано';
+  const borscht = { date: '2026-10-09', text: 'борщ' };
+
+  it('her own limit stops her only: the next user still has theirs, and both count globally', async () => {
+    const { s, estimate, status } = await setup(limits(2, 5));
+    const olya = await s.createUser('olya');
+    for (let i = 0; i < 2; i++) expect((await estimate(borscht)).status).toBe(200);
+    const res = await estimate(borscht);
+    expect(res.status).toBe(429);
+    expect(await json(res)).toEqual({ error: 'rate_limited', message: USER_MESSAGE });
+    expect(await status()).toEqual({ enabled: true, remainingToday: 0, limitToday: 2 });
+
+    expect(await status(olya.cookie)).toEqual({ enabled: true, remainingToday: 2, limitToday: 2 });
+    expect((await estimate(borscht, { cookie: olya.cookie })).status).toBe(200);
+    expect(await status(olya.cookie)).toEqual({ enabled: true, remainingToday: 1, limitToday: 2 });
+    const usage = s.budget.usage(s.clock.now);
+    expect(usage.globalToday).toBe(3);
+    expect(usage.byUser.get(s.anna.id)?.today).toBe(2);
+    expect(usage.byUser.get(olya.id)?.today).toBe(1);
+  });
+
+  it('the global ceiling stops everybody with its own message, before any photo is stored', async () => {
+    const { s, estimate, estimator, status, photoRows } = await setup(limits(5, 2));
+    const olya = await s.createUser('olya');
+    expect((await estimate(borscht)).status).toBe(200);
+    expect((await estimate(borscht, { cookie: olya.cookie })).status).toBe(200);
+
+    for (const cookie of [undefined, olya.cookie]) {
+      const res = await estimate({ ...borscht, image }, cookie ? { cookie } : {});
+      expect(res.status).toBe(429);
+      expect(await json(res)).toEqual({ error: 'rate_limited', message: GLOBAL_MESSAGE });
+      expect(res.headers.get('Retry-After')).toBe(String(12 * 3600));
+    }
+    // A recalculation goes through the atomic check and gets the same answer.
+    const recalc = await estimate({ date: '2026-10-09', items: [{ name: 'Хліб', portion: '' }] });
+    expect(recalc.status).toBe(429);
+    expect(await json(recalc)).toEqual({ error: 'rate_limited', message: GLOBAL_MESSAGE });
+
+    expect(photoRows()).toBe(0);
+    expect(estimator.inputs).toHaveLength(2);
+    expect(await status()).toEqual({ enabled: true, remainingToday: 0, limitToday: 5 });
+  });
+
+  it('her own exhausted limit wins over the global message when both are used up', async () => {
+    const { estimate } = await setup(limits(1, 1));
+    expect((await estimate(borscht)).status).toBe(200);
+    for (const body of [borscht, { ...borscht, image }]) {
+      expect(await json(await estimate(body))).toEqual({ error: 'rate_limited', message: USER_MESSAGE });
+    }
+  });
+
+  it('a per-user limit of 0 turns AI off for that user only (status says off, not «used up today»)', async () => {
+    const { s, estimate, estimator, status } = await setup();
+    const olya = await s.createUser('olya');
+    s.users.setAiLimit(olya.id, 0);
+    expect(await status(olya.cookie)).toEqual({ enabled: false, remainingToday: 0, limitToday: 0 });
+    // The estimate route still refuses on its own.
+    const res = await estimate(borscht, { cookie: olya.cookie });
+    expect(res.status).toBe(429);
+    expect(await json(res)).toEqual({ error: 'rate_limited', message: USER_MESSAGE });
+    expect(estimator.inputs).toHaveLength(0);
+    // Everybody else keeps AI.
+    expect(await status()).toEqual({ enabled: true, remainingToday: 40, limitToday: 40 });
+    expect((await estimate(borscht)).status).toBe(200);
+  });
+
+  it('a configured per-user default of 0 turns AI off for everyone without their own limit', async () => {
+    const { s, status } = await setup(limits(0, 150));
+    const olya = await s.createUser('olya');
+    s.users.setAiLimit(olya.id, 3);
+    expect(await status()).toEqual({ enabled: false, remainingToday: 0, limitToday: 0 });
+    expect(await status(olya.cookie)).toEqual({ enabled: true, remainingToday: 3, limitToday: 3 });
+  });
+
+  it('a saved global ceiling of 0 turns AI off for everybody; a used-up ceiling does not', async () => {
+    const { s, estimate, status } = await setup(limits(5, 150));
+    const olya = await s.createUser('olya');
+    s.budget.setLimits({ perUser: 5, global: 0 });
+    for (const cookie of [undefined, olya.cookie])
+      expect(await status(cookie)).toEqual({ enabled: false, remainingToday: 0, limitToday: 5 });
+    expect(await json(await estimate(borscht))).toEqual({ error: 'rate_limited', message: GLOBAL_MESSAGE });
+
+    // Used up for today is still «on» (the buttons explain the limit and it renews tomorrow).
+    s.budget.setLimits({ perUser: 5, global: 1 });
+    expect((await estimate(borscht)).status).toBe(200);
+    expect(await status(olya.cookie)).toEqual({ enabled: true, remainingToday: 0, limitToday: 5 });
+  });
+
+  it('parallel estimates with one left store at most one photo and call the model once', async () => {
+    const { s, estimate, estimator, photosDir, photoRows } = await setup();
+    s.users.setAiLimit(s.anna.id, 1);
+    const responses = await Promise.all(Array.from({ length: 8 }, () => estimate({ ...borscht, image })));
+    const statuses = responses.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 429, 429, 429, 429, 429, 429, 429]);
+    for (const res of responses.filter((r) => r.status === 429))
+      expect(await json(res)).toEqual({ error: 'rate_limited', message: USER_MESSAGE });
+    expect(estimator.inputs).toHaveLength(1);
+    expect(photoRows()).toBe(1);
+    expect(readdirSync(photosDir)).toHaveLength(2);
+  });
+
+  it('a refused estimate stores no photo, also when only the global ceiling is used up', async () => {
+    const { s, estimate, photoRows } = await setup(limits(5, 1));
+    const olya = await s.createUser('olya');
+    expect((await estimate(borscht)).status).toBe(200);
+    const responses = await Promise.all(
+      Array.from({ length: 4 }, () => estimate({ ...borscht, image }, { cookie: olya.cookie })),
+    );
+    expect(responses.map((r) => r.status)).toEqual([429, 429, 429, 429]);
+    expect(photoRows()).toBe(0);
+  });
+
+  it('limits an admin saved win over the configured defaults', async () => {
+    const { s, estimate } = await setup(limits(40, 150));
+    s.budget.setLimits({ perUser: 1, global: 150 });
+    expect((await estimate(borscht)).status).toBe(200);
+    expect(await json(await estimate(borscht))).toEqual({ error: 'rate_limited', message: USER_MESSAGE });
+  });
+
+  it('the estimate photo is stored as the caller’s', async () => {
+    const { s, estimate } = await setup();
+    const olya = await s.createUser('olya');
+    const res = await estimate({ ...borscht, image }, { cookie: olya.cookie });
+    const id = (await json<FoodEstimateResponse>(res)).photoId ?? '';
+    expect(s.db.prepare('SELECT user_id FROM photos WHERE id = ?').get(id)).toEqual({ user_id: olya.id });
+  });
+});
+
 describe('GET /api/photos/:id', () => {
+  it('serves a photo to its owner only: anyone else gets the same 404 as for an unknown id', async () => {
+    const { s, cookie, estimate } = await setup();
+    const id =
+      (await json<FoodEstimateResponse>(await estimate({ date: '2026-10-09', image }))).photoId ?? '';
+    const olya = await s.createUser('olya');
+    const admin = await s.login('admin');
+    for (const url of [photoUrl(id), photoThumbUrl(id)]) {
+      expect((await s.call(url, { cookie })).status).toBe(200);
+      for (const other of [olya.cookie, admin]) {
+        const res = await s.call(url, { cookie: other });
+        expect(res.status, url).toBe(404);
+        expect(await json(res)).toEqual({ error: 'not_found', message: 'Не знайдено' });
+        expect(res.headers.get('Cache-Control')).toBe('no-store');
+      }
+    }
+  });
+
+  it('a browser revalidating after an account switch gets 404 for the previous account’s photo, never a 304', async () => {
+    const { s, cookie, estimate } = await setup();
+    const id =
+      (await json<FoodEstimateResponse>(await estimate({ date: '2026-10-09', image }))).photoId ?? '';
+    const first = await s.call(photoUrl(id), { cookie });
+    expect(first.status).toBe(200);
+    // Same device, another account: the session cookie differs, so `Vary: Cookie` sends the request again.
+    const olya = await s.createUser('olya');
+    for (const url of [photoUrl(id), photoThumbUrl(id)]) {
+      const res = await s.call(url, {
+        cookie: olya.cookie,
+        headers: { 'If-None-Match': '*', 'If-Modified-Since': new Date(s.clock.now).toUTCString() },
+      });
+      expect(res.status, url).toBe(404);
+      expect(await json(res)).toEqual({ error: 'not_found', message: 'Не знайдено' });
+      expect(res.headers.get('Cache-Control')).toBe('no-store');
+    }
+  });
+
   it('requires a session', async () => {
     const { s, estimate } = await setup();
     const { photoId } = await json<FoodEstimateResponse>(await estimate({ date: '2026-10-09', image }));

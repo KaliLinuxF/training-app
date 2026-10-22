@@ -1,19 +1,26 @@
 /**
  * Compatibility of the meals release with what older builds send and keep (docs/meals-macros.md §3), checked
  * against the real server bundle over HTTP — no browser: an old cached PWA, an old offline outbox and old backup
- * files only ever talk to the API.
+ * files only ever talk to the API. Since accounts, `ServerApi` sends `X-Legko-User` by default (anna's v4 session
+ * needs it); the last describe is the pre-accounts bundle itself (docs/multi-user.md §10).
  */
 import type { APIResponse } from '@playwright/test';
 import {
+  API,
   DEFAULT_MEAL_TYPES,
   emptyMacroGoals,
+  USER_HEADER,
   type AppData,
   type DayEntry,
+  type LoginResponse,
 } from '../packages/shared/src/index';
 import { demo, MEALS_GOALS, MEALS_TODAY, meals } from './fixtures/data';
-import { TODAY } from './support/env';
+import { BASE_URL, PASSWORD, TODAY, USERNAME } from './support/env';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
+
+/** What every mutating request needs (CSRF guard). */
+const MUTATION = { Origin: BASE_URL, 'Content-Type': 'application/json' };
 
 /** What a build from before meals shows of a day — the derived fields — and sends back in its `day.put`. */
 function oldView(d: DayEntry, patch: Partial<DayEntry> = {}): DayEntry {
@@ -165,5 +172,52 @@ test.describe('compatibility with old clients, outboxes and backups (API)', () =
     expect(exported.foods.find((f) => f.name === 'Борщ')).toMatchObject({ protein: 6, fat: 9, carbs: 19 });
     await server.importData(exported);
     expect(await server.getData()).toEqual(exported);
+  });
+});
+
+test.describe('the pre-accounts bundle on her phone (docs/multi-user.md D3, D11, D24)', () => {
+  test.skip(({ isMobile }) => !isMobile, 'API level: runs once, in the iphone project');
+
+  test('a password-only login is anna on a legacy session that syncs without X-Legko-User until a header shows up', async ({
+    server,
+    playwright,
+  }) => {
+    await server.importData(meals());
+    const old = await playwright.request.newContext({ baseURL: BASE_URL });
+    try {
+      // The old login form sends only the password.
+      const login = await old.post(API.login, { data: { password: PASSWORD }, headers: MUTATION });
+      await expectOk(login);
+      const { user } = (await login.json()) as LoginResponse;
+      expect(user).toMatchObject({ id: server.id, username: USERNAME, legacyOwner: true });
+
+      // It never sends X-Legko-User: data and ops work on that session.
+      const data = await old.get(API.data);
+      await expectOk(data);
+      expect(await data.json()).toEqual(await server.getData());
+      await expectOk(
+        await old.post(API.ops, {
+          data: { ops: [{ kind: 'day.meta', date: TODAY, value: { notes: 'зі старої версії' } }] },
+          headers: MUTATION,
+        }),
+      );
+      expect((await today(server)).notes).toBe('зі старої версії');
+
+      // The new bundle on the same cookie presents the header once: from then on the session needs it.
+      await expectOk(await old.get(API.data, { headers: { [USER_HEADER]: server.id } }));
+      expect((await old.get(API.data)).status()).toBe(409);
+
+      // The Keychain alias «legko» (with a username) is a v4 login: its session is not legacy.
+      const alias = await old.post(API.login, {
+        data: { username: 'legko', password: PASSWORD },
+        headers: MUTATION,
+      });
+      await expectOk(alias);
+      expect(((await alias.json()) as LoginResponse).user.id).toBe(server.id);
+      expect((await old.get(API.data)).status()).toBe(409);
+      await expectOk(await old.get(API.data, { headers: { [USER_HEADER]: server.id } }));
+    } finally {
+      await old.dispose();
+    }
   });
 });

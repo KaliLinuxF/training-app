@@ -15,7 +15,7 @@ import todayStyles from './TodayCard.module.css';
 const mocks = vi.hoisted(() => ({
   isIOS: vi.fn(() => false),
   isStandalone: vi.fn(() => false),
-  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() },
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
 }));
 
 vi.mock('idb-keyval', () => mocks.idb);
@@ -132,6 +132,7 @@ beforeEach(async () => {
   mocks.idb.getMany.mockReset().mockImplementation(idb.getMany);
   mocks.idb.setMany.mockReset().mockImplementation(idb.setMany);
   mocks.idb.delMany.mockReset().mockImplementation(idb.delMany);
+  mocks.idb.keys.mockReset().mockImplementation(idb.keys);
   await resetLocal();
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date(2026, 9, 12, 9, 30));

@@ -16,6 +16,18 @@ export interface LoopOptions {
   logger?: Logger;
 }
 
+/** Several independent loops as one: `runNow` / `stop` reach all of them, and none waits for another's run. */
+export function combineLoops(loops: readonly Loop[]): Loop {
+  return {
+    async runNow() {
+      await Promise.all(loops.map((loop) => loop.runNow()));
+    },
+    async stop() {
+      await Promise.all(loops.map((loop) => loop.stop()));
+    },
+  };
+}
+
 /** A non-overlapping interval: a slow run (e.g. push delivery) delays, never duplicates, the next one. */
 export function startLoop({
   name,

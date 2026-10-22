@@ -7,12 +7,187 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page, TestInfo } from '@playwright/test';
-import { normalizeDay, type AppData, type FoodEstimateResponse } from '../packages/shared/src/index';
-import { TODAY } from './support/env';
+import {
+  API,
+  normalizeDay,
+  type AdminInvite,
+  type AdminOverview,
+  type AppData,
+  type FoodEstimateResponse,
+  type InviteCreatedResponse,
+  type LinkResponse,
+  type SessionUser,
+} from '../packages/shared/src/index';
+import { USERNAME_LABEL } from './support/app';
+import { BASE_URL, FIXED_NOW, TODAY } from './support/env';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
+import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
 
 const OUT = fileURLToPath(new URL('./__screenshots__/', import.meta.url));
+
+// ── Accounts: fixed answers relative to FIXED_NOW (the browser clock is fixed, the server's is real; throwaway
+//    account names are time-based), so the screenshots are the same on every run (docs/multi-user.md §11.2) ──────
+
+const NOW = FIXED_NOW.getTime();
+const DAY = 86_400_000;
+/** A well-formed one-time link token (the check endpoints are stubbed, so nobody has to issue it). */
+const LINK_TOKEN = 'e2eVisualLinkToken_0123456789abcdefghijklmn';
+
+/** `GET /api/auth/me` answers the real account (its id keeps `X-Legko-User` right) with fixed dates. */
+async function stubMe(page: Page, api: ServerApi, patch: Partial<SessionUser> = {}): Promise<SessionUser> {
+  const user: SessionUser = {
+    ...(await api.me()),
+    createdAt: Date.parse('2026-08-03T09:00:00+03:00'),
+    passwordChange: { at: NOW - DAY, via: 'reset', by: 'admin' },
+    ...patch,
+  };
+  await page.route(`**${API.me}`, (route) => route.fulfill({ json: { ok: true, user } }));
+  return user;
+}
+
+/** `GET /api/admin/users`: the admin (self), anna, a disabled and a pending account, two pending invites. */
+async function stubOverview(page: Page, admin: ServerApi, server: ServerApi): Promise<AdminOverview> {
+  const ai = (today: number, last30Days: number, customLimit: number | null = null) => ({
+    today,
+    last30Days,
+    limit: customLimit ?? 40,
+    customLimit,
+  });
+  const overview: AdminOverview = {
+    users: [
+      {
+        id: admin.id,
+        username: 'admin',
+        role: 'admin',
+        status: 'active',
+        createdAt: NOW - 40 * DAY,
+        lastSeenAt: NOW - 5 * 60_000,
+        ai: ai(0, 2),
+        self: true,
+      },
+      {
+        id: server.id,
+        username: 'anna',
+        role: 'user',
+        status: 'active',
+        createdAt: Date.parse('2026-08-03T09:00:00+03:00'),
+        lastSeenAt: NOW - 2 * 3600_000,
+        ai: ai(3, 41),
+        self: false,
+      },
+      {
+        id: 'c'.repeat(32),
+        username: 'olya',
+        role: 'user',
+        status: 'disabled',
+        createdAt: NOW - 12 * DAY,
+        lastSeenAt: NOW - 3 * DAY,
+        ai: ai(0, 9, 20),
+        self: false,
+      },
+      {
+        id: 'd'.repeat(32),
+        username: 'ira.k',
+        role: 'admin',
+        status: 'pending',
+        createdAt: NOW - DAY,
+        lastSeenAt: null,
+        ai: ai(0, 0),
+        self: false,
+      },
+    ],
+    invites: [
+      {
+        id: 'e'.repeat(32),
+        note: 'для Олі',
+        role: 'user',
+        createdAt: NOW - DAY,
+        expiresAt: NOW + 6 * DAY,
+        createdBy: 'admin',
+      },
+      {
+        id: 'f'.repeat(32),
+        note: '',
+        role: 'admin',
+        createdAt: NOW - 3600_000,
+        expiresAt: NOW + 7 * DAY,
+        createdBy: null,
+      },
+    ],
+    limits: { perUser: 40, global: 150 },
+    aiToday: { used: 12, ceiling: 150 },
+  };
+  await page.route(`**${API.adminUsers}`, (route) =>
+    route.request().method() === 'GET' ? route.fulfill({ json: overview }) : route.fallback(),
+  );
+  return overview;
+}
+
+/** The invite / reset checks answer a usable link (expiry relative to FIXED_NOW). */
+async function stubLinkChecks(page: Page): Promise<void> {
+  await page.route(`**${API.inviteCheck}`, (route) =>
+    route.fulfill({ json: { ok: true, expiresAt: NOW + 7 * DAY } }),
+  );
+  await page.route(`**${API.resetCheck}`, (route) =>
+    route.fulfill({ json: { ok: true, username: 'anna', purpose: 'reset', expiresAt: NOW + DAY } }),
+  );
+}
+
+/** The reset check answers `answer` instead (another name, the `setup` purpose). */
+async function restubResetCheck(
+  page: Page,
+  answer: { username: string; purpose: 'reset' | 'setup' },
+): Promise<void> {
+  await page.unroute(`**${API.resetCheck}`);
+  await page.route(`**${API.resetCheck}`, (route) =>
+    route.fulfill({ json: { ok: true, ...answer, expiresAt: NOW + DAY } }),
+  );
+}
+
+/** A throwaway account the mocked link flows sign in (nobody is created on the server). */
+const OLYA: SessionUser = {
+  id: 'b'.repeat(32),
+  username: 'olya',
+  role: 'user',
+  createdAt: NOW,
+  legacyOwner: false,
+  passwordChange: null,
+};
+
+/**
+ * «Створити запрошення» and «Посилання для нового пароля» answer fixed links (nothing is issued, so the shots show
+ * the same token and expiry on every run).
+ */
+async function stubLinkCreation(page: Page): Promise<void> {
+  const invite: AdminInvite = {
+    id: '9'.repeat(32),
+    note: '',
+    role: 'user',
+    createdAt: NOW,
+    expiresAt: NOW + 7 * DAY,
+    createdBy: 'admin',
+  };
+  const created: InviteCreatedResponse = {
+    ok: true,
+    path: `/invite#${LINK_TOKEN}`,
+    expiresAt: NOW + 7 * DAY,
+    invite,
+  };
+  const reset: LinkResponse = { ok: true, path: `/reset#${LINK_TOKEN}`, expiresAt: NOW + DAY };
+  await page.route(`**${API.adminInviteCreate}`, (route) =>
+    route.request().method() === 'POST' ? route.fulfill({ json: created }) : route.fallback(),
+  );
+  await page.route(`**${API.adminResetLink}`, (route) => route.fulfill({ json: reset }));
+}
+
+/** Fills the invite form (name, password twice) and sends it. */
+async function submitInvite(page: Page, username: string): Promise<void> {
+  await page.getByLabel(USERNAME_LABEL, { exact: true }).fill(username);
+  await page.getByLabel('Пароль', { exact: true }).fill('e2e-visual-pass');
+  await page.getByLabel('Повтори пароль', { exact: true }).fill('e2e-visual-pass');
+  await page.getByRole('button', { name: 'Створити акаунт', exact: true }).click();
+}
 
 /** A plate with weighed and counted positions (the item editor's shots). */
 const EDITOR_ESTIMATE: FoodEstimateResponse = {
@@ -54,7 +229,19 @@ async function shot(page: Page, info: TestInfo, name: string, fullPage = false):
   const step = view - 160; // overlap so nothing hides behind the tab bar between pages
   for (let i = 0, y = 0; y < total - 160 && i < 8; i++, y += step) {
     await page.evaluate((top) => window.scrollTo(0, top), y);
-    await expect.poll(() => page.evaluate(() => Math.round(window.scrollY))).toBe(Math.min(y, total - view));
+    // The page may still grow or shrink a little (fonts, a late row): scroll again and compare with its height now.
+    await expect
+      .poll(() =>
+        page.evaluate((top) => {
+          const target = Math.min(
+            top,
+            Math.round(document.documentElement.scrollHeight - window.innerHeight),
+          );
+          if (Math.round(window.scrollY) !== target) window.scrollTo(0, top);
+          return Math.round(window.scrollY) === target;
+        }, y),
+      )
+      .toBe(true);
     await page.screenshot({ path: join(dir, `${name}-${i + 1}.png`), animations: 'disabled' });
   }
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -140,15 +327,313 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
       test('login', async ({ page }, info) => {
         await page.goto('/');
+        await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toBeVisible();
         await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
-        await shot(page, info, '01-login');
-        await page.route('**/api/auth/login', (r) =>
-          r.fulfill({ status: 401, json: { error: 'bad_password', message: 'Неправильний пароль' } }),
+        await shot(page, info, '01-login', true);
+        // A refused login, mocked (a real one would count against the shared limits).
+        await page.route(`**${API.login}`, (r) =>
+          r.fulfill({
+            status: 401,
+            json: { error: 'bad_credentials', message: 'Неправильне імʼя або пароль' },
+          }),
         );
-        await page.getByLabel('Пароль', { exact: true }).fill('wrong');
-        await page.getByRole('button', { name: 'Увійти' }).click();
-        await expect(page.getByRole('alert')).toBeVisible();
-        await shot(page, info, '02-login-error');
+        await page.getByLabel(USERNAME_LABEL, { exact: true }).fill('anna');
+        await page.getByLabel('Пароль', { exact: true }).fill('wrong-password');
+        await page.getByRole('button', { name: 'Увійти', exact: true }).click();
+        await expect(page.getByRole('alert')).toHaveText('Неправильне імʼя або пароль');
+        await shot(page, info, '02-login-error', true);
+        // «Маю посилання»: paste an invite / reset link into the installed app.
+        await page.getByRole('button', { name: 'Маю посилання', exact: true }).click();
+        await expect(
+          page.getByLabel('Встав посилання із запрошенням або для нового пароля', { exact: true }),
+        ).toBeFocused();
+        await shot(page, info, '03-login-link', true);
+      });
+
+      test('invite and reset links', async ({ page }, info) => {
+        await stubLinkChecks(page);
+        await page.goto(`/invite#${LINK_TOKEN}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+        await expect(page.getByText('Посилання одноразове, діє до 21 жовтня.')).toBeVisible();
+        await shot(page, info, '04-invite', true);
+        if (info.project.name === 'iphone') {
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expectNoSideScroll(page, 'invite 320');
+          await shot(page, info, '04-invite-320', true);
+          await page.setViewportSize({ width: 390, height: 844 });
+        }
+
+        // A taken name (mocked: a real accept would use the link up): the error under the form, focus in the name.
+        await page.route(`**${API.inviteAccept}`, (route) =>
+          route.fulfill({ status: 409, json: { error: 'username_taken', message: 'Username taken' } }),
+        );
+        await submitInvite(page, 'olya');
+        await expect(page.getByRole('alert')).toHaveText('Це імʼя вже зайняте — обери інше');
+        await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toBeFocused();
+        await shot(page, info, '04-invite-taken', true);
+
+        // A used invite explains itself.
+        await page.unroute(`**${API.inviteCheck}`);
+        await page.route(`**${API.inviteCheck}`, (route) =>
+          route.fulfill({
+            status: 410,
+            json: { error: 'link_invalid', message: 'Посилання не працює', reason: 'used' },
+          }),
+        );
+        // A fresh page load (the same path with only a new fragment would not reload).
+        await page.goto('about:blank');
+        await page.goto(`/invite#${LINK_TOKEN}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'Посилання не працює' })).toBeVisible();
+        await shot(page, info, '05-invite-used', true);
+
+        await page.goto(`/reset#${LINK_TOKEN}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'Новий пароль' })).toBeVisible();
+        await expect(page.getByText('для anna', { exact: true })).toBeVisible();
+        await shot(page, info, '06-reset', true);
+        // Passwords that do not match (checked before anything is sent): the error, focus in the repeat field.
+        await page.getByLabel('Новий пароль', { exact: true }).fill('e2e-visual-pass');
+        await page.getByLabel('Повтори пароль', { exact: true }).fill('e2e-visual-pasz');
+        await page.getByRole('button', { name: 'Зберегти пароль', exact: true }).click();
+        await expect(page.getByRole('alert')).toHaveText('Паролі не збігаються');
+        await expect(page.getByLabel('Повтори пароль', { exact: true })).toBeFocused();
+        await shot(page, info, '06-reset-mismatch', true);
+
+        // The setup link the owner opens after `create-admin admin`: «Створення пароля», its own expiry line.
+        await restubResetCheck(page, { username: 'admin', purpose: 'setup' });
+        await page.goto('about:blank');
+        await page.goto(`/reset#${LINK_TOKEN}`);
+        await expect(page.getByRole('heading', { level: 1, name: 'Створення пароля' })).toBeVisible();
+        await expect(page.getByText('для admin', { exact: true })).toBeVisible();
+        await expect(page.getByText(/діє до 15 жовтня, 10:00/)).toBeVisible();
+        await shot(page, info, '06-setup', true);
+      });
+
+      test('«Готово» after a link in iPhone Safari', async ({ page }, info) => {
+        test.skip(
+          info.project.name !== 'iphone',
+          'iOS Safari only: anywhere else the page reloads into the app',
+        );
+        await stubLinkChecks(page);
+        // Mocked answers (a real accept would create an account): the link signs «olya» in.
+        await page.route(`**${API.inviteAccept}`, (route) =>
+          route.fulfill({ json: { ok: true, user: OLYA } }),
+        );
+        await page.goto(`/invite#${LINK_TOKEN}`);
+        await submitInvite(page, 'olya');
+        await expect(page.getByRole('heading', { level: 1, name: 'Акаунт створено' })).toBeVisible();
+        await expect(page.getByText('Імʼя для входу: olya')).toBeVisible();
+        await shot(page, info, '08-invite-done', true);
+
+        // The device is olya's now: a password link for her ends in «Пароль збережено».
+        await restubResetCheck(page, { username: 'olya', purpose: 'reset' });
+        await page.route(`**${API.resetComplete}`, (route) =>
+          route.fulfill({ json: { ok: true, user: OLYA } }),
+        );
+        await page.goto('about:blank');
+        await page.goto(`/reset#${LINK_TOKEN}`);
+        await expect(page.getByText('для olya', { exact: true })).toBeVisible();
+        await page.getByLabel('Новий пароль', { exact: true }).fill('e2e-visual-pass-2');
+        await page.getByLabel('Повтори пароль', { exact: true }).fill('e2e-visual-pass-2');
+        await page.getByRole('button', { name: 'Зберегти пароль', exact: true }).click();
+        await expect(page.getByRole('heading', { level: 1, name: 'Пароль збережено' })).toBeVisible();
+        await shot(page, info, '08-reset-done', true);
+      });
+    });
+
+    test('a link opened while signed in: sign out first', async ({ page }, info) => {
+      await stubLinkChecks(page);
+      await page.goto(`/invite#${LINK_TOKEN}`);
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(
+        page.getByText('На цьому пристрої вже ввійдено як anna. Щоб створити новий акаунт, спершу вийди.'),
+      ).toBeVisible();
+      await shot(page, info, '09-invite-signed-in', true);
+      // Someone else's password link.
+      await restubResetCheck(page, { username: 'olya', purpose: 'reset' });
+      await page.goto(`/reset#${LINK_TOKEN}`);
+      await expect(
+        page.getByText('Це посилання для olya, а на цьому пристрої ввійдено як anna.'),
+      ).toBeVisible();
+      await shot(page, info, '09-reset-signed-in', true);
+    });
+
+    test('login after an expired session with an unsent change', async ({ app, page, context }, info) => {
+      await app.goto('/');
+      await context.setOffline(true);
+      await app.trainingToggle('Не було').click();
+      await expect(app.toast('Відмічено: без тренування')).toBeVisible();
+      await context.clearCookies();
+      await context.setOffline(false);
+      await expect(app.loginButton()).toBeVisible();
+      await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toHaveValue('anna');
+      await expect(page.getByText(/^На цьому пристрої є зміни anna/)).toBeVisible();
+      // The «Відмічено…» toast from before the session ended would cover the logo.
+      await expect(app.toast('Відмічено: без тренування')).toBeHidden({ timeout: 10_000 });
+      await shot(page, info, '07-login-pending', true);
+    });
+
+    test('«Акаунт»', async ({ app, page, context, server }, info) => {
+      await stubMe(page, server);
+      await mockFood(page, { status: { enabled: true, remainingToday: 37, limitToday: 40 } });
+      await app.gotoSettings('Акаунт');
+      await expect(app.region('Профіль')).toContainText('Користувач · з 3 серпня 2026');
+      await expect(app.region('Пароль')).toContainText('Пароль задано 13 жовтня за посиланням від admin.');
+      await expect(app.region('Підрахунки калорій')).toContainText('Сьогодні ще 37 з 40');
+      await scrollTop(page);
+      await shot(page, info, '49-settings-account', true);
+      const nameCard = app.region('Імʼя для входу');
+      await nameCard.getByRole('button', { name: 'Змінити', exact: true }).click();
+      await expect(nameCard.getByLabel('Нове імʼя', { exact: true })).toBeFocused();
+      await scrollToTop(page, nameCard, 120);
+      await shot(page, info, '49-settings-account-rename');
+      await nameCard.getByRole('button', { name: 'Скасувати', exact: true }).click();
+
+      // Offline: account changes are online only, so the button is off and says why.
+      const passwordCard = app.region('Пароль');
+      await context.setOffline(true);
+      await expect(passwordCard.getByText('Потрібен інтернет', { exact: true })).toBeVisible();
+      await expect(passwordCard.getByRole('button', { name: 'Змінити пароль', exact: true })).toBeDisabled();
+      await scrollToTop(page, passwordCard, 120);
+      await shot(page, info, '49-settings-account-offline');
+      await context.setOffline(false);
+      await expect(passwordCard.getByRole('button', { name: 'Змінити пароль', exact: true })).toBeEnabled();
+
+      // A wrong current password (mocked: a real one would count against the password limiter).
+      await page.route(`**${API.accountPassword}`, (route) =>
+        route.fulfill({ status: 403, json: { error: 'wrong_password', message: 'Wrong password' } }),
+      );
+      await passwordCard.getByLabel('Поточний пароль', { exact: true }).fill('not-my-password');
+      await passwordCard.getByLabel('Новий пароль', { exact: true }).fill('e2e-visual-pass');
+      await passwordCard.getByLabel('Повтори новий пароль', { exact: true }).fill('e2e-visual-pass');
+      await passwordCard.getByRole('button', { name: 'Змінити пароль', exact: true }).click();
+      await expect(passwordCard.getByRole('alert')).toHaveText('Поточний пароль неправильний');
+      await expect(passwordCard.getByLabel('Поточний пароль', { exact: true })).toBeFocused();
+      await scrollToTop(page, passwordCard, 120);
+      await shot(page, info, '49-settings-account-wrong-password');
+    });
+
+    test.describe('the admin', () => {
+      test.use({ account: 'admin' });
+
+      test('settings list, «Користувачі», the user sheet and the delete panel', async ({
+        app,
+        page,
+        admin,
+        server,
+      }, info) => {
+        await stubMe(page, admin, {
+          createdAt: NOW - 40 * DAY,
+          passwordChange: { at: NOW - 40 * DAY, via: 'setup', by: null },
+        });
+        await stubOverview(page, admin, server);
+        await app.goto('/settings');
+        await expect(app.settingsRow('Користувачі')).toContainText('4 акаунти');
+        await expect(app.settingsRow('Акаунт')).toContainText('admin');
+        await shot(page, info, '40-settings-admin', true);
+
+        await app.gotoSettings('Користувачі');
+        await expect(app.region('Акаунти · 4')).toBeVisible();
+        await expect(app.region('Запрошення · 2')).toBeVisible();
+        await shot(page, info, '491-settings-users', true);
+
+        await app
+          .region('Акаунти · 4')
+          .getByRole('button', { name: /^anna( |$)/ })
+          .click();
+        const sheet = app.userSheet('anna');
+        await expect(sheet).toContainText('Користувач · з 3 серпня 2026');
+        await shot(page, info, '492-user-sheet');
+        await sheetBottom(page, info, sheet, '492-user-sheet');
+
+        await sheet.getByRole('button', { name: 'Видалити акаунт…', exact: true }).click();
+        await expect(
+          sheet.getByRole('textbox', { name: 'Імʼя для підтвердження', exact: true }),
+        ).toBeFocused();
+        await shot(page, info, '493-user-sheet-delete');
+
+        if (info.project.name === 'iphone') {
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expectNoSideScroll(page, 'delete panel 320');
+          await shot(page, info, '493-user-sheet-delete-320');
+          // Back to the details (Escape leaves the delete panel first).
+          await page.keyboard.press('Escape');
+          await expect(sheet.getByRole('radiogroup', { name: 'Роль' })).toBeVisible();
+          await expectNoSideScroll(page, 'user sheet 320');
+          await shot(page, info, '492-user-sheet-320');
+          await sheetBottom(page, info, sheet, '492-user-sheet-320');
+        }
+      });
+
+      test('«Користувачі» at 320, a fresh invite link and a password link in the user sheet', async ({
+        app,
+        page,
+        admin,
+        server,
+      }, info) => {
+        const phone = info.project.name === 'iphone';
+        await stubMe(page, admin, {
+          createdAt: NOW - 40 * DAY,
+          passwordChange: { at: NOW - 40 * DAY, via: 'setup', by: null },
+        });
+        await stubOverview(page, admin, server);
+        await stubLinkCreation(page);
+        await app.gotoSettings('Користувачі');
+        await expect(app.region('Акаунти · 4')).toBeVisible();
+        if (phone) {
+          // The rows with two pills and a status («ira.k», Адмін, Пароль не задано) wrap here.
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expectNoSideScroll(page, '«Користувачі» 320');
+          await shot(page, info, '491-settings-users-320', true);
+          await page.setViewportSize({ width: 390, height: 844 });
+        }
+
+        // «Створити запрошення» → the link card: the link, «Поділитися» / «Скопіювати», its expiry, «Готово».
+        const create = page.getByRole('button', { name: 'Створити запрошення', exact: true });
+        await create.click();
+        const card = app.region('Запрошення готове');
+        await expect(card.getByRole('heading', { name: 'Запрошення готове' })).toBeFocused();
+        await expect(card.getByRole('textbox', { name: 'Посилання', exact: true })).toHaveValue(
+          `${BASE_URL}/invite#${LINK_TOKEN}`,
+        );
+        // The fixed expiry (NOW + 7 days), whatever the wording around it.
+        await expect(card).toContainText('21 жовтня, 10:00');
+        await scrollToTop(page, app.region('Запросити людину'), 120);
+        // A viewport shot on desktop too: Chrome's full-page capture resizes the window for a moment, which swaps
+        // the desktop shell for the phone one and back — the card's state (the link) would not survive it.
+        await shot(page, info, '494-link-card');
+        if (phone) {
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expectNoSideScroll(page, 'invite link card 320');
+          await scrollToTop(page, card, 100);
+          await shot(page, info, '494-link-card-320');
+          await page.setViewportSize({ width: 390, height: 844 });
+        }
+        // «Готово»: the link is gone for good, focus is back on the button that made it.
+        await card.getByRole('button', { name: 'Готово', exact: true }).click();
+        await expect(card).toHaveCount(0);
+        await expect(create).toBeFocused();
+
+        // anna's sheet → «Посилання для нового пароля»: the same card in the sheet, the old password still works.
+        await app
+          .region('Акаунти · 4')
+          .getByRole('button', { name: /^anna( |$)/ })
+          .click();
+        const sheet = app.userSheet('anna');
+        await sheet.getByRole('button', { name: 'Посилання для нового пароля', exact: true }).click();
+        const reset = sheet.getByRole('region', { name: 'Посилання готове', exact: true });
+        await expect(reset.getByRole('heading', { name: 'Посилання готове' })).toBeFocused();
+        await expect(reset.getByRole('textbox', { name: 'Посилання', exact: true })).toHaveValue(
+          `${BASE_URL}/reset#${LINK_TOKEN}`,
+        );
+        await expect(reset).toContainText(/Старий пароль \S+, доки посиланням не скористаються/);
+        await reset.scrollIntoViewIfNeeded();
+        await shot(page, info, '495-user-sheet-reset-link');
+        if (phone) {
+          await page.setViewportSize({ width: 320, height: 640 });
+          await expectNoSideScroll(page, 'user sheet with the password link 320');
+          await reset.scrollIntoViewIfNeeded();
+          await shot(page, info, '495-user-sheet-reset-link-320');
+        }
       });
     });
 
@@ -476,7 +961,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         const accD = await tokenColor(page, '--accD');
         const over = food.locator('span').filter({ hasText: /^52$/ });
         await expect(over).toHaveCount(1);
-        expect(await over.evaluate((el) => getComputedStyle(el).color), 'over-goal protein').toBe(accD);
+        // Polled: the colour may settle a moment after the fresh data renders (seen once in a full dark run).
+        await expect
+          .poll(() => over.evaluate((el) => getComputedStyle(el).color), { message: 'over-goal protein' })
+          .toBe(accD);
         const under = food.locator('span').filter({ hasText: /^59$/ });
         expect(await under.evaluate((el) => getComputedStyle(el).color), 'fat under its goal').not.toBe(accD);
         await shot(page, info, '15-home-macros-goals-over', true);

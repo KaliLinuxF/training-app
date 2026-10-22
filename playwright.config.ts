@@ -13,7 +13,15 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, devices, type PlaywrightTestConfig } from '@playwright/test';
-import { BASE_URL, PASSWORD, PORT, TIMEZONE } from './e2e/support/env';
+import {
+  ADMIN_PASSWORD,
+  ADMIN_USERNAME,
+  BASE_URL,
+  PASSWORD,
+  PORT,
+  TIMEZONE,
+  USERNAME,
+} from './e2e/support/env';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const SERVER_BUNDLE = resolve(ROOT, 'apps/server/dist/index.js');
@@ -120,8 +128,11 @@ export default defineConfig({
       STATIC_DIR: WEB_DIST,
       DATA_DIR: dataDir(),
       NODE_ENV: 'development',
-      // Local test credential, applied by the server on first start (development only).
+      // Local test accounts, created by the server on first start (development only): «anna» (a user) and «admin».
+      DEV_USERNAME: USERNAME,
       DEV_PASSWORD: PASSWORD,
+      DEV_ADMIN_USERNAME: ADMIN_USERNAME,
+      DEV_ADMIN_PASSWORD: ADMIN_PASSWORD,
       LOG_LEVEL: 'warn',
       // The AI endpoints are mocked in the browser; never call the real model from tests.
       ANTHROPIC_API_KEY: '',

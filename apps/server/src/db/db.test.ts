@@ -12,13 +12,42 @@ import {
 } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import { preMigrationBackupName, pruneBackups } from '../backup';
-import { createLogger } from '../logger';
-import { createDataRepo } from './data';
+import { createLogger, type Logger } from '../logger';
+import { createDataRepos, type DataRepo } from './data';
 import { getKv, KV, setKv } from './kv';
 import { migrate, MIGRATIONS, schemaVersion } from './migrations';
 import { openDatabase } from './open';
-import { sqlite } from './sqlite';
+import { sqlite, type Database } from './sqlite';
 import { transaction } from './tx';
+import { createUserRepo, type UserId } from './users';
+
+/** The id of the database's legacy owner / «anna», created on first use. */
+function annaId(db: Database): UserId {
+  const users = createUserRepo(db);
+  return (
+    users.legacyOwner()?.id ??
+    users.byKey('anna')?.id ??
+    users.create({ username: 'anna', role: 'user', passwordHash: null, now: 0, legacyOwner: true }).id
+  );
+}
+
+/** anna's data repo (the single-account cases of the v3 suite). */
+function createDataRepo(db: Database, now: () => number = Date.now, logger?: Logger): DataRepo {
+  return createDataRepos(db, now, logger).forUser(annaId(db));
+}
+
+/** Raw `user_settings.value` of anna, or null. */
+const rawSettings = (db: Database): string | null => {
+  const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ?').get(annaId(db));
+  return row ? String(row.value) : null;
+};
+
+const putRawSettings = (db: Database, value: string): void => {
+  db.prepare(
+    `INSERT INTO user_settings (user_id, value, updated_at) VALUES (?, ?, 0)
+     ON CONFLICT (user_id) DO UPDATE SET value = excluded.value`,
+  ).run(annaId(db), value);
+};
 
 describe('openDatabase', () => {
   it('creates the file in WAL mode with the latest schema', () => {
@@ -68,14 +97,14 @@ describe('migrate', () => {
 describe('transaction', () => {
   it('commits on success and rolls back on error', () => {
     const db = openDatabase(':memory:');
-    transaction(db, () => setKv(db, KV.settings, 'a'));
+    transaction(db, () => setKv(db, KV.aiLimits, 'a'));
     expect(() =>
       transaction(db, () => {
-        setKv(db, KV.settings, 'b');
+        setKv(db, KV.aiLimits, 'b');
         throw new Error('boom');
       }),
     ).toThrow('boom');
-    expect(getKv(db, KV.settings)).toBe('a');
+    expect(getKv(db, KV.aiLimits)).toBe('a');
     expect(db.isTransaction).toBe(false);
   });
 });
@@ -83,17 +112,16 @@ describe('transaction', () => {
 describe('data repo', () => {
   it('serves defaults for corrupt stored settings', () => {
     const db = openDatabase(':memory:');
-    setKv(db, KV.settings, '{"goal": "heavy"}');
+    putRawSettings(db, '{"goal": "heavy"}');
     expect(createDataRepo(db).settings().goal).toBe(60);
-    setKv(db, KV.settings, 'not json');
+    putRawSettings(db, 'not json');
     expect(createDataRepo(db).settings().goal).toBe(60);
   });
 
   it('fills in fields missing from older stored settings', () => {
     const db = openDatabase(':memory:');
-    setKv(
+    putRawSettings(
       db,
-      KV.settings,
       JSON.stringify({ goal: 57, kcalGoal: 1500, timezone: 'Europe/Kyiv', onboarded: true }),
     );
     const s = createDataRepo(db).settings();
@@ -143,7 +171,7 @@ describe('data repo', () => {
   it('setTimezone stores a new zone once, canonicalised; aliases of the stored zone change nothing', () => {
     const db = openDatabase(':memory:');
     const repo = createDataRepo(db);
-    const raw = () => getKv(db, KV.settings);
+    const raw = () => rawSettings(db);
     expect(repo.setTimezone('Europe/Kyiv')).toBeNull();
     expect(repo.setTimezone('Europe/Kiev')).toBeNull();
     expect(raw()).toBeNull(); // defaults were never written
@@ -198,7 +226,7 @@ describe('migration v1 → v2 (photos, foods)', () => {
       expect(data.measures).toEqual([{ date: '2026-10-01', chest: 90, waist: 70, hips: null }]);
       expect(data.foods).toEqual([]);
       expect(data.settings.goal).toBe(57);
-      expect(getKv(db, KV.passwordHash)).toBe('scrypt$hash');
+      expect(createUserRepo(db).legacyOwner()?.passwordHash).toBe('scrypt$hash');
       expect(db.prepare('SELECT photos FROM days').get()).toEqual({ photos: '[]' });
       expect(db.prepare('SELECT COUNT(*) AS n FROM photos').get()).toEqual({ n: 0 });
       db.close();
@@ -307,12 +335,12 @@ const V2_SEED = `
 `;
 
 describe('migration v2 → v3 (meals, macros)', () => {
-  it('keeps every row: days become legacy days (meals NULL), dishes have no macros', () => {
+  it('keeps every row (through to v4): days become legacy days (meals NULL), dishes have no macros', () => {
     withTempDb('legko-db-v2-', (file) => {
       createAt(file, 2, V2_SEED);
       const db = openDatabase(file);
       try {
-        expect(schemaVersion(db)).toBe(3);
+        expect(schemaVersion(db)).toBe(MIGRATIONS.length);
         expect(db.prepare('SELECT meals FROM days').get()).toEqual({ meals: null });
         expect(db.prepare('SELECT protein, fat, carbs FROM foods').get()).toEqual({
           protein: null,
@@ -340,9 +368,9 @@ describe('migration v2 → v3 (meals, macros)', () => {
     });
   });
 
-  it('creates schema v3 on a fresh database', () => {
+  it('creates the latest schema (meals, macros) on a fresh database', () => {
     const db = openDatabase(':memory:');
-    expect(schemaVersion(db)).toBe(3);
+    expect(schemaVersion(db)).toBe(MIGRATIONS.length);
     const columns = (table: string) =>
       db
         .prepare(`PRAGMA table_info(${table})`)
@@ -364,7 +392,7 @@ describe('pre-migration snapshot', () => {
       openDatabase(file, { now, logger: createLogger('info', (line) => lines.push(line)) }).close();
       const backups = join(dir, 'backups');
       expect(readdirSync(backups)).toEqual([snapshotName]);
-      expect(snapshotName).toBe('legko-pre-v3-2026-10-15.db');
+      expect(snapshotName).toBe('legko-pre-v4-2026-10-15.db');
       const copy = new (sqlite().DatabaseSync)(join(backups, snapshotName), { readOnly: true });
       try {
         expect(schemaVersion(copy)).toBe(2);
@@ -525,5 +553,116 @@ describe('data repo: meals and dish macros', () => {
       '2026-10-02': { food: 'Суп', kcal: 300, trained: null, types: [], notes: '' },
     });
     expect(repo.read().days['2026-10-01']).toMatchObject({ food: 'Сніданок: Тост з тунцем', kcal: 420 });
+  });
+});
+
+describe('data repo: two users on the same dates', () => {
+  const D = '2026-10-10';
+  const setup = () => {
+    const db = openDatabase(':memory:');
+    const users = createUserRepo(db);
+    const a = users.create({ username: 'anna', role: 'user', passwordHash: null, now: 0 }).id;
+    const b = users.create({ username: 'olya', role: 'user', passwordHash: null, now: 0 }).id;
+    const repos = createDataRepos(db, () => 5);
+    return { db, a, b, A: repos.forUser(a), B: repos.forUser(b) };
+  };
+  const day = (food: string) => ({ food, kcal: 100, trained: null, types: [], notes: '' });
+
+  it('keeps every table separate: days, meals, weights, measures, foods, settings', () => {
+    const { A, B } = setup();
+    A.apply([
+      { kind: 'day.put', date: D, value: day('A') },
+      { kind: 'meal.put', date: '2026-10-11', value: meal() },
+      { kind: 'weight.put', date: D, kg: 65 },
+      { kind: 'measure.put', date: D, value: { chest: 90, waist: 70, hips: 95 } },
+      { kind: 'food.use', date: D, value: { name: 'Борщ', portion: '', kcal: 180 } },
+      { kind: 'settings.put', value: { ...defaultSettings(), goal: 57 } },
+    ]);
+    B.apply([
+      { kind: 'day.put', date: D, value: day('B') },
+      { kind: 'weight.put', date: D, kg: 80 },
+      { kind: 'food.use', date: D, value: { name: 'борщ', portion: '', kcal: 200 } },
+    ]);
+
+    const a = A.read();
+    const b = B.read();
+    expect(a.days[D]?.food).toBe('A');
+    expect(b.days[D]?.food).toBe('B');
+    expect(Object.keys(b.days)).toEqual([D]);
+    expect(a.weights).toEqual([{ date: D, kg: 65 }]);
+    expect(b.weights).toEqual([{ date: D, kg: 80 }]);
+    expect(b.measures).toEqual([]);
+    // Same dish key, separate rows (and counts).
+    expect(a.foods.map((f) => [f.name, f.count, f.kcal])).toEqual([['Борщ', 1, 180]]);
+    expect(b.foods.map((f) => [f.name, f.count, f.kcal])).toEqual([['борщ', 1, 200]]);
+    expect(a.settings.goal).toBe(57);
+    expect(b.settings.goal).toBe(60);
+    expect(B.isDone('measure', D)).toBe(false);
+    expect(A.isDone('measure', D)).toBe(true);
+  });
+
+  it('deletes and food ops of one user never touch the other', () => {
+    const { A, B } = setup();
+    for (const repo of [A, B]) {
+      repo.apply([
+        { kind: 'day.put', date: D, value: day('x') },
+        { kind: 'weight.put', date: D, kg: 70 },
+        { kind: 'food.use', date: D, value: { name: 'Кава', portion: '', kcal: 40 } },
+      ]);
+    }
+    B.apply([
+      { kind: 'day.delete', date: D },
+      { kind: 'weight.delete', date: D },
+      { kind: 'food.delete', name: 'кава' },
+    ]);
+    expect(A.read().days[D]?.food).toBe('x');
+    expect(A.read().weights).toHaveLength(1);
+    expect(A.read().foods).toHaveLength(1);
+    expect(B.read()).toMatchObject({ days: {}, weights: [], foods: [] });
+  });
+
+  it('replaceAll (import) replaces only the importer’s data', () => {
+    const { A, B } = setup();
+    A.apply([
+      { kind: 'day.put', date: D, value: day('A') },
+      { kind: 'weight.put', date: D, kg: 65 },
+      { kind: 'food.use', date: D, value: { name: 'Борщ', portion: '', kcal: 180 } },
+      { kind: 'settings.put', value: { ...defaultSettings(), goal: 57 } },
+    ]);
+    const before = A.read();
+    B.replaceAll({ ...emptyData(), days: { [D]: day('B') }, settings: { ...defaultSettings(), goal: 70 } });
+    expect(A.read()).toEqual(before);
+    expect(B.read().days[D]?.food).toBe('B');
+    expect(B.read().settings.goal).toBe(70);
+    B.replaceAll(emptyData());
+    expect(A.read()).toEqual(before);
+  });
+
+  it('setTimezone changes only that user’s settings', () => {
+    const { A, B } = setup();
+    expect(B.setTimezone('Europe/Warsaw')).toBe('Europe/Warsaw');
+    expect(B.settings().timezone).toBe('Europe/Warsaw');
+    expect(A.settings().timezone).toBe('Europe/Kyiv');
+  });
+
+  it('deleting a user removes all of their rows (cascade) and nothing of the other', () => {
+    const { db, a, b, A, B } = setup();
+    for (const repo of [A, B]) {
+      repo.apply([
+        { kind: 'day.put', date: D, value: day('x') },
+        { kind: 'weight.put', date: D, kg: 70 },
+        { kind: 'measure.put', date: D, value: { chest: 1, waist: null, hips: null } },
+        { kind: 'food.use', date: D, value: { name: 'Кава', portion: '', kcal: 40 } },
+        { kind: 'settings.put', value: defaultSettings() },
+      ]);
+    }
+    transaction(db, () => createUserRepo(db).delete(b));
+    for (const table of ['days', 'weights', 'measures', 'foods', 'user_settings']) {
+      const rows = db.prepare(`SELECT user_id FROM ${table}`).all();
+      expect(
+        rows.map((r) => r.user_id),
+        table,
+      ).toEqual([a]);
+    }
   });
 });

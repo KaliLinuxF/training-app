@@ -2,7 +2,16 @@
  * The «Налаштування» list: sections, routes, row icons and the one-line summaries shown on each row.
  * Pure functions only — SettingsList wires them to the store, the push status and the theme.
  */
-import { f0, fN, normalizeTypeNames, WORKOUT_TYPES, type Reminders, type Settings } from '@legko/shared';
+import {
+  f0,
+  fN,
+  normalizeTypeNames,
+  WORKOUT_TYPES,
+  type AdminOverview,
+  type Reminders,
+  type SessionUser,
+  type Settings,
+} from '@legko/shared';
 import type { PushStatus } from '@/lib/push';
 import type { ThemePref } from '@/lib/theme';
 import type { SyncState } from '@/store/data';
@@ -11,8 +20,9 @@ import { plural, REMINDER_ORDER, syncStatus, THEME_OPTIONS, type SyncStatusView 
 
 // ---- sections & routes ----------------------------------------------------------------
 
-/** URL slugs of the sub-pages (`/settings/:section`). */
-export type SettingsSectionId = 'reminders' | 'goals' | 'workouts' | 'meals' | 'appearance' | 'data';
+/** URL slugs of the sub-pages (`/settings/:section`). `users` is shown to admins only. */
+export type SettingsSectionId =
+  'reminders' | 'goals' | 'workouts' | 'meals' | 'appearance' | 'data' | 'account' | 'users';
 
 export const SETTINGS_ROOT = '/settings';
 
@@ -28,6 +38,8 @@ export const SECTION_TITLES: Readonly<Record<SettingsSectionId, string>> = {
   meals: 'Прийоми їжі',
   appearance: 'Вигляд',
   data: 'Дані і копія',
+  account: 'Акаунт',
+  users: 'Користувачі',
 };
 
 export const SECTION_ICONS: Readonly<Record<SettingsSectionId, { icon: IconName; tone: ListIconTone }>> = {
@@ -37,13 +49,42 @@ export const SECTION_ICONS: Readonly<Record<SettingsSectionId, { icon: IconName;
   meals: { icon: 'food', tone: 'acc2' },
   appearance: { icon: 'theme', tone: 'neutral' },
   data: { icon: 'data', tone: 'acc2' },
+  account: { icon: 'user', tone: 'acc' },
+  users: { icon: 'users', tone: 'acc2' },
 };
 
-/** The list's groups, in order: what she plans with, then the app itself. */
+/**
+ * The list's groups, in order: what she plans with, the app itself, then the account. The last group takes the
+ * place of the old «Вийти» card (docs/multi-user.md D30); its «Користувачі» row is for admins only (`settingsGroups`).
+ */
 export const SETTINGS_GROUPS: readonly (readonly SettingsSectionId[])[] = [
   ['reminders', 'goals', 'workouts', 'meals'],
   ['appearance', 'data'],
+  ['account', 'users'],
 ];
+
+/** Sections only an admin may open (everyone else is sent back to the list). */
+export const ADMIN_SECTIONS: readonly SettingsSectionId[] = ['users'];
+
+/** The groups the signed-in person sees: without the admin-only rows unless `isAdmin`. */
+export function settingsGroups(isAdmin: boolean): SettingsSectionId[][] {
+  return SETTINGS_GROUPS.map((group) => group.filter((id) => isAdmin || !ADMIN_SECTIONS.includes(id))).filter(
+    (group) => group.length > 0,
+  );
+}
+
+/** Whether `id` may be opened by this person (`users` needs an admin). */
+export function canOpenSection(id: SettingsSectionId, isAdmin: boolean): boolean {
+  return isAdmin || !ADMIN_SECTIONS.includes(id);
+}
+
+/**
+ * The caption «Легко · трекер схуднення» under the list shows for users and is hidden while the «Користувачі» row
+ * shows: the admin's extra row would otherwise make the list scroll on a 390×763 iPhone (D30).
+ */
+export function showsCaption(groups: readonly (readonly SettingsSectionId[])[]): boolean {
+  return !groups.some((group) => group.includes('users'));
+}
 
 const SECTION_IDS: readonly string[] = SETTINGS_GROUPS.flat();
 
@@ -87,6 +128,21 @@ export function mealTypesSummary(mealTypes: readonly string[]): string {
 /** «Авто» / «Світла» / «Темна». */
 export function themeSummary(pref: ThemePref): string {
   return THEME_OPTIONS.find((o) => o.value === pref)?.label ?? 'Авто';
+}
+
+/** The «Акаунт» row: the username, «…» while it is not known yet (the legacy copy shown before `me`). */
+export function accountSummary(user: Pick<SessionUser, 'username'> | null): string {
+  return user?.username ?? '…';
+}
+
+/** «1 акаунт», «3 акаунти», «5 акаунтів». */
+export function accountsCount(n: number): string {
+  return `${n} ${plural(n, 'акаунт', 'акаунти', 'акаунтів')}`;
+}
+
+/** The «Користувачі» row: how many accounts there are, from the admin overview; nothing while it loads. */
+export function usersSummary(overview: Pick<AdminOverview, 'users'> | null): string | undefined {
+  return overview ? accountsCount(overview.users.length) : undefined;
 }
 
 /**

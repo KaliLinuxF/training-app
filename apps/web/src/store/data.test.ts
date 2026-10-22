@@ -2,18 +2,23 @@ import { addDays, LEGACY_MEAL_ID, mealIdSchema, type DayEntry, type Meal, type O
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ApiModule from '../lib/api';
 import { ApiError } from '../lib/api';
-import { CACHE_KEYS, flushCacheWrites } from './cache';
+import { cacheKeys, flushCacheWrites, LEGACY_KEYS } from './cache';
 import {
+  adoptLegacy,
+  bindOwner,
   clearSyncError,
   commit,
   dataActions,
   flushNow,
   getAppData,
   hasDeviceCache,
+  isSyncPaused,
   newMealId,
   onUnauthorized,
+  onUserMismatch,
   refreshFromServer,
   resetLocal,
+  resumeSync,
   startSync,
   useDataStore,
 } from './data';
@@ -36,7 +41,7 @@ const mocks = vi.hoisted(() => ({
     sendOps: vi.fn(),
     importData: vi.fn(),
   },
-  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() },
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
 }));
 
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -46,6 +51,9 @@ vi.mock('../lib/api', async (importOriginal) => ({
 vi.mock('idb-keyval', () => mocks.idb);
 
 const TODAY = '2026-10-09';
+/** The device user every test syncs for (sent as `X-Legko-User`). */
+const OWNER = 'a1'.padEnd(32, '0');
+const KEYS = cacheKeys(OWNER);
 const networkError = () => new ApiError(0, 'network', 'offline');
 const sync = () => useDataStore.getState().sync;
 const sentBatches = (): Op[][] => mocks.api.sendOps.mock.calls.map((call) => call[0] as Op[]);
@@ -55,7 +63,7 @@ let idb: FakeIdb;
 let stop: (() => void) | undefined;
 
 function begin(): void {
-  stop = startSync();
+  stop = startSync(OWNER);
 }
 
 beforeEach(async () => {
@@ -65,12 +73,15 @@ beforeEach(async () => {
   mocks.idb.getMany.mockReset().mockImplementation(idb.getMany);
   mocks.idb.setMany.mockReset().mockImplementation(idb.setMany);
   mocks.idb.delMany.mockReset().mockImplementation(idb.delMany);
+  mocks.idb.keys.mockReset().mockImplementation(idb.keys);
   for (const fn of Object.values(mocks.api)) fn.mockReset();
   mocks.api.getData.mockResolvedValue(sampleData());
   mocks.api.sendOps.mockImplementation(async (ops: Op[]) => ({ ok: true, applied: ops.length }));
   mocks.api.importData.mockResolvedValue({ ok: true });
+  bindOwner(null);
   await resetLocal();
   mocks.idb.delMany.mockClear();
+  bindOwner(OWNER);
 });
 
 afterEach(async () => {
@@ -92,8 +103,8 @@ describe('commit', () => {
 
     await flushCacheWrites();
     expect(mocks.idb.setMany).toHaveBeenCalledTimes(1);
-    expect(idb.store.get(CACHE_KEYS.data)).toMatchObject({ weights: [{ date: TODAY, kg: 65.4 }] });
-    expect(idb.store.get(CACHE_KEYS.outbox)).toEqual([
+    expect(idb.store.get(KEYS.data)).toMatchObject({ weights: [{ date: TODAY, kg: 65.4 }] });
+    expect(idb.store.get(KEYS.outbox)).toEqual([
       { id: expect.any(String), op: weightOp(TODAY, 65.4) },
       { id: expect.any(String), op: expect.objectContaining({ kind: 'day.put', date: TODAY }) },
     ]);
@@ -121,7 +132,7 @@ describe('commit', () => {
 describe('start-up', () => {
   it('restores the device cache before the server answers', async () => {
     const cached = sampleData({ weights: [{ date: '2026-10-01', kg: 66 }] });
-    idb.store.set(CACHE_KEYS.data, cached);
+    idb.store.set(KEYS.data, cached);
     mocks.api.getData.mockReturnValue(deferred().promise);
 
     begin();
@@ -150,7 +161,7 @@ describe('start-up', () => {
   it('replays still-pending ops on top of the server copy, then sends them', async () => {
     const pending = weightOp(TODAY, 65);
     idb.store.set(
-      CACHE_KEYS.data,
+      KEYS.data,
       sampleData({
         weights: [
           { date: '2026-10-01', kg: 66 },
@@ -158,7 +169,7 @@ describe('start-up', () => {
         ],
       }),
     );
-    idb.store.set(CACHE_KEYS.outbox, [{ id: 'a', op: pending }]);
+    idb.store.set(KEYS.outbox, [{ id: 'a', op: pending }]);
     mocks.api.getData.mockResolvedValue(
       sampleData({
         weights: [
@@ -188,13 +199,13 @@ describe('start-up', () => {
     await settle();
     expect(sync().pending).toBe(0);
     await flushCacheWrites();
-    expect(idb.store.get(CACHE_KEYS.outbox)).toEqual([]);
+    expect(idb.store.get(KEYS.outbox)).toEqual([]);
   });
 
   it('keeps ops committed while the cache was still loading, after the cached ones', async () => {
     const cachedOp = weightOp('2026-10-08', 65.5);
-    idb.store.set(CACHE_KEYS.data, sampleData({ weights: [{ date: '2026-10-08', kg: 65.5 }] }));
-    idb.store.set(CACHE_KEYS.outbox, [{ id: 'old', op: cachedOp }]);
+    idb.store.set(KEYS.data, sampleData({ weights: [{ date: '2026-10-08', kg: 65.5 }] }));
+    idb.store.set(KEYS.outbox, [{ id: 'old', op: cachedOp }]);
 
     begin();
     dataActions.setWeight(TODAY, 65.1);
@@ -205,8 +216,8 @@ describe('start-up', () => {
   });
 
   it('ignores a corrupted cache instead of crashing', async () => {
-    idb.store.set(CACHE_KEYS.data, 'garbage');
-    idb.store.set(CACHE_KEYS.outbox, [{ id: 1 }, { id: 'x', op: { kind: 'nope' } }]);
+    idb.store.set(KEYS.data, 'garbage');
+    idb.store.set(KEYS.outbox, [{ id: 1 }, { id: 'x', op: { kind: 'nope' } }]);
 
     begin();
     await settle();
@@ -576,12 +587,12 @@ describe('importAll', () => {
     expect(mocks.api.sendOps.mock.invocationCallOrder.at(-1)).toBeLessThan(
       mocks.api.importData.mock.invocationCallOrder[0] ?? 0,
     );
-    expect(mocks.api.importData).toHaveBeenCalledWith(backup);
+    expect(mocks.api.importData).toHaveBeenCalledWith(backup, OWNER);
     expect(getAppData()).toEqual(backup);
     expect(sync().pending).toBe(0);
     await flushCacheWrites();
-    expect(idb.store.get(CACHE_KEYS.data)).toEqual(backup);
-    expect(idb.store.get(CACHE_KEYS.outbox)).toEqual([]);
+    expect(idb.store.get(KEYS.data)).toEqual(backup);
+    expect(idb.store.get(KEYS.outbox)).toEqual([]);
   });
 
   it('drops pending ops the server never got: the backup replaces them', async () => {
@@ -613,7 +624,7 @@ describe('importAll', () => {
 
 describe('resetLocal', () => {
   it('wipes memory and the device cache', async () => {
-    idb.store.set(CACHE_KEYS.data, sampleData({ weights: [{ date: '2026-10-01', kg: 66 }] }));
+    idb.store.set(KEYS.data, sampleData({ weights: [{ date: '2026-10-01', kg: 66 }] }));
     begin();
     await settle();
     commit(weightOp(TODAY, 65));
@@ -622,7 +633,8 @@ describe('resetLocal', () => {
 
     expect(getAppData().weights).toEqual([]);
     expect(sync()).toMatchObject({ loaded: false, pending: 0, error: null });
-    expect(mocks.idb.delMany).toHaveBeenCalledWith([CACHE_KEYS.data, CACHE_KEYS.outbox]);
+    // Every stored legko.* key goes (the pending, never written outbox is simply dropped).
+    expect(mocks.idb.delMany).toHaveBeenCalledWith([KEYS.data]);
     expect(idb.store.size).toBe(0);
     expect(await hasDeviceCache()).toBe(false);
   });
@@ -642,7 +654,7 @@ describe('meals: saveMeal / deleteMeal / setDayMeta', () => {
   });
   const outbox = async (): Promise<Op[]> => {
     await flushCacheWrites();
-    return ((idb.store.get(CACHE_KEYS.outbox) ?? []) as { op: Op }[]).map((item) => item.op);
+    return ((idb.store.get(KEYS.outbox) ?? []) as { op: Op }[]).map((item) => item.op);
   };
 
   it('saveMeal applies optimistically, converts a legacy day and queues meal.put + food.use', async () => {
@@ -758,5 +770,153 @@ describe('meals: saveMeal / deleteMeal / setDayMeta', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('owner binding (accounts)', () => {
+  const OTHER = 'b2'.padEnd(32, '0');
+  const mismatch = () => new ApiError(409, 'user_mismatch', 'На цьому пристрої ввійдено в інший акаунт');
+  const owners = (fn: { mock: { calls: unknown[][] } }, at: number) => fn.mock.calls.map((call) => call[at]);
+
+  it('every request carries the owner (the X-Legko-User header)', async () => {
+    begin();
+    await settle();
+    commit(weightOp(TODAY, 65));
+    await settle();
+    await dataActions.importAll(sampleData());
+
+    expect(owners(mocks.api.getData, 0)).toEqual([OWNER]);
+    expect(owners(mocks.api.sendOps, 1)).toEqual([OWNER]);
+    expect(owners(mocks.api.importData, 1)).toEqual([OWNER]);
+  });
+
+  it('never sends another owner’s outbox after a rebind', async () => {
+    mocks.api.sendOps.mockRejectedValue(networkError());
+    begin();
+    await settle();
+    commit(weightOp(TODAY, 65));
+    await settle();
+    await flushCacheWrites();
+    expect(idb.store.get(KEYS.outbox)).toHaveLength(1);
+
+    stop?.();
+    mocks.api.sendOps.mockReset().mockImplementation(async (ops: Op[]) => ({ ok: true, applied: ops.length }));
+    stop = startSync(OTHER);
+    await settle();
+    // Nothing of OWNER's in memory or on the wire.
+    expect(getAppData().weights).toEqual([]);
+    expect(sync().pending).toBe(0);
+    commit(weightOp(TODAY, 70));
+    await settle();
+    await vi.advanceTimersByTimeAsync(PENDING_POLL_MS);
+    await settle();
+
+    expect(sentBatches()).toEqual([[weightOp(TODAY, 70)]]);
+    expect(owners(mocks.api.sendOps, 1)).toEqual([OTHER]);
+    expect(owners(mocks.api.getData, 0).at(-1)).toBe(OTHER);
+    await flushCacheWrites();
+    // OWNER's pending op is still waiting in OWNER's keys, untouched.
+    expect(idb.store.get(KEYS.outbox)).toEqual([{ id: expect.any(String), op: weightOp(TODAY, 65) }]);
+    expect(idb.store.get(cacheKeys(OTHER).outbox)).toEqual([]);
+  });
+
+  it('409 user_mismatch stops sending, tells the auth layer once and never retries by itself', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUserMismatch(listener);
+    mocks.api.sendOps.mockRejectedValue(mismatch());
+    begin();
+    await settle();
+    commit(weightOp(TODAY, 65));
+    await settle();
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(isSyncPaused()).toBe(true);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    window.dispatchEvent(new Event('online'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    commit(weightOp(TODAY, 66));
+    expect(await flushNow()).toBe(false);
+    await settle();
+
+    expect(mocks.api.sendOps).toHaveBeenCalledTimes(1);
+    expect(mocks.api.getData).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(sync().pending).toBe(2);
+    // Kept on the device for whoever this copy belongs to.
+    await flushCacheWrites();
+    expect(idb.store.get(KEYS.outbox)).toHaveLength(2);
+
+    // The auth layer found the session is the device user's after all.
+    mocks.api.sendOps.mockReset().mockImplementation(async (ops: Op[]) => ({ ok: true, applied: ops.length }));
+    resumeSync();
+    await settle();
+    expect(sentBatches()).toEqual([[weightOp(TODAY, 65), weightOp(TODAY, 66)]]);
+    expect(sync().pending).toBe(0);
+    unsubscribe();
+  });
+
+  it('treats a 409 on the initial load and on a backup upload the same way', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onUserMismatch(listener);
+    mocks.api.getData.mockRejectedValue(mismatch());
+    begin();
+    await settle();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(sync().loaded).toBe(false);
+
+    await expect(dataActions.importAll(sampleData())).rejects.toMatchObject({ code: 'user_mismatch' });
+    expect(mocks.api.importData).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('without a real owner nothing is sent: changes stay on the device', async () => {
+    bindOwner(null);
+    commit(weightOp(TODAY, 65));
+    expect(await flushNow()).toBe(false);
+    await expect(dataActions.importAll(sampleData())).rejects.toBeInstanceOf(ApiError);
+    await flushCacheWrites();
+    // No owner bound: the legacy keys, exactly as before accounts.
+    expect(idb.store.get(LEGACY_KEYS.outbox)).toHaveLength(1);
+
+    bindOwner('');
+    stop = startSync('');
+    await settle();
+    commit(weightOp(TODAY, 66));
+    await settle();
+    expect(mocks.api.getData).not.toHaveBeenCalled();
+    expect(mocks.api.sendOps).not.toHaveBeenCalled();
+  });
+
+  it('adopting the legacy copy keeps memory and sends its pending ops once, for the adopter', async () => {
+    idb.store.set(LEGACY_KEYS.data, sampleData({ weights: [{ date: '2026-10-01', kg: 66 }] }));
+    idb.store.set(LEGACY_KEYS.outbox, [{ id: 'legacy-op', op: weightOp('2026-10-01', 66) }]);
+    bindOwner('');
+    expect(await hasDeviceCache()).toBe(true);
+    // Shown provisionally; a change made meanwhile joins the queue.
+    commit(weightOp(TODAY, 65));
+
+    await adoptLegacy(OWNER);
+    stop = startSync(OWNER);
+    await settle();
+
+    expect(sentBatches()).toEqual([[weightOp('2026-10-01', 66), weightOp(TODAY, 65)]]);
+    expect(owners(mocks.api.sendOps, 1)).toEqual([OWNER]);
+    await flushCacheWrites();
+    expect(idb.store.has(LEGACY_KEYS.data)).toBe(false);
+    expect(idb.store.has(LEGACY_KEYS.outbox)).toBe(false);
+    expect(idb.store.get(KEYS.outbox)).toEqual([]);
+    expect((idb.store.get(KEYS.data) as { weights: unknown }).weights).toEqual([
+      { date: '2026-10-01', kg: 66 },
+      { date: TODAY, kg: 65 },
+    ]);
+  });
+
+  it('resetLocal wipes every account’s copy and the device user, not just the bound one', async () => {
+    idb.store.set('legko.user', { id: OWNER });
+    idb.store.set(cacheKeys(OTHER).data, sampleData());
+    begin();
+    await settle();
+    expect(await resetLocal()).toBe(true);
+    expect(idb.store.size).toBe(0);
   });
 });

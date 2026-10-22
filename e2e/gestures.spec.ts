@@ -24,6 +24,15 @@ async function touchDrag(
   await cdp.detach();
 }
 
+/**
+ * The sheet has stopped moving: even with reduced motion a sheet that just opened (or snapped back) keeps its panel
+ * translated for a frame or two after it is «visible» (a stacked one starts ~650px down), so a drag that starts from
+ * a point measured earlier lands below the header instead of on it.
+ */
+async function settled(sheet: Locator): Promise<void> {
+  await expect.poll(() => sheet.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+}
+
 async function center(locator: Locator): Promise<{ x: number; y: number }> {
   const box = await locator.boundingBox();
   if (!box) throw new Error('element is not visible');
@@ -60,12 +69,14 @@ test.describe('touch gestures (iPhone)', () => {
     const sheet = await app.record('Вага');
     const heading = sheet.getByRole('heading', { name: 'Контрольне зважування' });
 
+    await settled(sheet);
     let start = await center(heading);
     await touchDrag(page, start, { x: start.x, y: start.y + 300 });
     await app.expectSheetClosed();
 
     await app.record('Вага');
     await sheet.getByRole('button', { name: 'Плюс 0,1 кг' }).click();
+    await settled(sheet);
     start = await center(heading);
     // The in-app question shows while the panel waits off-screen; «Залишитись» slides it back.
     const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
@@ -78,6 +89,7 @@ test.describe('touch gestures (iPhone)', () => {
     await expect(sheet.getByRole('textbox', { name: 'Вага', exact: true })).toHaveValue('65,5');
 
     // Dragged again and confirmed: the draft goes with the sheet.
+    await settled(sheet);
     start = await center(heading);
     await touchDrag(page, start, { x: start.x, y: start.y + 300 });
     await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
@@ -100,6 +112,7 @@ test.describe('touch gestures (iPhone)', () => {
       const heading = editor.getByRole('heading', { name: 'Прийом їжі' });
 
       // Untouched: it slides away without a question; the list under it is live again, focus on the row.
+      await settled(editor);
       let start = await center(heading);
       await touchDrag(page, start, { x: start.x, y: start.y + 300 });
       await expect(editor).toBeHidden();
@@ -111,6 +124,7 @@ test.describe('touch gestures (iPhone)', () => {
       await row.click();
       const text = editor.getByRole('textbox', { name: 'Що я їла', exact: true });
       await text.fill('Яблуко і груша');
+      await settled(editor);
       start = await center(heading);
       await touchDrag(page, start, { x: start.x, y: start.y + 300 });
       const ask = page.getByRole('alertdialog', { name: 'Є незбережені зміни' });
@@ -122,6 +136,7 @@ test.describe('touch gestures (iPhone)', () => {
       await expect(text).toHaveValue('Яблуко і груша');
 
       // Dragged again and confirmed: only the meal editor goes, with its draft; the list stays as it was.
+      await settled(editor);
       start = await center(heading);
       await touchDrag(page, start, { x: start.x, y: start.y + 300 });
       await ask.getByRole('button', { name: 'Закрити', exact: true }).click();
@@ -147,6 +162,7 @@ test.describe('touch gestures (iPhone)', () => {
       await oats.click();
       const editor = app.sheet('Позиція');
       const heading = editor.getByRole('heading', { name: 'Позиція' });
+      await settled(editor);
       let start = await center(heading);
       await touchDrag(page, start, { x: start.x, y: start.y + 300 });
       await expect(editor).toBeHidden();
@@ -158,6 +174,7 @@ test.describe('touch gestures (iPhone)', () => {
       // A changed draft: the question, «Залишитись» slides the editor back with her change.
       await oats.click();
       await editor.getByRole('textbox', { name: 'Скільки', exact: true }).fill('150');
+      await settled(editor);
       start = await center(heading);
       await touchDrag(page, start, { x: start.x, y: start.y + 300 });
       const ask = page.getByRole('alertdialog', { name: 'Скасувати зміни?' });

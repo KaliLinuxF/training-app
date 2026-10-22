@@ -3,7 +3,7 @@
  * account (not onboarded, no weigh-ins and no day records). An older account that simply
  * predates the flag is marked as onboarded silently.
  */
-import type { AppData } from '@legko/shared';
+import type { AppData, UserRole } from '@legko/shared';
 import type { SyncState } from '@/store/data';
 
 export type SetupGateAction = 'open' | 'mark-onboarded' | 'none';
@@ -18,7 +18,17 @@ export const SETUP_SHOWN_KEY = 'legko.setupShown';
 export const syncSettled = (sync: SyncState): boolean =>
   sync.loaded && (sync.lastSyncedAt !== null || !sync.online || sync.error !== null);
 
-export function setupGateAction(data: AppData, settled: boolean, shownThisSession: boolean): SetupGateAction {
+/**
+ * `role` = the signed-in account's: an admin never gets the sheet by itself (D23; the Home «Почнімо» banner still
+ * offers it), nor is an admin's account marked as onboarded behind their back.
+ */
+export function setupGateAction(
+  data: AppData,
+  settled: boolean,
+  shownThisSession: boolean,
+  role?: UserRole,
+): SetupGateAction {
+  if (role === 'admin') return 'none';
   if (!settled || data.settings.onboarded) return 'none';
   const hasData = data.weights.length > 0 || Object.keys(data.days).length > 0;
   if (hasData) return 'mark-onboarded';

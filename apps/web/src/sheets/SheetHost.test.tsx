@@ -20,7 +20,7 @@ import { FIELD_ERRORS } from './validation';
 const TODAY = '2026-10-10';
 
 const mocks = vi.hoisted(() => ({
-  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() },
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
   /** Every `commit()` call the sheets make, in order. */
   commits: [] as Op[][],
   /** The next `commit()` is refused (nothing applied), as the store does with an op it cannot accept. */
@@ -123,6 +123,7 @@ beforeEach(() => {
   mocks.idb.getMany.mockImplementation(idb.getMany);
   mocks.idb.setMany.mockImplementation(idb.setMany);
   mocks.idb.delMany.mockImplementation(idb.delMany);
+  mocks.idb.keys.mockImplementation(idb.keys);
   mocks.commits.length = 0;
   mocks.refuseNext = false;
   useUiStore.setState({ sheet: null, toast: null, confirm: null });

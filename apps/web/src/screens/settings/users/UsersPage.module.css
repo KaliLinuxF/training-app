@@ -1,0 +1,65 @@
+/* «Запрошення · 2» / «Акаунти · 3»: a section title above its list card, 8 apart (like a ListGroup caption). */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Name + pills («admin (Адмін)»): wraps under the name on a narrow phone instead of squeezing it. */
+.rowTitle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rowName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * In the desktop pane «Користувачі» is the pane's own 18/700 title: there «Запрошення · 2» / «Акаунти · 3» are the
+ * captions of their lists (ListGroup's caption style), not sibling sections. On the phone they stay 18/700 under
+ * the big <h1>. The element part outranks SectionTitle's one-class style in any bundle order.
+ */
+h3.paneGroupTitle {
+  padding: 0 16px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--muted);
+}
+
+/*
+ * «Скасувати» next to a pending invite: the kit ghost (14/500, a 45px tap area), in the accent so it reads as
+ * an action. Rounded like the kit's buttons (the focus comes back here after a revoke); 5px in from the edge so it
+ * lines up with the chevrons of the account rows below (the 16px glyph has ~5px of air on its right).
+ */
+button.revoke {
+  margin-right: 5px;
+  border-radius: var(--r12);
+  color: var(--accD);
+  font-weight: 600;
+}
+
+/* «Підрахунки калорій (ШІ)»: label + stepper rows like «Мої цілі». */
+.limits {
+  container-type: inline-size;
+}
+
+@container (max-width: 265px) {
+  .limitRow {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .stepper {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

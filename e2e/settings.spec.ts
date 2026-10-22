@@ -2,11 +2,15 @@ import type { Locator, Page } from '@playwright/test';
 import { DEFAULT_MEAL_TYPES, type MacroGoals } from '../packages/shared/src/index';
 import { MEALS_TODAY } from './fixtures/data';
 import { SETTINGS_SLUGS, type App, type SettingsSection } from './support/app';
-import { TODAY } from './support/env';
+import { ADMIN_USERNAME, TODAY, USERNAME } from './support/env';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
 
+/** Every row of the list for an admin; a user has all but «Користувачі» (docs/multi-user.md D30). */
 const SECTIONS = Object.keys(SETTINGS_SLUGS) as SettingsSection[];
+const USER_SECTIONS = SECTIONS.filter((title) => title !== 'Користувачі');
+
+const CAPTION = 'Легко · трекер схуднення';
 
 const DEFAULT_TYPES = [...DEFAULT_MEAL_TYPES];
 
@@ -37,8 +41,51 @@ const MEAL_NOTE_DEFAULTS =
 /** The note under the card (generated from the meal editor's own preselection). */
 const mealNote = (page: Page) => page.getByText(/^(Тип нового прийому підказується|Без типів новий прийом)/);
 
-/** The «Вийти» row (only touched while no dialog is open: the logout dialog has its own «Вийти»). */
+/**
+ * The «Вийти» row — on the «Акаунт» page now, no longer on the list (D30). Only touched while no dialog is open: the
+ * logout dialog has its own «Вийти».
+ */
 const logoutRow = (page: Page) => page.getByRole('button', { name: 'Вийти', exact: true });
+
+/**
+ * The phone list fits one screen at 390×844 (the Playwright iPhone) and 390×763 (the installed app's web view on an
+ * iPhone 14: status bar, no URL bar), every row above the tab bar, no scroll, the first group right under the header.
+ */
+async function expectListFits(app: App, page: Page, rows: readonly SettingsSection[]): Promise<void> {
+  for (const height of [844, 763]) {
+    await page.setViewportSize({ width: 390, height });
+    await app.goto('/settings');
+    const at = `390×${height}`;
+    // The worst case: an iPhone Safari tab shows the install badge, the tallest row.
+    await expect(app.settingsRow('Нагадування')).toContainText('Потрібне встановлення');
+    // The admin's «Користувачі» row has its count once the overview is in (same height either way).
+    if (rows.includes('Користувачі'))
+      await expect(app.settingsRow('Користувачі')).toContainText(/\d+ акаунт/);
+
+    const bar = await box(app.nav, `tab bar @${at}`);
+    for (const title of rows) {
+      const b = await box(app.settingsRow(title), `«${title}» @${at}`);
+      expect(b.y, `«${title}» top @${at}`).toBeGreaterThanOrEqual(0);
+      expect(b.y + b.height, `«${title}» above the tab bar @${at}`).toBeLessThanOrEqual(bar.y);
+    }
+    // «Вийти» is not on the list any more.
+    await expect(logoutRow(page)).toHaveCount(0);
+    const overflow = await page.evaluate(
+      () => (document.scrollingElement ?? document.documentElement).scrollHeight - window.innerHeight,
+    );
+    expect(overflow, `scrolls @${at}`).toBeLessThanOrEqual(1);
+
+    // Classic layout (owner decision Q8): the first group sits right under the header, not docked low.
+    const header = await box(
+      page.locator('header').filter({ has: app.heading('Налаштування') }),
+      `header @${at}`,
+    );
+    const list = await box(page.getByRole('navigation', { name: 'Розділи налаштувань' }), `list @${at}`);
+    const gap = list.y - (header.y + header.height);
+    expect(gap, `header → first group @${at}`).toBeGreaterThanOrEqual(0);
+    expect(gap, `header → first group @${at}`).toBeLessThanOrEqual(24);
+  }
+}
 
 /** Any push problem badge of the «Нагадування» row (push is never enabled in the e2e browsers). */
 const PUSH_BADGE = /^(Сповіщення (вимкнені|заборонені|недоступні)|Потрібне встановлення)$/;
@@ -60,43 +107,17 @@ const lines = (el: Element) => {
 };
 
 test.describe('settings list', () => {
-  test('on the phone the whole list fits one screen, right under the header', async ({ app, page }, info) => {
+  test('on the phone the whole list fits one screen, right under the header (user)', async ({
+    app,
+    page,
+  }, info) => {
     test.skip(info.project.name !== 'iphone', 'phone layout');
-    // 844: the Playwright iPhone; 763: the installed app's web view on an iPhone 14 (status bar, no URL bar).
-    for (const height of [844, 763]) {
-      await page.setViewportSize({ width: 390, height });
-      await app.goto('/settings');
-      const at = `390×${height}`;
-      // The worst case: an iPhone Safari tab shows the install badge, the tallest row.
-      await expect(app.settingsRow('Нагадування')).toContainText('Потрібне встановлення');
-
-      const bar = await box(app.nav, `tab bar @${at}`);
-      for (const [name, row] of [
-        ...SECTIONS.map((title) => [title, app.settingsRow(title)] as const),
-        ['Вийти', logoutRow(page)] as const,
-      ]) {
-        const b = await box(row, `«${name}» @${at}`);
-        expect(b.y, `«${name}» top @${at}`).toBeGreaterThanOrEqual(0);
-        expect(b.y + b.height, `«${name}» above the tab bar @${at}`).toBeLessThanOrEqual(bar.y);
-      }
-      const overflow = await page.evaluate(
-        () => (document.scrollingElement ?? document.documentElement).scrollHeight - window.innerHeight,
-      );
-      expect(overflow, `scrolls @${at}`).toBeLessThanOrEqual(1);
-
-      // Classic layout (owner decision Q8): the first group sits right under the header, not docked low.
-      const header = await box(
-        page.locator('header').filter({ has: app.heading('Налаштування') }),
-        `header @${at}`,
-      );
-      const list = await box(page.getByRole('navigation', { name: 'Розділи налаштувань' }), `list @${at}`);
-      const gap = list.y - (header.y + header.height);
-      expect(gap, `header → first group @${at}`).toBeGreaterThanOrEqual(0);
-      expect(gap, `header → first group @${at}`).toBeLessThanOrEqual(24);
-    }
+    await expectListFits(app, page, USER_SECTIONS);
+    await expect(app.settingsRow('Користувачі')).toHaveCount(0);
+    await expect(page.getByText(CAPTION, { exact: true })).toBeVisible();
   });
 
-  test('each row sums up its section', async ({ app }) => {
+  test('each row sums up its section; «Акаунт» shows the name; the caption is there', async ({ app }) => {
     await app.goto('/');
     await app.go('Налаштування');
     await expect(app.settingsRow('Нагадування')).toContainText('3 увімк.');
@@ -105,12 +126,17 @@ test.describe('settings list', () => {
     await expect(app.settingsRow('Прийоми їжі')).toContainText('4 типи');
     await expect(app.settingsRow('Вигляд')).toContainText('Авто');
     await expect(app.settingsRow('Дані і копія')).toContainText('Синхронізовано');
-    await expect(logoutRow(app.page)).toBeVisible();
-    await expect(app.page.getByText('Легко · трекер схуднення')).toBeVisible();
+    await expect(app.settingsRow('Акаунт')).toHaveAccessibleName(`Акаунт ${USERNAME}`);
+    await expect(app.settingsRow('Користувачі')).toHaveCount(0);
+    await expect(logoutRow(app.page)).toHaveCount(0);
+    await expect(app.page.getByText(CAPTION, { exact: true })).toBeVisible();
   });
 
-  test('cancelling the logout dialog gives the focus back to «Вийти»', async ({ app, page }) => {
-    await app.goto('/settings');
+  test('cancelling the logout dialog gives the focus back to «Вийти» (on «Акаунт»)', async ({
+    app,
+    page,
+  }) => {
+    await app.gotoSettings('Акаунт');
     const row = logoutRow(page);
     const dialog = page.getByRole('alertdialog');
 
@@ -128,7 +154,7 @@ test.describe('settings list', () => {
     await dialog.getByRole('button', { name: 'Скасувати' }).click();
     await expect(dialog).toHaveCount(0);
     await expect(row).toBeFocused();
-    await expect(app.heading('Налаштування')).toBeVisible();
+    await expect(page).toHaveURL(/\/settings\/account$/);
   });
 
   test('in iPhone Safari the reminders row says the app needs installing; «Як?» explains how', async ({
@@ -238,6 +264,38 @@ test.describe('settings list', () => {
   });
 });
 
+test.describe('settings list for an admin', () => {
+  test.use({ account: 'admin' });
+
+  test('the list with «Користувачі» still fits one phone screen; no caption', async ({ app, page }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone layout');
+    await expectListFits(app, page, SECTIONS);
+    await expect(page.getByText(CAPTION, { exact: true })).toHaveCount(0);
+  });
+
+  test('«Акаунт» shows the admin’s name and «Користувачі» how many accounts there are', async ({
+    app,
+    admin,
+  }) => {
+    await app.goto('/settings');
+    await expect(app.settingsRow('Акаунт')).toHaveAccessibleName(`Акаунт ${ADMIN_USERNAME}`);
+    const count = (await admin.overview()).users.length;
+    await expect(app.settingsRow('Користувачі')).toHaveAccessibleName(
+      new RegExp(`^Користувачі ${count} акаунт(и|ів)?$`),
+    );
+    await expect(app.page.getByText(CAPTION, { exact: true })).toHaveCount(0);
+    // The account group is the last one, «Користувачі» right under «Акаунт».
+    const [account, users] = [
+      await box(app.settingsRow('Акаунт'), 'Акаунт'),
+      await box(app.settingsRow('Користувачі'), 'Користувачі'),
+    ];
+    expect(users.y).toBeGreaterThan(account.y);
+    for (const title of USER_SECTIONS.filter((t) => t !== 'Акаунт')) {
+      expect((await box(app.settingsRow(title), title)).y, title).toBeLessThan(account.y);
+    }
+  });
+});
+
 test.describe('settings on desktop', () => {
   test('the list and the selected section sit side by side; a row swaps the section and the URL', async ({
     app,
@@ -336,7 +394,11 @@ test.describe('settings on desktop', () => {
     await expect(app.settingsRow('Дані і копія')).toContainText('Синхронізовано');
     await expect(app.settingsRow('Дані і копія')).toHaveAttribute('aria-current', 'page');
     await expect(app.settingsRow('Нагадування')).not.toHaveAttribute('aria-current');
-    await expect(logoutRow(app.page)).toBeVisible();
+    // «Вийти» lives in the «Акаунт» pane, not under the list.
+    await expect(logoutRow(app.page)).toHaveCount(0);
+    await app.settingsRow('Акаунт').click();
+    await expect(app.region('Акаунт').getByRole('heading', { level: 2, name: 'Акаунт' })).toBeVisible();
+    await expect(app.region('Акаунт').getByRole('button', { name: 'Вийти', exact: true })).toBeVisible();
   });
 });
 

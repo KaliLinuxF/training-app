@@ -3,9 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { photoIdSchema } from '@legko/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createDataRepo } from '../db/data';
+import { createDataRepos, type DataRepo } from '../db/data';
 import { openDatabase } from '../db/open';
 import type { Database } from '../db/sqlite';
+import { createUserRepo, type UserId } from '../db/users';
 import { createLogger } from '../logger';
 import { createPhotoGcJob } from './gc';
 import {
@@ -17,6 +18,7 @@ import {
   PHOTO_MAX_BYTES,
   THUMB_MAX_BYTES,
   type PhotoStore,
+  type UserPhotos,
 } from './store';
 
 const HOUR = 3600_000;
@@ -79,6 +81,11 @@ describe('photo store', () => {
   let db: Database;
   let clock: number;
   let store: PhotoStore;
+  let anna: UserId;
+  let olya: UserId;
+  /** anna's photos (the single-user cases). */
+  let mine: UserPhotos;
+  let repo: DataRepo;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'legko-photos-'));
@@ -86,6 +93,11 @@ describe('photo store', () => {
     db = openDatabase(':memory:');
     clock = T0;
     store = createPhotoStore(db, dir, () => clock);
+    const users = createUserRepo(db);
+    anna = users.create({ username: 'anna', role: 'user', passwordHash: null, now: 0 }).id;
+    olya = users.create({ username: 'olya', role: 'user', passwordHash: null, now: 0 }).id;
+    mine = store.forUser(anna);
+    repo = createDataRepos(db).forUser(anna);
   });
 
   afterEach(() => {
@@ -93,7 +105,7 @@ describe('photo store', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  const save = (size = 500) => store.save({ full: fakeJpeg(size, 1), thumb: fakeJpeg(50, 2) }, '2026-10-09');
+  const save = (size = 500) => mine.save({ full: fakeJpeg(size, 1), thumb: fakeJpeg(50, 2) }, '2026-10-09');
 
   /** Makes a file look as old as `ms` before T0 (the GC compares mtimes for stray files). */
   const age = (name: string, ms: number): void => {
@@ -105,8 +117,8 @@ describe('photo store', () => {
     expect(existsSync(dir)).toBe(false);
     const id = await save(500);
     expect(readdirSync(dir).sort()).toEqual([`${id}.jpg`, `${id}_t.jpg`].sort());
-    expect((await store.read(id, 'full'))?.length).toBe(500);
-    expect((await store.read(id, 'thumb'))?.length).toBe(50);
+    expect((await mine.read(id, 'full'))?.length).toBe(500);
+    expect((await mine.read(id, 'thumb'))?.length).toBe(50);
     expect(db.prepare('SELECT id, date, created_at, bytes, thumb_bytes FROM photos').get()).toEqual({
       id,
       date: '2026-10-09',
@@ -117,13 +129,12 @@ describe('photo store', () => {
   });
 
   it('returns null for unknown photos', async () => {
-    expect(await store.read(newPhotoId(), 'full')).toBeNull();
+    expect(await mine.read(newPhotoId(), 'full')).toBeNull();
     await save();
-    expect(await store.read(newPhotoId(), 'thumb')).toBeNull();
+    expect(await mine.read(newPhotoId(), 'thumb')).toBeNull();
   });
 
   it('GC: deletes unreferenced photos older than 24 h, keeps referenced and young ones', async () => {
-    const repo = createDataRepo(db);
     const oldUnused = await save();
     const oldUsed = await save();
     clock = T0 + 23 * HOUR;
@@ -137,11 +148,11 @@ describe('photo store', () => {
     ]);
 
     const result = store.collectGarbage(T0 + PHOTO_GC_GRACE_MS + 1);
-    expect(result).toEqual({ photos: [oldUnused], strayFiles: [] });
-    expect(await store.read(oldUnused, 'full')).toBeNull();
-    expect(await store.read(oldUnused, 'thumb')).toBeNull();
-    expect(await store.read(oldUsed, 'full')).not.toBeNull();
-    expect(await store.read(youngUnused, 'thumb')).not.toBeNull();
+    expect(result).toEqual({ photos: [oldUnused], strayFiles: [], skippedUsers: 0 });
+    expect(await mine.read(oldUnused, 'full')).toBeNull();
+    expect(await mine.read(oldUnused, 'thumb')).toBeNull();
+    expect(await mine.read(oldUsed, 'full')).not.toBeNull();
+    expect(await mine.read(youngUnused, 'thumb')).not.toBeNull();
     const ids = db
       .prepare('SELECT id FROM photos ORDER BY id')
       .all()
@@ -157,7 +168,6 @@ describe('photo store', () => {
   });
 
   it('GC: keeps a photo referenced only by a meal, collects an unreferenced old one', async () => {
-    const repo = createDataRepo(db);
     const mealOnly = await save();
     const unused = await save();
     // 13 photos over two meals: the derived day list holds the first 12 only.
@@ -181,11 +191,11 @@ describe('photo store', () => {
     expect(repo.read().days['2026-10-09']?.photos).toEqual(many);
 
     const result = store.collectGarbage(T0 + PHOTO_GC_GRACE_MS + 1);
-    expect(result).toEqual({ photos: [unused], strayFiles: [] });
-    expect(await store.read(mealOnly, 'full')).not.toBeNull();
+    expect(result).toEqual({ photos: [unused], strayFiles: [], skippedUsers: 0 });
+    expect(await mine.read(mealOnly, 'full')).not.toBeNull();
   });
 
-  it('GC: skips the whole run while a day has unreadable meal data', async () => {
+  it('GC: an owner with unreadable meal data keeps all photos; other owners are collected (D14)', async () => {
     const lines: string[] = [];
     const logged = createPhotoStore(
       db,
@@ -193,8 +203,10 @@ describe('photo store', () => {
       () => clock,
       createLogger('warn', (line) => lines.push(line)),
     );
-    const repo = createDataRepo(db);
     const unused = await save();
+    const othersUnused = await store
+      .forUser(olya)
+      .save({ full: fakeJpeg(10), thumb: fakeJpeg(10) }, '2026-10-09');
     const stray = `${newPhotoId()}.jpg`;
     writeFileSync(join(dir, stray), 'x');
     age(stray, 2 * PHOTO_GC_GRACE_MS);
@@ -216,18 +228,55 @@ describe('photo store', () => {
     ]);
     db.prepare('UPDATE days SET meals = ?').run('[{"id": "m1", "photos": ["broken"');
 
-    expect(logged.collectGarbage(T0 + 2 * PHOTO_GC_GRACE_MS)).toEqual({ photos: [], strayFiles: [] });
-    expect(await store.read(unused, 'full')).not.toBeNull();
-    expect(readdirSync(dir)).toContain(stray);
+    expect(logged.collectGarbage(T0 + 2 * PHOTO_GC_GRACE_MS)).toEqual({
+      photos: [othersUnused],
+      strayFiles: [stray],
+      skippedUsers: 1,
+    });
+    expect(await mine.read(unused, 'full')).not.toBeNull();
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('photo gc: skipped');
+    expect(lines[0]).toContain('photo gc: kept the photos of 1 account(s) with unreadable meal data');
+    expect(lines[0]).not.toContain('Борщ');
 
-    // Once the row is rewritten, collection resumes.
+    // Once the row is rewritten, collection resumes for that owner too.
     repo.apply([{ kind: 'meal.delete', date: '2026-10-09', id: 'legacy' }]);
     expect(logged.collectGarbage(T0 + 2 * PHOTO_GC_GRACE_MS)).toEqual({
       photos: [unused],
-      strayFiles: [stray],
+      strayFiles: [],
+      skippedUsers: 0,
     });
+  });
+
+  it('reads only the owner’s photos: another user’s id is null (404), full and thumb', async () => {
+    const id = await save();
+    const theirs = store.forUser(olya);
+    expect(await theirs.read(id, 'full')).toBeNull();
+    expect(await theirs.read(id, 'thumb')).toBeNull();
+    expect(await mine.read(id, 'full')).not.toBeNull();
+    expect(db.prepare('SELECT user_id FROM photos WHERE id = ?').get(id)?.user_id).toBe(anna);
+  });
+
+  it('GC: a reference from ANOTHER user keeps nothing alive', async () => {
+    const id = await save();
+    createDataRepos(db)
+      .forUser(olya)
+      .apply([
+        {
+          kind: 'day.put',
+          date: '2026-10-09',
+          value: { food: 'x', kcal: null, trained: null, types: [], notes: '', photos: [id] },
+        },
+      ]);
+    expect(store.collectGarbage(T0 + PHOTO_GC_GRACE_MS + 1).photos).toEqual([id]);
+    expect(existsSync(join(dir, `${id}.jpg`))).toBe(false);
+  });
+
+  it('removeFiles deletes both files of each id (after a user delete)', async () => {
+    const a = await save();
+    const b = await save();
+    store.removeFiles([a]);
+    expect(readdirSync(dir).sort()).toEqual([`${b}.jpg`, `${b}_t.jpg`].sort());
+    expect(() => store.removeFiles([a, 'nonexistent0000000000'])).not.toThrow();
   });
 
   it('GC: removes old stray files of interrupted saves, nothing else', async () => {
@@ -254,7 +303,7 @@ describe('photo store', () => {
   });
 
   it('GC tolerates a missing directory', () => {
-    expect(store.collectGarbage(T0)).toEqual({ photos: [], strayFiles: [] });
+    expect(store.collectGarbage(T0)).toEqual({ photos: [], strayFiles: [], skippedUsers: 0 });
   });
 });
 
@@ -265,11 +314,14 @@ describe('photo GC job', () => {
     const job = createPhotoGcJob({
       photos: {
         dir: '',
-        save: () => Promise.reject(new Error('unused')),
-        read: () => Promise.resolve(null),
+        forUser: () => ({
+          save: () => Promise.reject(new Error('unused')),
+          read: () => Promise.resolve(null),
+        }),
+        removeFiles: () => undefined,
         collectGarbage: (now) => {
           calls.push(now);
-          return { photos: calls.length === 1 ? ['a', 'b'] : [], strayFiles: [] };
+          return { photos: calls.length === 1 ? ['a', 'b'] : [], strayFiles: [], skippedUsers: 0 };
         },
       },
       logger: createLogger('info', (line) => lines.push(line)),

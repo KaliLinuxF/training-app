@@ -1,5 +1,7 @@
 /** Page-level helpers: navigation, sheets, toasts — written against roles and visible copy. */
 import { expect, type Locator, type Page } from '@playwright/test';
+import type { SessionUser } from '../../packages/shared/src/index';
+import { USER, type Credentials } from './server';
 
 /** The four sections of the tab bar / sidebar (redesign A). */
 export type Section = 'Головна' | 'Календар' | 'Прогрес' | 'Налаштування';
@@ -54,9 +56,16 @@ const RECORD_SHEETS: Record<RecordItem, SheetName> = {
 /** Action rows of the Home «Сьогодні» list. */
 export type HomeRow = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри';
 
-/** Rows of the «Налаштування» list. */
+/** Rows of the «Налаштування» list («Користувачі» is shown to admins only). */
 export type SettingsSection =
-  'Нагадування' | 'Цілі' | 'Типи тренувань' | 'Прийоми їжі' | 'Вигляд' | 'Дані і копія';
+  | 'Нагадування'
+  | 'Цілі'
+  | 'Типи тренувань'
+  | 'Прийоми їжі'
+  | 'Вигляд'
+  | 'Дані і копія'
+  | 'Акаунт'
+  | 'Користувачі';
 
 /** `/settings/:section` of each settings row. */
 export const SETTINGS_SLUGS: Record<SettingsSection, string> = {
@@ -66,7 +75,61 @@ export const SETTINGS_SLUGS: Record<SettingsSection, string> = {
   'Прийоми їжі': 'meals',
   Вигляд: 'appearance',
   'Дані і копія': 'data',
+  Акаунт: 'account',
+  Користувачі: 'users',
 };
+
+/** Label of the login / invite username field (with the Ukrainian apostrophe U+02BC). */
+export const USERNAME_LABEL = 'Імʼя користувача';
+
+/** The idb-keyval default store the app keeps its device copy in. */
+const IDB_NAME = 'keyval-store';
+const IDB_STORE = 'keyval';
+
+/**
+ * Every entry of the idb-keyval store (key → value; keys only when `withValues` is false), without creating the
+ * database just by looking. Runs in the page.
+ */
+function readDeviceStore(page: Page, withValues: boolean): Promise<Record<string, unknown>> {
+  return page.evaluate(
+    ([name, storeName, values]) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const open = indexedDB.open(name);
+        let missing = false;
+        // No database yet: do not create one just by looking.
+        open.onupgradeneeded = () => {
+          missing = true;
+          open.transaction?.abort();
+        };
+        open.onerror = () => (missing ? resolve({}) : reject(open.error));
+        open.onsuccess = () => {
+          const db = open.result;
+          if (!db.objectStoreNames.contains(storeName)) {
+            db.close();
+            resolve({});
+            return;
+          }
+          const tx = db.transaction(storeName, 'readonly');
+          const store = tx.objectStore(storeName);
+          const keys = store.getAllKeys();
+          const all = values ? store.getAll() : null;
+          tx.oncomplete = () => {
+            db.close();
+            const out: Record<string, unknown> = {};
+            keys.result.forEach((key, i) => {
+              out[String(key)] = all ? (all.result[i] as unknown) : true;
+            });
+            resolve(out);
+          };
+          tx.onerror = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+      }),
+    [IDB_NAME, IDB_STORE, withValues] as const,
+  );
+}
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -265,38 +328,63 @@ export class App {
     await expect(this.toast('Збережено')).toBeVisible();
   }
 
-  /** Values of `legko.data` / `legko.outbox` in IndexedDB (idb-keyval default store). */
-  async deviceCache(): Promise<{ data: unknown; outbox: unknown }> {
-    return this.page.evaluate(
-      () =>
-        new Promise<{ data: unknown; outbox: unknown }>((resolve, reject) => {
-          const open = indexedDB.open('keyval-store');
-          let missing = false;
-          // No database yet: do not create one just by looking.
-          open.onupgradeneeded = () => {
-            missing = true;
-            open.transaction?.abort();
-          };
-          open.onerror = () =>
-            missing ? resolve({ data: undefined, outbox: undefined }) : reject(open.error);
-          open.onsuccess = () => {
-            const db = open.result;
-            if (!db.objectStoreNames.contains('keyval')) {
-              db.close();
-              resolve({ data: undefined, outbox: undefined });
-              return;
-            }
-            const store = db.transaction('keyval', 'readonly').objectStore('keyval');
-            const data = store.get('legko.data');
-            const outbox = store.get('legko.outbox');
-            store.transaction.oncomplete = () => {
-              db.close();
-              resolve({ data: data.result as unknown, outbox: outbox.result as unknown });
-            };
-            store.transaction.onerror = () => reject(store.transaction.error);
-          };
-        }),
-    );
+  /**
+   * The device user's copy in IndexedDB (idb-keyval default store): `legko.user` (the full SessionUser whose copy
+   * this device holds), then that user's `legko.data.<id>` / `legko.outbox.<id>`; each undefined when absent (no
+   * pointer → no data / outbox). The legacy keys `legko.data` / `legko.outbox` are read with `deviceEntries()`.
+   */
+  async deviceCache(): Promise<{ user: SessionUser | undefined; data: unknown; outbox: unknown }> {
+    const entries = await this.deviceEntries();
+    const user = entries['legko.user'] as SessionUser | undefined;
+    const id = typeof user === 'object' && user !== null && typeof user.id === 'string' ? user.id : undefined;
+    return {
+      user,
+      data: id === undefined ? undefined : entries[`legko.data.${id}`],
+      outbox: id === undefined ? undefined : entries[`legko.outbox.${id}`],
+    };
+  }
+
+  /** Every key of the idb-keyval store, sorted (`[]` when there is no database; never creates it). */
+  async deviceKeys(): Promise<string[]> {
+    return Object.keys(await readDeviceStore(this.page, false)).sort();
+  }
+
+  /** Every key → value of the idb-keyval store (`{}` when there is no database; never creates it). */
+  deviceEntries(): Promise<Record<string, unknown>> {
+    return readDeviceStore(this.page, true);
+  }
+
+  /** «Увійти» of the login form. */
+  loginButton(): Locator {
+    return this.page.getByRole('button', { name: 'Увійти', exact: true });
+  }
+
+  /**
+   * On the login screen: fills «Імʼя користувача» and «Пароль», then clicks «Увійти» (does not wait for the result:
+   * the app, an error, or the switch confirm).
+   */
+  async loginUi(creds: Credentials = USER): Promise<void> {
+    await this.page.getByLabel(USERNAME_LABEL, { exact: true }).fill(creds.username);
+    await this.page.getByLabel('Пароль', { exact: true }).fill(creds.password);
+    await this.loginButton().click();
+  }
+
+  /**
+   * Settings → «Акаунт» → «Вийти» → confirm «Вийти» (a synced device: the unsynced warning has another button), then
+   * waits for the login screen. «Вийти» is no longer on the settings list (D30).
+   */
+  async logoutUi(): Promise<void> {
+    await this.openSettings('Акаунт');
+    await this.page.getByRole('button', { name: 'Вийти', exact: true }).click();
+    await this.page.getByRole('alertdialog').getByRole('button', { name: 'Вийти', exact: true }).click();
+    // The app shows the login screen for a moment, then reloads to `/`: wait for that page, not the first one.
+    await this.page.waitForURL((url) => url.pathname === '/');
+    await expect(this.loginButton()).toBeVisible();
+  }
+
+  /** The «Користувачі» user sheet (a dialog named by the username). */
+  userSheet(username: string): Locator {
+    return this.page.getByRole('dialog', { name: username, exact: true });
   }
 }
 

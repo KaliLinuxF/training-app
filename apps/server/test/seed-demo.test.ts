@@ -1,7 +1,7 @@
-import { addDays, appDataSchema, dayMacros, mealsOf, normalizeDay } from '@legko/shared';
+import { addDays, API, appDataSchema, dayMacros, mealsOf, normalizeDay, USER_HEADER } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { demoData } from '../scripts/seed-demo';
-import { createTestServer, json } from './helpers';
+import { DEFAULT_SEED_USERNAME, demoData, seedDemo } from '../scripts/seed-demo';
+import { createTestServer, json, PASSWORD, type TestServer } from './helpers';
 
 // The e2e clock's day (Wed 14 Oct 2026).
 const TODAY = '2026-10-14';
@@ -66,5 +66,60 @@ describe('demo data (dev seed and e2e fixture)', () => {
     const cookie = await s.login();
     expect((await s.call('/api/import', { cookie, body: data })).status).toBe(200);
     expect(await json(await s.call('/api/data', { cookie }))).toEqual(data);
+  });
+});
+
+describe('seedDemo (the dev script)', () => {
+  const ORIGIN = 'http://127.0.0.1:3000';
+
+  /** The script's fetch, answered by the in-process app; records what it sent. */
+  function appFetch(s: TestServer) {
+    const sent: { url: string; headers: Headers; body: string }[] = [];
+    const request = async (url: string, init: RequestInit): Promise<Response> => {
+      sent.push({ url, headers: new Headers(init.headers), body: String(init.body) });
+      return s.app.request(url, init);
+    };
+    return { sent, request };
+  }
+
+  it('logs in with a username and imports into that account only, sending its id as X-Legko-User', async () => {
+    const s = await createTestServer();
+    const olya = await s.createUser('olya', 'user', 'olya-password');
+    const { sent, request } = appFetch(s);
+
+    const id = await seedDemo({
+      origin: ORIGIN,
+      username: 'olya',
+      password: 'olya-password',
+      today: TODAY,
+      fetch: request,
+    });
+    expect(id).toBe(olya.id);
+    expect(JSON.parse(sent[0]?.body ?? '{}')).toEqual({ username: 'olya', password: 'olya-password' });
+    expect(sent[1]?.url).toBe(`${ORIGIN}${API.import}`);
+    expect(sent[1]?.headers.get(USER_HEADER)).toBe(olya.id);
+
+    expect(s.data.forUser(olya.id).read()).toEqual(demoData(TODAY));
+    expect(s.data.forUser(s.anna.id).read().days).toEqual({});
+  });
+
+  it('defaults to anna and fails clearly on a wrong password, importing nothing', async () => {
+    expect(DEFAULT_SEED_USERNAME).toBe('anna');
+    const s = await createTestServer();
+    const { sent, request } = appFetch(s);
+    await expect(
+      seedDemo({
+        origin: ORIGIN,
+        username: 'anna',
+        password: 'wrong-password',
+        today: TODAY,
+        fetch: request,
+      }),
+    ).rejects.toThrow(/Login failed: 401/);
+    expect(sent).toHaveLength(1);
+    expect(s.data.forUser(s.anna.id).read().days).toEqual({});
+
+    await seedDemo({ origin: ORIGIN, username: 'anna', password: PASSWORD, today: TODAY, fetch: request });
+    expect(s.data.forUser(s.anna.id).read()).toEqual(demoData(TODAY));
   });
 });

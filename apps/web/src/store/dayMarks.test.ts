@@ -6,7 +6,9 @@ import { markNoTraining, markTrained, NO_TRAINING_TOAST, setTrainedMark, TRAINED
 import { fakeIdb, sampleData, type FakeIdb } from './test-utils';
 import { ui } from './ui';
 
-const mocks = vi.hoisted(() => ({ idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() } }));
+const mocks = vi.hoisted(() => ({
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
+}));
 vi.mock('idb-keyval', () => mocks.idb);
 
 const DATE = '2026-10-08';
@@ -48,6 +50,7 @@ beforeEach(async () => {
   mocks.idb.getMany.mockReset().mockImplementation(idb.getMany);
   mocks.idb.setMany.mockReset().mockImplementation(idb.setMany);
   mocks.idb.delMany.mockReset().mockImplementation(idb.delMany);
+  mocks.idb.keys.mockReset().mockImplementation(idb.keys);
   await resetLocal();
 });
 

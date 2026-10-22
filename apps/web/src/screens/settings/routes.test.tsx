@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 import { AppRoutes } from '@/App';
+import { useAuthStore } from '@/auth/auth';
+import { api } from '@/lib/api';
 import type { PushStatus } from '@/lib/push';
 import { useDataStore } from '@/store/data';
 import { initialSyncState } from '@/store/state';
-import { sampleData, settle } from '@/store/test-utils';
+import { sampleData, sessionUser, settle } from '@/store/test-utils';
 import { installMatchMedia } from '@/ui/internal/testing';
+import { resetAdminOverview } from './users/adminOverview';
 
 const mocks = vi.hoisted(() => ({
   push: {
@@ -37,6 +40,10 @@ beforeEach(() => {
   installMatchMedia();
   mocks.push.getPushStatus.mockReset().mockResolvedValue('enabled');
   useDataStore.setState({ data: sampleData(), sync: { ...initialSyncState(), loaded: true, online: true } });
+  useAuthStore.setState({ status: 'authed', offline: false, user: sessionUser() });
+  resetAdminOverview();
+  // Nothing in these tests may reach the network.
+  vi.spyOn(api, 'foodStatus').mockReturnValue(new Promise(() => undefined));
 });
 
 afterEach(() => {
@@ -68,6 +75,37 @@ describe('settings routes (App.tsx)', () => {
       expect(screen.getByRole('navigation', { name: 'Розділи налаштувань' })).toBeTruthy();
       cleanup();
     }
+  });
+
+  it('renders «Акаунт» at /settings/account for everyone', async () => {
+    const memory = await renderAt('/settings/account');
+    expect(memory.history).toEqual(['/settings/account']);
+    expect(screen.getByRole('heading', { level: 1, name: 'Акаунт' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Профіль' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Вийти' })).toBeTruthy();
+  });
+
+  it('sends a user (and a device whose account is not known yet) from /settings/users back to the list', async () => {
+    const overview = vi.spyOn(api.admin, 'overview');
+    for (const user of [sessionUser({ role: 'user' }), null]) {
+      useAuthStore.setState({ user });
+      const memory = await renderAt('/settings/users');
+      expect(memory.history, String(user?.role)).toEqual(['/settings']);
+      expect(screen.getByRole('navigation', { name: 'Розділи налаштувань' })).toBeTruthy();
+      expect(screen.queryByRole('link', { name: /^Користувачі/ })).toBeNull();
+      cleanup();
+    }
+    expect(overview).not.toHaveBeenCalled();
+  });
+
+  it('opens /settings/users for an admin', async () => {
+    useAuthStore.setState({ user: sessionUser({ username: 'admin', role: 'admin' }) });
+    const overview = vi.spyOn(api.admin, 'overview').mockReturnValue(new Promise(() => undefined));
+    const memory = await renderAt('/settings/users');
+    expect(memory.history).toEqual(['/settings/users']);
+    expect(screen.getByRole('heading', { level: 1, name: 'Користувачі' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Запросити людину' })).toBeTruthy();
+    expect(overview).toHaveBeenCalledTimes(1);
   });
 
   it('redirects the old /reminders (bookmarks, delivered test notifications) to /settings/reminders', async () => {

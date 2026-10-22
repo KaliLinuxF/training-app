@@ -1,19 +1,21 @@
 import { useEffect } from 'react';
+import { useCurrentUser } from '@/auth/auth';
 import { useToday } from '@/lib/useToday';
 import { dataActions, useAppData, useSyncState } from '@/store/data';
 import { ui, useSheet, useUiStore } from '@/store/ui';
 import { readSetupShown, setupGateAction, syncSettled, writeSetupShown } from './setupGate';
 
-/** Offers the first-run setup sheet once per session to a new account (see `setupGateAction`). */
+/** Offers the first-run setup sheet once per session to a new account (see `setupGateAction`; never to admins). */
 export function useSetupAutoOpen(): void {
   const data = useAppData();
   const settled = syncSettled(useSyncState());
+  const role = useCurrentUser()?.role;
   // Re-runs the effect when a sheet closes, so the setup can follow it.
   const sheetOpen = useSheet() !== null;
   const today = useToday();
 
   useEffect(() => {
-    const action = setupGateAction(data, settled, readSetupShown());
+    const action = setupGateAction(data, settled, readSetupShown(), role);
     if (action === 'mark-onboarded') {
       dataActions.updateSettings((s) => ({ ...s, onboarded: true }));
     } else if (action === 'open' && useUiStore.getState().sheet === null) {
@@ -22,5 +24,5 @@ export function useSetupAutoOpen(): void {
       writeSetupShown();
       ui.openSheet(today, 'setup');
     }
-  }, [data, settled, sheetOpen, today]);
+  }, [data, settled, sheetOpen, today, role]);
 }

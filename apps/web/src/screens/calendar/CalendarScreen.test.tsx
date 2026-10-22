@@ -25,7 +25,9 @@ vi.mock('@/features/food', () => ({
   ),
 }));
 // The real data store saves the inline ✓ / ✕; its device cache lives in this in-memory IndexedDB stand-in.
-const mocks = vi.hoisted(() => ({ idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() } }));
+const mocks = vi.hoisted(() => ({
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
+}));
 vi.mock('idb-keyval', () => mocks.idb);
 
 const day = (patch: Partial<DayEntry> = {}): DayEntry => ({
@@ -128,6 +130,7 @@ beforeEach(async () => {
   mocks.idb.getMany.mockReset().mockImplementation(idb.getMany);
   mocks.idb.setMany.mockReset().mockImplementation(idb.setMany);
   mocks.idb.delMany.mockReset().mockImplementation(idb.delMany);
+  mocks.idb.keys.mockReset().mockImplementation(idb.keys);
   await resetLocal();
   installMatchMedia();
   scrollIntoView = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);

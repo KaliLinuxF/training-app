@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { zonedNow } from '@legko/shared';
-import { BACKUP_TIMEZONE, backupsDir, preMigrationBackupName, writeSnapshot } from '../backup';
+import { BACKUP_TIMEZONE, backupsDir, preMigrationBackupName, writeSnapshotOnce } from '../backup';
 import { silentLogger, type Logger } from '../logger';
 import { migrate, MIGRATIONS, schemaVersion } from './migrations';
 import { sqlite, type Database } from './sqlite';
@@ -19,13 +19,17 @@ export interface OpenDatabaseOptions {
 /**
  * Before an existing file database is migrated, keeps a copy of it as it was:
  * `<dir>/backups/legko-pre-v<target>-<date>.db`. The daily start-up backup is taken after migrating, so this is
- * the copy a rollback to the previous build can use. Fresh (v0) and up-to-date databases are left alone.
+ * the copy a rollback to the previous build can use. Fresh (v0) and up-to-date databases are left alone. An existing
+ * snapshot is never replaced: a second migration on the same date (after a downgrade) writes `…-2.db` next to it.
  */
 function snapshotBeforeMigrating(db: Database, file: string, now: Date): string | null {
   const version = schemaVersion(db);
   if (version === 0 || version >= MIGRATIONS.length) return null;
   const date = zonedNow(BACKUP_TIMEZONE, now).date;
-  return writeSnapshot(db, join(backupsDir(dirname(file)), preMigrationBackupName(MIGRATIONS.length, date)));
+  return writeSnapshotOnce(
+    db,
+    join(backupsDir(dirname(file)), preMigrationBackupName(MIGRATIONS.length, date)),
+  );
 }
 
 /** Opens (creating if needed) the database in WAL mode and brings the schema up to date. */

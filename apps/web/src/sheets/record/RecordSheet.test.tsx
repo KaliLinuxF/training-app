@@ -25,7 +25,7 @@ const TODAY = '2026-10-10';
 const YESTERDAY = '2026-10-09';
 
 const mocks = vi.hoisted(() => ({
-  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn() },
+  idb: { getMany: vi.fn(), setMany: vi.fn(), delMany: vi.fn(), keys: vi.fn() },
   /** Every `commit()` call the record sheet makes, in order (the meal editor saves through `dataActions`). */
   commits: [] as Op[][],
 }));
@@ -165,6 +165,7 @@ beforeEach(() => {
   mocks.idb.getMany.mockImplementation(idb.getMany);
   mocks.idb.setMany.mockImplementation(idb.setMany);
   mocks.idb.delMany.mockImplementation(idb.delMany);
+  mocks.idb.keys.mockImplementation(idb.keys);
   mocks.commits.length = 0;
   useUiStore.setState({ sheet: null, toast: null, confirm: null });
   setData(seed());

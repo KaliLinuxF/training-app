@@ -210,7 +210,8 @@ describe('syncPushSubscription', () => {
     const { pushManager, created } = installEnv({ permission: 'granted', subscription: stale });
     await syncPushSubscription();
     expect(stale.unsubscribe).toHaveBeenCalled();
-    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/stale');
+    // With the old subscription's own auth key (D15), read before it was dropped.
+    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/stale', 'a');
     expect(pushManager.subscribe).toHaveBeenCalled();
     expect(api.pushSubscribe).toHaveBeenCalledWith(created.toJSON(), expect.any(String));
   });
@@ -231,7 +232,26 @@ describe('disablePush', () => {
     installEnv({ permission: 'granted', subscription: existing });
     await disablePush();
     expect(existing.unsubscribe).toHaveBeenCalled();
-    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/a');
+    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/a', 'a');
+  });
+
+  it('sends the subscription’s own auth key, so a row still owned by the previous account goes too (D15)', async () => {
+    const existing = fakeSubscription('https://push.example/a', OTHER_KEY);
+    existing.toJSON = () => ({ endpoint: existing.endpoint, keys: { p256dh: 'p', auth: 'secret-auth-key' } });
+    installEnv({ permission: 'granted', subscription: existing });
+    await disablePush();
+    expect(api.pushUnsubscribe).toHaveBeenCalledTimes(1);
+    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/a', 'secret-auth-key');
+    // Read before the browser drops the subscription.
+    expect(existing.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('still unsubscribes without an auth key when the browser gives none', async () => {
+    const existing = fakeSubscription('https://push.example/a', OTHER_KEY);
+    existing.toJSON = () => ({ endpoint: existing.endpoint });
+    installEnv({ permission: 'granted', subscription: existing });
+    await disablePush();
+    expect(api.pushUnsubscribe).toHaveBeenCalledWith('https://push.example/a', undefined);
   });
 
   it('still succeeds when the server is unreachable', async () => {

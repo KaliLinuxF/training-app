@@ -11,7 +11,7 @@ import {
 import type { Hono } from 'hono';
 import { BODY_LIMITS, limitBody } from '../bodyLimit';
 import { apiError, badRequest, describeIssue, MESSAGES, readJson } from '../errors';
-import type { AppEnv } from '../types';
+import { currentUser, type AppEnv } from '../types';
 import type { RouteDeps } from './deps';
 
 const OK: OkResponse = { ok: true };
@@ -23,10 +23,16 @@ function opsArray(body: unknown): unknown[] | null {
   return Array.isArray(ops) && ops.length >= 1 && ops.length <= MAX_OPS_PER_REQUEST ? ops : null;
 }
 
+/**
+ * The signed-in user's own `AppData` (docs/multi-user.md §5.1). Every handler works on
+ * `data.forUser(currentUser(c).id)`; the `X-Legko-User` rule (409 `user_mismatch`, D11) is enforced by `auth` before
+ * a handler runs.
+ */
 export function registerDataRoutes(app: Hono<AppEnv>, { data, auth, now }: RouteDeps): void {
-  app.get(API.data, auth, (c) => c.json(data.read()));
+  app.get(API.data, auth, (c) => c.json(data.forUser(currentUser(c).id).read()));
 
   app.post(API.ops, auth, limitBody(BODY_LIMITS.bulk), async (c) => {
+    const repo = data.forUser(currentUser(c).id);
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);
     const raw = opsArray(body.value);
@@ -43,25 +49,28 @@ export function registerDataRoutes(app: Hono<AppEnv>, { data, auth, now }: Route
       }
       ops.push(parsed.data);
     }
-    data.apply(ops);
+    repo.apply(ops);
     const res: OpsResponse = { ok: true, applied: ops.length };
     return c.json(res);
   });
 
+  // A plain download link (no X-Legko-User needed): only ever this user's data.
   app.get(API.export, auth, (c) => {
-    const snapshot = data.read();
+    const snapshot = data.forUser(currentUser(c).id).read();
     const date = zonedNow(snapshot.settings.timezone, new Date(now())).date;
     c.header('Content-Disposition', `attachment; filename="legko-${date}.json"`);
     c.header('Content-Type', 'application/json; charset=utf-8');
     return c.body(JSON.stringify(snapshot, null, 2));
   });
 
+  // Replaces this user's data only; nobody else's rows are touched.
   app.post(API.import, auth, limitBody(BODY_LIMITS.bulk), async (c) => {
+    const repo = data.forUser(currentUser(c).id);
     const body = await readJson(c);
     if (!body) return badRequest(c, MESSAGES.badJson);
     const parsed = appDataSchema.safeParse(body.value);
     if (!parsed.success) return badRequest(c, describeIssue(parsed.error));
-    data.replaceAll(parsed.data);
+    repo.replaceAll(parsed.data);
     return c.json(OK);
   });
 }

@@ -119,14 +119,11 @@ test.describe('offline', () => {
     await app.ready();
     await expect(app.region('Поточна вага')).toContainText('65,4');
 
-    // Logged out (local data wiped) and offline: the login screen says why it cannot sign in.
-    await app.go('Налаштування');
-    await page.getByRole('button', { name: 'Вийти', exact: true }).click();
-    await page
-      .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
-      .getByRole('button', { name: 'Вийти', exact: true })
-      .click();
+    // Logged out (local data wiped; «Вийти» is in «Акаунт», reached in-app) and offline: the reload comes from the
+    // service worker, and the login screen says why it cannot sign in.
+    await app.logoutUi();
     await expect(page.getByLabel('Пароль', { exact: true })).toBeVisible();
+    await expect.poll(() => app.deviceKeys()).toEqual([]);
     await page.reload();
     await expect(
       page.getByText('Немає зʼєднання з сервером. Увійти можна, щойно зʼявиться інтернет.'),

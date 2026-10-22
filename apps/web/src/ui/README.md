@@ -174,7 +174,8 @@ Big unboxed numbers instead of a tile grid. `columns` defaults to `min(items.len
 3–21 (unit-tested on every path's end points), `fill="none" stroke="currentColor" strokeWidth={1.8}`, round caps and
 joins, `aria-hidden="true" focusable="false"` — always decorative: name the control around it.
 `IconName` = `home calendar chart gear` (tab bar / sidebar) · `food workout weight measure notes` (actions, day rows) ·
-`bell target theme data logout` (settings rows) · `chevronRight chevronLeft`. `ICON_PATHS[name]` is the list of path
+`bell target theme data logout` (settings rows) · `user users link key` (accounts: «Акаунт», «Користувачі»,
+one-time links) · `chevronRight chevronLeft`. `ICON_PATHS[name]` is the list of path
 strings (`home`, `calendar`, `chart`, `bell` are the former `shell/NavIcon` glyphs; `gear` is the ISC-licensed lucide
 cog scaled into the 3–21 box; its licence notice heads `icons/paths.ts` as a `/*! @license */` comment — keep it).
 No emoji in rows.
@@ -342,7 +343,7 @@ The «Що записати?» menu — four `lg` rows in a group without a titl
 </ListGroup>
 ```
 
-A settings group — `href` rows with soft values, a `Pill` in the sub, and «Вийти» on its own:
+A settings group — `href` rows with soft values, a `Pill` in the sub, then the account group last (D30):
 
 ```tsx
 <nav aria-label="Розділи налаштувань">
@@ -353,9 +354,15 @@ A settings group — `href` rows with soft values, a `Pill` in the sub, and «В
   </ListGroup>
 </nav>
 <ListGroup>
-  <ListRow icon="logout" title="Вийти" titleTone="accent" chevron={false} onClick={logout} />
+  <ListRow href="/settings/account" icon="user" iconTone="acc" title="Акаунт" value={username} valueVariant="soft" />
+  {isAdmin && (
+    <ListRow href="/settings/users" icon="users" iconTone="acc2" title="Користувачі" value="4 акаунти"
+      valueVariant="soft" />
+  )}
 </ListGroup>
 ```
+
+Since D30 «Вийти» (`screens/settings/LogoutRow`) is not on the settings list; it sits at the bottom of the «Акаунт» page.
 
 The calendar day card — large title, subtitle, status pill, footer, wrapped text with photos, described rows:
 

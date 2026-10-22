@@ -1,8 +1,19 @@
-import { defaultReminders, defaultSettings, LIMITS, type ReminderKind, type Reminders } from '@legko/shared';
+import {
+  defaultReminders,
+  defaultSettings,
+  LIMITS,
+  type AdminUser,
+  type ReminderKind,
+  type Reminders,
+} from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import type { PushStatus } from '@/lib/push';
 import { ICON_PATHS } from '@/ui';
 import {
+  accountsCount,
+  accountSummary,
+  ADMIN_SECTIONS,
+  canOpenSection,
   DESKTOP_DEFAULT_SECTION,
   goalsSummary,
   mealTypesSummary,
@@ -13,10 +24,13 @@ import {
   SECTION_TITLES,
   SETTINGS_GROUPS,
   SETTINGS_ROOT,
+  settingsGroups,
   settingsPath,
+  showsCaption,
   syncShort,
   themeSummary,
   typesSummary,
+  usersSummary,
   type SettingsSectionId,
 } from './listModel';
 import { syncStatus, withReminder } from './model';
@@ -24,10 +38,19 @@ import { syncStatus, withReminder } from './model';
 /** `f0` groups thousands with a (narrow) no-break space, which `\s` matches; compare with plain spaces. */
 const plain = (text: string) => text.replace(/\s/g, ' ');
 
-const ALL: SettingsSectionId[] = ['reminders', 'goals', 'workouts', 'meals', 'appearance', 'data'];
+const ALL: SettingsSectionId[] = [
+  'reminders',
+  'goals',
+  'workouts',
+  'meals',
+  'appearance',
+  'data',
+  'account',
+  'users',
+];
 
 describe('sections & routes', () => {
-  it('has one route, title and icon per section, in two groups', () => {
+  it('has one route, title and icon per section, in three groups', () => {
     expect(SETTINGS_ROOT).toBe('/settings');
     expect(ALL.map(settingsPath)).toEqual([
       '/settings/reminders',
@@ -36,6 +59,8 @@ describe('sections & routes', () => {
       '/settings/meals',
       '/settings/appearance',
       '/settings/data',
+      '/settings/account',
+      '/settings/users',
     ]);
     expect(SECTION_TITLES).toEqual({
       reminders: 'Нагадування',
@@ -44,6 +69,8 @@ describe('sections & routes', () => {
       meals: 'Прийоми їжі',
       appearance: 'Вигляд',
       data: 'Дані і копія',
+      account: 'Акаунт',
+      users: 'Користувачі',
     });
     expect(SECTION_ICONS).toEqual({
       reminders: { icon: 'bell', tone: 'acc' },
@@ -52,15 +79,42 @@ describe('sections & routes', () => {
       meals: { icon: 'food', tone: 'acc2' },
       appearance: { icon: 'theme', tone: 'neutral' },
       data: { icon: 'data', tone: 'acc2' },
+      account: { icon: 'user', tone: 'acc' },
+      users: { icon: 'users', tone: 'acc2' },
     });
     for (const id of ALL) expect(ICON_PATHS[SECTION_ICONS[id].icon]).toBeTruthy();
-    // «Прийоми їжі» joins what she plans with, right after «Типи тренувань».
+    // «Прийоми їжі» joins what she plans with; the account group is last, where «Вийти» used to be (D30).
     expect(SETTINGS_GROUPS).toEqual([
       ['reminders', 'goals', 'workouts', 'meals'],
       ['appearance', 'data'],
+      ['account', 'users'],
     ]);
     expect(SETTINGS_GROUPS.flat()).toEqual(ALL);
     expect(DESKTOP_DEFAULT_SECTION).toBe('reminders');
+  });
+
+  it('shows «Користувачі» to admins only; «Акаунт» to everyone, in the last group', () => {
+    expect(ADMIN_SECTIONS).toEqual(['users']);
+    expect(settingsGroups(false)).toEqual([
+      ['reminders', 'goals', 'workouts', 'meals'],
+      ['appearance', 'data'],
+      ['account'],
+    ]);
+    expect(settingsGroups(true)).toEqual([
+      ['reminders', 'goals', 'workouts', 'meals'],
+      ['appearance', 'data'],
+      ['account', 'users'],
+    ]);
+    for (const isAdmin of [false, true]) expect(settingsGroups(isAdmin).at(-1)?.[0]).toBe('account');
+    for (const id of ALL) {
+      expect(canOpenSection(id, true), id).toBe(true);
+      expect(canOpenSection(id, false), id).toBe(id !== 'users');
+    }
+  });
+
+  it('shows the caption only while the «Користувачі» row is not on the list', () => {
+    expect(showsCaption(settingsGroups(false))).toBe(true);
+    expect(showsCaption(settingsGroups(true))).toBe(false);
   });
 
   it('parses the :section param', () => {
@@ -68,11 +122,49 @@ describe('sections & routes', () => {
     expect(parseSettingsSection('')).toBeNull();
     for (const id of ALL) expect(parseSettingsSection(id)).toBe(id);
     expect(parseSettingsSection('meals')).toBe('meals');
+    expect(parseSettingsSection('account')).toBe('account');
+    expect(parseSettingsSection('users')).toBe('users');
     expect(parseSettingsSection('foo')).toBe('invalid');
     expect(parseSettingsSection('Reminders')).toBe('invalid');
     expect(parseSettingsSection('Meals')).toBe('invalid');
+    expect(parseSettingsSection('Users')).toBe('invalid');
+    expect(parseSettingsSection('admin')).toBe('invalid');
     expect(parseSettingsSection('types')).toBe('invalid');
     expect(parseSettingsSection('food')).toBe('invalid');
+  });
+});
+
+describe('account rows', () => {
+  const user = (id: string): AdminUser => ({
+    id: id.padEnd(32, '0'),
+    username: `u${id}`,
+    role: 'user',
+    status: 'active',
+    createdAt: 0,
+    lastSeenAt: null,
+    ai: { today: 0, last30Days: 0, limit: 40, customLimit: null },
+    self: false,
+  });
+
+  it('names the signed-in account, «…» while it is not known', () => {
+    expect(accountSummary({ username: 'anna' })).toBe('anna');
+    expect(accountSummary({ username: 'Olya.K' })).toBe('Olya.K');
+    expect(accountSummary(null)).toBe('…');
+  });
+
+  it('counts the accounts with Ukrainian plurals, and shows nothing while the overview loads', () => {
+    expect(usersSummary(null)).toBeUndefined();
+    expect(usersSummary({ users: [user('a')] })).toBe('1 акаунт');
+    expect(usersSummary({ users: ['a', 'b', 'c'].map(user) })).toBe('3 акаунти');
+    expect(usersSummary({ users: ['a', 'b', 'c', 'd', 'e'].map(user) })).toBe('5 акаунтів');
+    expect(accountsCount(0)).toBe('0 акаунтів');
+    expect(accountsCount(2)).toBe('2 акаунти');
+    expect(accountsCount(4)).toBe('4 акаунти');
+    expect(accountsCount(11)).toBe('11 акаунтів');
+    expect(accountsCount(12)).toBe('12 акаунтів');
+    expect(accountsCount(21)).toBe('21 акаунт');
+    expect(accountsCount(22)).toBe('22 акаунти');
+    expect(accountsCount(25)).toBe('25 акаунтів');
   });
 });
 
