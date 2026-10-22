@@ -889,7 +889,7 @@ describe('install sheet', () => {
     try {
       renderHost();
       act(() => ui.openSheet(TODAY, 'install'));
-      expect(screen.getByText('Готово — Легко вже встановлено ✨')).toBeTruthy();
+      expect(screen.getByText('Готово — Home Fit вже встановлено ✨')).toBeTruthy();
       expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     } finally {
       installMatchMedia();

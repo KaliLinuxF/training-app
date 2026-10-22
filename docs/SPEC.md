@@ -1,4 +1,4 @@
-# «Легко» — personal weight-loss tracker · Engineering spec
+# «Home Fit» (formerly «Легко») — personal weight-loss tracker · Engineering spec
 
 Single source of truth for everyone working on this repo. Read it fully before touching code.
 

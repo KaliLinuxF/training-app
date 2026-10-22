@@ -30,7 +30,7 @@ import {
 import s from './LoginScreen.module.css';
 import { useLinkCheck } from './useLinkCheck';
 
-export const INVITE_TITLE = 'Запрошення в Легко';
+export const INVITE_TITLE = 'Запрошення в Home Fit';
 const INVITE_SUBTITLE = 'Обери імʼя і пароль — і можна починати';
 /**
  * Read before registering (docs/coach-cabinet.md §7.1): inside the form, right above «Створити акаунт», so it is on
@@ -61,7 +61,7 @@ export function InviteScreen() {
       <LinkDone
         title="Акаунт створено"
         username={done.username}
-        text="Нагадування приходять у застосунок на початковому екрані. Додай Легко туди й один раз увійди з цим імʼям і паролем."
+        text="Нагадування приходять у застосунок на початковому екрані. Додай Home Fit туди й один раз увійди з цим імʼям і паролем."
         installSteps
         target={done.target}
       />

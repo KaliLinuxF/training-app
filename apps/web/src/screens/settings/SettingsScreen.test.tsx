@@ -165,7 +165,7 @@ describe('SettingsScreen — the list (phone)', () => {
     expect(screen.queryByRole('button', { name: 'Вийти' })).toBeNull();
     expect(screen.queryByRole('link', { name: /^Користувачі/ })).toBeNull();
     expect(mocks.admin.overview).not.toHaveBeenCalled();
-    const caption = screen.getByText('Легко · трекер схуднення');
+    const caption = screen.getByText('Home Fit · трекер схуднення');
     expect(navEl.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // No section content on the list itself.
     expect(screen.queryByRole('region', { name: 'Сповіщення на телефон' })).toBeNull();
@@ -193,7 +193,7 @@ describe('SettingsScreen — the list (phone)', () => {
     expect(row('Користувачі').getAttribute('href')).toBe('/settings/users');
     expect(plain(row('Акаунт').textContent)).toBe('Акаунт admin');
     expect(within(lists[2] as HTMLElement).getAllByRole('link')).toEqual([row('Акаунт'), row('Користувачі')]);
-    expect(screen.queryByText('Легко · трекер схуднення')).toBeNull();
+    expect(screen.queryByText('Home Fit · трекер схуднення')).toBeNull();
 
     await act(async () => {
       answer.resolve(OVERVIEW);
@@ -537,7 +537,7 @@ describe('Нагадування (/settings/reminders)', () => {
       mocks.push.enablePush.mockReturnValue(result.promise);
       await renderReady('/settings/reminders', 'default');
       const panel = region('Сповіщення на телефон');
-      expect(panel.getByText('Дозволь Легко надсилати нагадування')).toBeTruthy();
+      expect(panel.getByText('Дозволь Home Fit надсилати нагадування')).toBeTruthy();
 
       fireEvent.click(panel.getByRole('button', { name: 'Увімкнути' }));
       // Synchronously, inside the click: iOS needs the user gesture.
@@ -591,7 +591,7 @@ describe('Нагадування (/settings/reminders)', () => {
       await renderReady('/settings/reminders', 'denied');
       expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Заблоковано' }).disabled).toBe(true);
       expect(
-        screen.getByText('Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Легко'),
+        screen.getByText('Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Home Fit'),
       ).toBeTruthy();
     });
 
@@ -808,7 +808,7 @@ describe('Дані і копія (/settings/data)', () => {
     pickFile('{"not":"a backup"}');
     await act(settle);
     expect(useUiStore.getState().confirm).toBeNull();
-    expect(toast()).toBe('Файл не схожий на резервну копію «Легко»');
+    expect(toast()).toBe('Файл не схожий на резервну копію «Home Fit»');
   });
 
   it('shows the server error when the restore fails', async () => {
@@ -987,7 +987,7 @@ describe('«Вийти» (/settings/account)', () => {
     const leaving = deferred<boolean>();
     // Like authActions.logout: asks in the app's dialog, then logs out.
     vi.spyOn(authActions, 'logout').mockImplementation(async () =>
-      (await ui.confirm({ title: 'Вийти з Легко на цьому пристрої?' })) ? leaving.promise : false,
+      (await ui.confirm({ title: 'Вийти з Home Fit на цьому пристрої?' })) ? leaving.promise : false,
     );
     await renderReady('/settings/account');
 
@@ -1022,7 +1022,7 @@ describe('«Вийти» (/settings/account)', () => {
       button.focus();
       fireEvent.click(button);
       await act(settle);
-      const dialog = within(screen.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' }));
+      const dialog = within(screen.getByRole('alertdialog', { name: 'Вийти з Home Fit на цьому пристрої?' }));
       // Destructive: the dialog starts on «Скасувати»; the row waits, disabled, behind it.
       expect(document.activeElement).toBe(dialog.getByRole('button', { name: 'Скасувати' }));
       expect(button.disabled).toBe(true);

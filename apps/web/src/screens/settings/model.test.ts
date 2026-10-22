@@ -137,7 +137,7 @@ describe('goals', () => {
 describe('notifications panel', () => {
   it('maps every push status to copy and an action', () => {
     expect(notifView('default')).toEqual({
-      sub: 'Дозволь Легко надсилати нагадування',
+      sub: 'Дозволь Home Fit надсилати нагадування',
       cta: 'Увімкнути',
       action: 'enable',
       disabled: false,
@@ -150,13 +150,13 @@ describe('notifications panel', () => {
       canTurnOff: true,
     });
     expect(notifView('needs-install')).toMatchObject({
-      sub: 'На iPhone нагадування працюють, коли Легко додано на початковий екран',
+      sub: 'На iPhone нагадування працюють, коли Home Fit додано на початковий екран',
       cta: 'Як?',
       action: 'install',
       disabled: false,
     });
     expect(notifView('denied')).toMatchObject({
-      sub: 'Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Легко',
+      sub: 'Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Home Fit',
       cta: 'Заблоковано',
       disabled: true,
     });

@@ -258,7 +258,7 @@ describe('push routes', () => {
     expect(await json(res)).toEqual({ ok: true, sent: 1 });
     expect(s.transport.sent).toHaveLength(3);
     expect(s.transport.sent[0]?.payload).toEqual({
-      title: 'Легко',
+      title: 'Home Fit',
       body: 'Сповіщення працюють ✨',
       url: '/settings/reminders',
       tag: 'test',

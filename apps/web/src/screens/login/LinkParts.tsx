@@ -15,7 +15,7 @@ import { LogoMark } from './LogoMark';
 export const inIosSafari = (): boolean => isIOS() && !isStandalone();
 
 export const COPY_LINK = {
-  note: 'Легко вже на початковому екрані? Скопіюй посилання й встав його там: «Маю посилання».',
+  note: 'Home Fit вже на початковому екрані? Скопіюй посилання й встав його там: «Маю посилання».',
   button: 'Скопіювати посилання',
   copied: 'Посилання скопійовано',
   failed: 'Не вдалося скопіювати. Виділи посилання й скопіюй його:',
@@ -53,7 +53,7 @@ export function LinkInvalid({ text, askAdmin, signedIn }: { text: string; askAdm
           {askAdmin ? <p className={s.text}>{ASK_ADMIN}</p> : null}
         </div>
         <button type="button" className={s.submit} onClick={leaveLinkPage}>
-          {signedIn ? 'Відкрити Легко' : 'Увійти'}
+          {signedIn ? 'Відкрити Home Fit' : 'Увійти'}
         </button>
       </div>
     </AuthPage>

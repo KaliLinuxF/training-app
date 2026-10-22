@@ -4,7 +4,7 @@
  */
 
 /** Title used when a push arrives without a usable payload. */
-export const DEFAULT_NOTIFICATION_TITLE = 'Легко';
+export const DEFAULT_NOTIFICATION_TITLE = 'Home Fit';
 
 export interface NotificationPayload {
   title: string;

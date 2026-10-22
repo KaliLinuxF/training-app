@@ -265,12 +265,12 @@ export function statusPill(status: CoachClientStatus): string | null {
 }
 
 /**
- * «У Легко з 9 жовтня 2026 · активність: сьогодні, 09:12» / «У Легко з 9 жовтня 2026 · ще не входили». The line never
+ * «У Home Fit з 9 жовтня 2026 · активність: сьогодні, 09:12» / «У Home Fit з 9 жовтня 2026 · ще не входили». The line never
  * starts with «З» + a digit (in Manrope the capital «З» looks like «3»). `omitNeverSeen`: the header already shows the
  * «Ще не входили» pill.
  */
 export function headerSubtitle(client: CoachClient, now: Date, omitNeverSeen = false): string {
-  const since = `У Легко з ${longDate(client.createdAt)}`;
+  const since = `У Home Fit з ${longDate(client.createdAt)}`;
   if (client.lastSeenAt !== null) return `${since} · активність: ${dayTime(client.lastSeenAt, now.getTime())}`;
   return omitNeverSeen ? since : `${since} · ще не входили`;
 }

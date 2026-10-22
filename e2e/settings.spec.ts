@@ -10,7 +10,7 @@ import { expect, test } from './support/test';
 const SECTIONS = Object.keys(SETTINGS_SLUGS) as SettingsSection[];
 const USER_SECTIONS = SECTIONS.filter((title) => title !== 'Користувачі');
 
-const CAPTION = 'Легко · трекер схуднення';
+const CAPTION = 'Home Fit · трекер схуднення';
 
 const DEFAULT_TYPES = [...DEFAULT_MEAL_TYPES];
 

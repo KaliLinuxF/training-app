@@ -1,10 +1,6 @@
-import s from './LogoMark.module.css';
+import { BrandMark } from '@/shell/BrandMark';
 
-/** The «Л» app mark (rounded solid square), as on the sidebar and the home-screen icon. */
+/** The «Home Fit» app mark, as on the sidebar and the home-screen icon. */
 export function LogoMark({ className }: { className?: string }) {
-  return (
-    <div className={className ? `${s.mark} ${className}` : s.mark} aria-hidden="true">
-      Л
-    </div>
-  );
+  return <BrandMark size={56} className={className} />;
 }

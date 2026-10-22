@@ -1,0 +1,16 @@
+.mark {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 23.3%;
+}
+
+/* A hairline so the dark square still has an edge on the dark paper. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .mark {
+    box-shadow: 0 0 0 1px var(--line);
+  }
+}
+
+:root[data-theme='dark'] .mark {
+  box-shadow: 0 0 0 1px var(--line);
+}

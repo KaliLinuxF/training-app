@@ -1147,7 +1147,7 @@ test.describe('accounts on the phone: 390 and 320 wide (no side scroll, 44px tar
     test('the invite and the reset forms', async ({ page }) => {
       await stubLinkChecks(page);
       await page.goto(`/invite#${LINK_TOKEN}`);
-      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
       await expect(page.getByLabel(USERNAME_LABEL, { exact: true })).toHaveAttribute(
         'autocomplete',
         'username',
@@ -1193,7 +1193,7 @@ test.describe('accounts on the phone: 390 and 320 wide (no side scroll, 44px tar
     test('the invite form: «Адміністратор бачить…» is ≥ 13px in --muted', async ({ page }) => {
       await stubLinkChecks(page);
       await page.goto(`/invite#${LINK_TOKEN}`);
-      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
       const line = page.getByText(ADMIN_SEES, { exact: true });
       await expect(line).toHaveCount(1);
       await atPhoneWidths(page, async (width) => {

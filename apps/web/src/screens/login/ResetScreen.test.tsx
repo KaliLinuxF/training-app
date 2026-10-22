@@ -123,7 +123,7 @@ describe('ResetScreen', () => {
     expect(Boolean(screen.queryByText(ASK_ADMIN))).toBe(askAdmin);
     expect(RESET_INVALID.used).toBe('Це посилання вже використали. Якщо пароль уже змінено — увійди з ним.');
     expect(RESET_INVALID.revoked).toBe('Посилання скасовано — є новіше.');
-    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Легко' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Відкрити Home Fit' }));
     expect(replace).toHaveBeenCalledWith('/');
   });
 
@@ -218,7 +218,7 @@ describe('ResetScreen', () => {
 
       expect(await screen.findByRole('heading', { level: 1, name: 'Пароль збережено' })).toBeTruthy();
       expect(screen.getByText(/^Імʼя для входу:/).textContent).toBe('Імʼя для входу: anna');
-      expect(screen.getByText('Відкрий Легко з іконки й увійди з новим паролем.')).toBeTruthy();
+      expect(screen.getByText('Відкрий Home Fit з іконки й увійди з новим паролем.')).toBeTruthy();
       expect(replace).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole('button', { name: 'Продовжити в Safari' }));
       expect(replace).toHaveBeenCalledWith('/');

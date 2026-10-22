@@ -1,4 +1,5 @@
 import { cx } from '@/ui';
+import { BrandMark } from './BrandMark';
 import { isNavActive, isNavRoot, type NavItem } from './nav';
 import { NavLink } from './NavLink';
 import s from './Sidebar.module.css';
@@ -18,10 +19,8 @@ export function Sidebar({ location, items, onRecord, recordOpen = false }: Sideb
   return (
     <aside className={s.sidebar}>
       <div className={s.logo}>
-        <span className={s.mark} aria-hidden="true">
-          Л
-        </span>
-        <span className={s.name}>Легко</span>
+        <BrandMark size={36} />
+        <span className={s.name}>Home Fit</span>
       </div>
       <nav className={s.nav} aria-label="Основна навігація">
         {items.map((item) => {

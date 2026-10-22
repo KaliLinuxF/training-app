@@ -31,7 +31,7 @@ export const REMINDER_MESSAGES: Readonly<Record<ReminderKind, PushMessage>> = {
 
 /** Opens «Налаштування → Нагадування», where the «Тест» button is. */
 export const TEST_MESSAGE: Readonly<PushMessage> = {
-  title: 'Легко',
+  title: 'Home Fit',
   body: 'Сповіщення працюють ✨',
   url: SETTINGS_REMINDERS_PATH,
   tag: 'test',

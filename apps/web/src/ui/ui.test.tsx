@@ -150,7 +150,7 @@ describe('Banner compact', () => {
     render(
       <Banner
         size="compact"
-        title="Додай Легко на екран «Додому»"
+        title="Додай Home Fit на екран «Додому»"
         sub="Тоді працюватимуть нагадування"
         cta="Як?"
         onAction={onAction}

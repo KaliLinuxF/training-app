@@ -145,16 +145,16 @@ export interface NotifView {
 }
 
 const NOTIF_COPY: Record<PushStatus, { sub: string; cta: string; action: NotifAction }> = {
-  default: { sub: 'Дозволь Легко надсилати нагадування', cta: 'Увімкнути', action: 'enable' },
+  default: { sub: 'Дозволь Home Fit надсилати нагадування', cta: 'Увімкнути', action: 'enable' },
   enabled: { sub: 'Нагадування приходять, навіть коли застосунок закритий', cta: 'Тест', action: 'test' },
   'needs-install': {
-    sub: 'На iPhone нагадування працюють, коли Легко додано на початковий екран',
+    sub: 'На iPhone нагадування працюють, коли Home Fit додано на початковий екран',
     // As short as on the Home install banner: a long CTA squeezes the title onto two lines.
     cta: 'Як?',
     action: 'install',
   },
   denied: {
-    sub: 'Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Легко',
+    sub: 'Сповіщення заборонені. Увімкни їх у Параметрах → Сповіщення → Home Fit',
     cta: 'Заблоковано',
     action: null,
   },
@@ -441,7 +441,7 @@ export function syncStatus(
 
 export const BACKUP_COPY = {
   restored: 'Дані відновлено',
-  invalid: 'Файл не схожий на резервну копію «Легко»',
+  invalid: 'Файл не схожий на резервну копію «Home Fit»',
   tooLarge: 'Файл завеликий для резервної копії',
   restoreFailed: 'Не вдалося відновити дані. Спробуй ще раз',
   offline: 'Немає інтернету — копію можна завантажити, коли зʼявиться звʼязок',
@@ -464,7 +464,7 @@ export const RESTORE_CONFIRM = {
 /** Backups are a few MB at most; anything much bigger is not one of ours. */
 export const BACKUP_MAX_BYTES = 20 * 1024 * 1024;
 
-/** Parses and validates a backup file's text; `null` when it is not a valid «Легко» backup. */
+/** Parses and validates a backup file's text; `null` when it is not a valid «Home Fit» backup. */
 export function parseBackup(text: string): AppData | null {
   let raw: unknown;
   try {

@@ -479,7 +479,7 @@ describe('HomeScreen — banners', () => {
     expect(screen.getByText('Почнімо')).toBeTruthy();
     expect(screen.getByText('Запиши стартову вагу й ціль')).toBeTruthy();
     expect(screen.queryByText(/прогрес рахуватиметься/)).toBeNull();
-    expect(screen.queryByText('Встанови Легко на iPhone')).toBeNull();
+    expect(screen.queryByText('Встанови Home Fit на iPhone')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Сховати' })).toBeNull();
     // Not due before the setup: no «Сьогодні» pill, no «За планом».
     expect(item('Тренування').textContent).toContain('Ще не відмічено');
@@ -494,7 +494,7 @@ describe('HomeScreen — banners', () => {
       mocks.isStandalone.mockReturnValue(true);
       setData();
       render(<HomeScreen />);
-      expect(screen.queryByText('Встанови Легко на iPhone')).toBeNull();
+      expect(screen.queryByText('Встанови Home Fit на iPhone')).toBeNull();
     });
 
     it('«Як?» opens the install guide; «Сховати» hides it for good', () => {
@@ -507,12 +507,12 @@ describe('HomeScreen — banners', () => {
       expect(sheet()).toMatchObject({ date: TODAY, mode: 'install' });
 
       fireEvent.click(screen.getByRole('button', { name: 'Сховати' }));
-      expect(screen.queryByText('Встанови Легко на iPhone')).toBeNull();
+      expect(screen.queryByText('Встанови Home Fit на iPhone')).toBeNull();
       expect(localStorage.getItem(INSTALL_HINT_KEY)).toBe('1');
 
       cleanup();
       render(<HomeScreen />);
-      expect(screen.queryByText('Встанови Легко на iPhone')).toBeNull();
+      expect(screen.queryByText('Встанови Home Fit на iPhone')).toBeNull();
     });
 
     it('still shows (and hides) when storage is blocked', () => {
@@ -525,9 +525,9 @@ describe('HomeScreen — banners', () => {
       });
       setData();
       render(<HomeScreen />);
-      expect(screen.getByText('Встанови Легко на iPhone')).toBeTruthy();
+      expect(screen.getByText('Встанови Home Fit на iPhone')).toBeTruthy();
       fireEvent.click(screen.getByRole('button', { name: 'Сховати' }));
-      expect(screen.queryByText('Встанови Легко на iPhone')).toBeNull();
+      expect(screen.queryByText('Встанови Home Fit на iPhone')).toBeNull();
     });
   });
 

@@ -20,17 +20,6 @@
   padding: 0 10px 22px;
 }
 
-.mark {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--r12);
-  background: var(--solid);
-  color: var(--onSolid);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-}
 
 .name {
   font-family: var(--display);

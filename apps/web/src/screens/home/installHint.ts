@@ -1,6 +1,6 @@
 import { isIOS, isStandalone } from '@/lib/platform';
 
-/** localStorage flag: the «Встанови Легко на iPhone» banner was hidden on this device. */
+/** localStorage flag: the «Встанови Home Fit на iPhone» banner was hidden on this device. */
 export const INSTALL_HINT_KEY = 'legko.installHint.dismissed';
 
 export function isInstallHintDismissed(): boolean {

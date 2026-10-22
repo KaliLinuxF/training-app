@@ -49,7 +49,7 @@ export function ResetScreen() {
       <LinkDone
         title="Пароль збережено"
         username={done.username}
-        text="Відкрий Легко з іконки й увійди з новим паролем."
+        text="Відкрий Home Fit з іконки й увійди з новим паролем."
         target={done.target}
       />
     );

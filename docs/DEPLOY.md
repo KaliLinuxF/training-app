@@ -1,4 +1,4 @@
-# Deploying «Легко»
+# Deploying «Home Fit»
 
 Production: **https://fit.triple-a.dev** — one Vultr VPS, two containers, built on the server from the
 committed `HEAD` by `deploy/deploy.sh`.
@@ -619,3 +619,10 @@ ssh deploy@64.176.75.160 'docker exec training-app-caddy-1 caddy validate --conf
 
 - Never edit `/opt/training-app/Caddyfile` or `compose.yaml` on the server: `deploy/deploy.sh` overwrites them.
 - The `edge` network and `/opt/caddy-sites` are created once (the deploy script checks both).
+
+## Rebrand to «Home Fit» (iPhone note)
+
+The product name and icons changed from «Легко» to «Home Fit» (manifest, title, logo «HF» under a roof).
+Internal identifiers (`@legko/*`, `legko.db`, cookies, IndexedDB/localStorage keys, `X-Legko-User`) are unchanged,
+so nobody is signed out. iOS keeps the old home-screen icon and name until the app is removed from the home screen
+and added again (Safari → Поділитися → На початковий екран); the data lives on the server and stays.

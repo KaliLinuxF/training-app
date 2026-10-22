@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   const logger = createLogger(config.logLevel);
   const file = databasePath(config.dataDir);
   logger.info(
-    `Легко server ${APP_VERSION} (${config.production ? 'production' : 'development'}), database ${file}`,
+    `Home Fit server ${APP_VERSION} (${config.production ? 'production' : 'development'}), database ${file}`,
   );
 
   const db = openDatabase(file, { logger });

@@ -87,7 +87,7 @@ describe('AppShell on the phone', () => {
     expect(screen.getByRole('main').textContent).toBe('Екран');
     expect(screen.getByRole('button', { name: 'Записати день' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: '+ Записати день' })).toBeNull();
-    expect(screen.queryByText('Легко')).toBeNull();
+    expect(screen.queryByText('Home Fit')).toBeNull();
     expect(htmlShell()).toBe('phone');
   });
 
@@ -124,7 +124,7 @@ describe('AppShell on the desktop', () => {
 
   it('renders the sidebar instead of the tab bar', () => {
     renderShell();
-    expect(screen.getByText('Легко')).toBeTruthy();
+    expect(screen.getByText('Home Fit')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Записати день' })).toBeNull();
     expect(htmlShell()).toBeUndefined();
   });

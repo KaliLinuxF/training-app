@@ -58,7 +58,7 @@ describe('LoginScreen', () => {
   it('renders the brand, the username and password fields — and no hidden fixed account name', () => {
     const { container } = render(<LoginScreen />);
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Легко' })).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1, name: 'Home Fit' })).toBeTruthy();
     expect(screen.getByText('Твій персональний трекер')).toBeTruthy();
     const name = nameField();
     expect(name.type).toBe('text');
@@ -226,7 +226,7 @@ describe('LoginScreen', () => {
     expect(notice.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(form.contains(notice)).toBe(false);
     // Between the brand and the form.
-    const brand = screen.getByRole('heading', { level: 1, name: 'Легко' });
+    const brand = screen.getByRole('heading', { level: 1, name: 'Home Fit' });
     expect(brand.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

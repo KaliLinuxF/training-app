@@ -50,7 +50,7 @@ function steps(iconClass: string): ReactNode[] {
       Обери <b>«На початковий екран»</b>, залиш увімкненим <b>«Відкривати як вебпрограму»</b> і натисни{' '}
       <b>«Додати»</b>
     </>,
-    <>Відкрий Легко з іконки й увійди ще раз (лише першого разу)</>,
+    <>Відкрий Home Fit з іконки й увійди ще раз (лише першого разу)</>,
     <>
       Увімкни сповіщення в <b>«Налаштуваннях»</b> → <b>«Нагадування»</b>
     </>,
@@ -58,7 +58,7 @@ function steps(iconClass: string): ReactNode[] {
 }
 
 /**
- * The numbered steps for adding Легко to the iPhone home screen (the sheet's list; also shown inline by the link
+ * The numbered steps for adding Home Fit to the iPhone home screen (the sheet's list; also shown inline by the link
  * pages' «Готово» state in iOS Safari, D29).
  */
 export function InstallSteps({ className }: { className?: string }) {
@@ -89,7 +89,7 @@ export function InstallSheet({ open }: { open: boolean }) {
       }
     >
       {installed ? (
-        <p className={s.done}>Готово — Легко вже встановлено ✨</p>
+        <p className={s.done}>Готово — Home Fit вже встановлено ✨</p>
       ) : (
         <>
           <p className={s.intro}>

@@ -37,7 +37,7 @@ export const SYNC_ERRORS = {
   invalidLocal: 'Некоректні дані — зміну не збережено',
   rejected: 'Сервер відхилив одну зміну — її не збережено',
   failed: 'Не вдалося синхронізувати — спробую ще раз',
-  importInvalid: 'Файл не схожий на резервну копію «Легко»',
+  importInvalid: 'Файл не схожий на резервну копію «Home Fit»',
 } as const;
 
 /** Thrown by `importAll` when no account is bound to this copy (nothing is uploaded). */

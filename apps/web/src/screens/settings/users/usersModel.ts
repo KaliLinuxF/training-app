@@ -98,19 +98,19 @@ export function linkExpiryLine(purpose: LinkPurpose, expiresAt: number): string 
 
 /**
  * What «Поділитися» hands to `navigator.share`. Messengers drop the title, so the text carries the explanation; the
- * link itself is the `url`. «Легко» without quotes, as on the invite page («Запрошення в Легко»).
+ * link itself is the `url`. «Home Fit» without quotes, as on the invite page («Запрошення в Home Fit»).
  */
 export function shareData(purpose: LinkPurpose, url: string, expiresAt: number): ShareData {
   if (purpose === 'invite') {
     return {
-      title: 'Запрошення в Легко',
-      text: `Запрошую в Легко — трекер схуднення. Посилання одноразове, діє до ${shortDate(expiresAt)}.`,
+      title: 'Запрошення в Home Fit',
+      text: `Запрошую в Home Fit — трекер схуднення. Посилання одноразове, діє до ${shortDate(expiresAt)}.`,
       url,
     };
   }
   return {
-    title: 'Новий пароль у Легко',
-    text: 'Посилання для нового пароля в Легко, діє 24 години.',
+    title: 'Новий пароль у Home Fit',
+    text: 'Посилання для нового пароля в Home Fit, діє 24 години.',
     url,
   };
 }

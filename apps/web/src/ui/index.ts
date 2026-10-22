@@ -1,5 +1,5 @@
 /**
- * «Легко» UI kit — reusable pieces extracted from design/handoff/Tracker.dc.html (variant 1b).
+ * «Home Fit» UI kit — reusable pieces extracted from design/handoff/Tracker.dc.html (variant 1b).
  * See ./README.md for every component's props and the prototype element it reproduces.
  */
 

@@ -79,7 +79,7 @@ export function canOpenSection(id: SettingsSectionId, isAdmin: boolean): boolean
 }
 
 /**
- * The caption «Легко · трекер схуднення» under the list shows for users and is hidden while the «Користувачі» row
+ * The caption «Home Fit · трекер схуднення» under the list shows for users and is hidden while the «Користувачі» row
  * shows: the admin's extra row would otherwise make the list scroll on a 390×763 iPhone (D30).
  */
 export function showsCaption(groups: readonly (readonly SettingsSectionId[])[]): boolean {

@@ -262,13 +262,13 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
     it('says since when and the last activity, or that they never signed in', () => {
       const c = client(1, 'olya', { lastSeenAt: NOW.getTime() - 3_600_000 });
       expect(headerSubtitle(c, NOW)).toBe(
-        `У Легко з ${longDate(c.createdAt)} · активність: ${dayTime(c.lastSeenAt ?? 0, NOW.getTime())}`,
+        `У Home Fit з ${longDate(c.createdAt)} · активність: ${dayTime(c.lastSeenAt ?? 0, NOW.getTime())}`,
       );
       expect(headerSubtitle({ ...c, lastSeenAt: null }, NOW)).toBe(
-        `У Легко з ${longDate(c.createdAt)} · ще не входили`,
+        `У Home Fit з ${longDate(c.createdAt)} · ще не входили`,
       );
       // The «Ще не входили» pill is in the header: the line leaves it out.
-      expect(headerSubtitle({ ...c, lastSeenAt: null }, NOW, true)).toBe(`У Легко з ${longDate(c.createdAt)}`);
+      expect(headerSubtitle({ ...c, lastSeenAt: null }, NOW, true)).toBe(`У Home Fit з ${longDate(c.createdAt)}`);
       expect(headerSubtitle(c, NOW, true)).toContain('· активність: ');
     });
 

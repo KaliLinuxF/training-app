@@ -187,7 +187,7 @@ describe('banner', () => {
   };
   const INSTALL = {
     id: 'install',
-    title: 'Встанови Легко на iPhone',
+    title: 'Встанови Home Fit на iPhone',
     sub: 'Так працюватимуть нагадування',
     cta: 'Як?',
     action: { mode: 'install' },

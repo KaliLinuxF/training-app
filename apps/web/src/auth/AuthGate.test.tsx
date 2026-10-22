@@ -267,7 +267,7 @@ describe('link pages', () => {
     window.history.replaceState(null, '', `/invite#${TOKEN}`);
     renderGate();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeTruthy();
     expect(mocks.api.inviteCheck).toHaveBeenCalledWith(TOKEN);
     expect(window.location.hash).toBe('');
     expect(window.location.pathname).toBe('/invite');

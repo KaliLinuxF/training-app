@@ -92,7 +92,7 @@ describe('InviteScreen: the link', () => {
     // Loading: the splash.
     expect(screen.getByRole('status')).toBeTruthy();
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeTruthy();
     expect(mocks.api.inviteCheck).toHaveBeenCalledWith(TOKEN);
     expect(screen.getByText('Обери імʼя і пароль — і можна починати')).toBeTruthy();
     expect(screen.getByText(`Посилання одноразове, діє до ${untilDate(EXPIRES)}.`)).toBeTruthy();
@@ -145,11 +145,11 @@ describe('InviteScreen: the link', () => {
     expect(sessionStorage.getItem(LINK_TOKEN_KEY)).toBeNull();
   });
 
-  it('offers «Відкрити Легко» instead when someone is signed in on this device', async () => {
+  it('offers «Відкрити Home Fit» instead when someone is signed in on this device', async () => {
     useAuthStore.setState({ status: 'anon', offline: false, user: ANNA });
     mocks.api.inviteCheck.mockRejectedValue(new ApiError(410, 'link_invalid', 'x', undefined, 'used'));
     openAt();
-    fireEvent.click(await screen.findByRole('button', { name: 'Відкрити Легко' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Відкрити Home Fit' }));
     expect(replace).toHaveBeenCalledWith('/');
   });
 
@@ -380,7 +380,7 @@ describe('InviteScreen in iOS Safari (D29)', () => {
     expect(screen.getByText(/^Імʼя для входу:/).textContent).toBe('Імʼя для входу: olya');
     expect(
       screen.getByText(
-        'Нагадування приходять у застосунок на початковому екрані. Додай Легко туди й один раз увійди з цим імʼям і паролем.',
+        'Нагадування приходять у застосунок на початковому екрані. Додай Home Fit туди й один раз увійди з цим імʼям і паролем.',
       ),
     ).toBeTruthy();
     expect(within(screen.getByRole('list')).getAllByRole('listitem').length).toBeGreaterThan(2);

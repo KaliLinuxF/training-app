@@ -36,7 +36,7 @@ export interface SettingsListProps {
   ref?: Ref<HTMLElement>;
 }
 
-export const SETTINGS_CAPTION = 'Легко · трекер схуднення';
+export const SETTINGS_CAPTION = 'Home Fit · трекер схуднення';
 
 /**
  * «Налаштування» list: the header (phone), the groups of section links with a one-line summary each — the last

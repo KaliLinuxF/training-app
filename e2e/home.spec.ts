@@ -15,7 +15,7 @@ import { expect, test } from './support/test';
 
 const ROWS: readonly HomeRow[] = ['Їжа', 'Тренування', 'Вага', 'Заміри'];
 const SETUP_SUB = 'Запиши стартову вагу й ціль';
-const INSTALL_TITLE = 'Встанови Легко на iPhone';
+const INSTALL_TITLE = 'Встанови Home Fit на iPhone';
 
 interface Box {
   x: number;

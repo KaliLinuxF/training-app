@@ -56,7 +56,7 @@ export interface AuthState {
 
 /** «Вийти» always asks: it also switches off this device's reminders and wipes its copy. */
 export const LOGOUT_CONFIRM: ConfirmOptions = {
-  title: 'Вийти з Легко на цьому пристрої?',
+  title: 'Вийти з Home Fit на цьому пристрої?',
   body: 'Нагадування сюди більше не приходитимуть, а дані на пристрої буде очищено. Усі записи залишаться на сервері.',
   confirmLabel: 'Вийти',
   destructive: true,

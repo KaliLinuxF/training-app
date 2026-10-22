@@ -400,8 +400,8 @@ describe('«Запросити людину» and the link card', () => {
     fireEvent.click(button(region('Запрошення готове'), 'Поділитися'));
     await act(settle);
     expect(share).toHaveBeenCalledWith({
-      title: 'Запрошення в Легко',
-      text: 'Запрошую в Легко — трекер схуднення. Посилання одноразове, діє до 28 жовтня.',
+      title: 'Запрошення в Home Fit',
+      text: 'Запрошую в Home Fit — трекер схуднення. Посилання одноразове, діє до 28 жовтня.',
       url: `${window.location.origin}/invite#${TOKEN}`,
     });
     expect(toast()).toBeUndefined();
@@ -755,8 +755,8 @@ describe('the user sheet', () => {
     fireEvent.click(again.getByRole('button', { name: 'Поділитися' }));
     await act(settle);
     expect(share).toHaveBeenCalledWith({
-      title: 'Новий пароль у Легко',
-      text: 'Посилання для нового пароля в Легко, діє 24 години.',
+      title: 'Новий пароль у Home Fit',
+      text: 'Посилання для нового пароля в Home Fit, діє 24 години.',
       url: `${window.location.origin}/reset#${TOKEN}`,
     });
   });

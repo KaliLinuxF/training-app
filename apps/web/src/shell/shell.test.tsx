@@ -205,7 +205,7 @@ describe('Sidebar', () => {
   it('shows the logo, the links and «+ Записати день» (a menu opener)', () => {
     const onRecord = vi.fn();
     const { view } = inRouter('/', <Sidebar location="/" items={NAV_ITEMS} onRecord={onRecord} />);
-    expect(screen.getByText('Легко')).toBeTruthy();
+    expect(screen.getByText('Home Fit')).toBeTruthy();
     const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
     expect(
       within(nav)

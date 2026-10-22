@@ -62,16 +62,16 @@ describe('link card copy', () => {
 
   it('shares a self-explaining text with the link (messengers drop the title)', () => {
     const url = 'https://fit.triple-a.dev/invite#tok';
-    // «Легко» without quotes, as in the invite page's «Запрошення в Легко».
+    // «Home Fit» without quotes, as in the invite page's «Запрошення в Home Fit».
     expect(shareData('invite', url, expires)).toEqual({
-      title: 'Запрошення в Легко',
-      text: 'Запрошую в Легко — трекер схуднення. Посилання одноразове, діє до 28 жовтня.',
+      title: 'Запрошення в Home Fit',
+      text: 'Запрошую в Home Fit — трекер схуднення. Посилання одноразове, діє до 28 жовтня.',
       url,
     });
     for (const purpose of ['reset', 'setup'] as const) {
       expect(shareData(purpose, url, expires)).toEqual({
-        title: 'Новий пароль у Легко',
-        text: 'Посилання для нового пароля в Легко, діє 24 години.',
+        title: 'Новий пароль у Home Fit',
+        text: 'Посилання для нового пароля в Home Fit, діє 24 години.',
         url,
       });
     }

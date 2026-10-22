@@ -409,7 +409,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       test('invite and reset links', async ({ page }, info) => {
         await stubLinkChecks(page);
         await page.goto(`/invite#${LINK_TOKEN}`);
-        await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+        await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
         await expect(page.getByText('Посилання одноразове, діє до 21 жовтня.')).toBeVisible();
         await shot(page, info, '04-invite', true);
         if (info.project.name === 'iphone') {
@@ -499,7 +499,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
     test('a link opened while signed in: sign out first', async ({ page }, info) => {
       await stubLinkChecks(page);
       await page.goto(`/invite#${LINK_TOKEN}`);
-      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
       await expect(
         page.getByText('На цьому пристрої вже ввійдено як anna. Щоб створити новий акаунт, спершу вийди.'),
       ).toBeVisible();

@@ -11,8 +11,8 @@ const SHARED_SRC = /[\\/]packages[\\/]shared[\\/]src[\\/]/;
 
 const manifest: Partial<ManifestOptions> = {
   id: '/',
-  name: 'Легко — трекер схуднення',
-  short_name: 'Легко',
+  name: 'Home Fit',
+  short_name: 'Home Fit',
   description: 'Персональний трекер схуднення: харчування, тренування, вага й заміри',
   lang: 'uk',
   dir: 'ltr',

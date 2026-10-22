@@ -13,7 +13,7 @@ export const PASTE_LINK = {
   open: 'Маю посилання',
   label: 'Встав посилання із запрошенням або для нового пароля',
   submit: 'Відкрити',
-  invalid: 'Це не схоже на посилання з Легко',
+  invalid: 'Це не схоже на посилання з Home Fit',
 } as const;
 
 export const LOGIN_FOOTER =
@@ -97,7 +97,7 @@ export function LoginScreen() {
       <div className={s.column}>
         <header className={s.brand}>
           <LogoMark className={s.logo} />
-          <h1 className={s.title}>Легко</h1>
+          <h1 className={s.title}>Home Fit</h1>
           <p className={s.subtitle}>Твій персональний трекер</p>
         </header>
 

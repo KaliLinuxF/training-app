@@ -66,7 +66,7 @@ test.describe('session', () => {
   test('«Вийти» (in «Акаунт») always asks first, says what happens, and can be cancelled', async ({ app, page }) => {
     await app.gotoSettings('Акаунт');
     await page.getByRole('button', { name: 'Вийти', exact: true }).click();
-    const dialog = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
+    const dialog = page.getByRole('alertdialog', { name: 'Вийти з Home Fit на цьому пристрої?' });
     await expect(dialog).toContainText('Нагадування сюди більше не приходитимуть');
     await expect(dialog).toContainText('Усі записи залишаться на сервері.');
     await dialog.getByRole('button', { name: 'Скасувати' }).click();
@@ -121,7 +121,7 @@ test.describe('login', () => {
     app,
   }) => {
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Легко', level: 1 })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Home Fit', level: 1 })).toBeVisible();
     const name = page.getByLabel(USERNAME_LABEL, { exact: true });
     const password = page.getByLabel('Пароль', { exact: true });
     await expect(name).toHaveAttribute('autocomplete', 'username');
@@ -207,7 +207,7 @@ test.describe('login', () => {
     await expect(password).toHaveAttribute('type', 'text');
   });
 
-  test('«Маю посилання» refuses a link that is not from Легко', async ({ page }) => {
+  test('«Маю посилання» refuses a link that is not from Home Fit', async ({ page }) => {
     await page.goto('/');
     await expect(page.getByText(FOOTER)).toBeVisible();
     await page.getByRole('button', { name: 'Маю посилання', exact: true }).click();
@@ -218,7 +218,7 @@ test.describe('login', () => {
 
     await field.fill(`https://example.com/invite#${'x'.repeat(43)}`);
     await page.getByRole('button', { name: 'Відкрити', exact: true }).click();
-    await expect(page.getByRole('alert')).toHaveText('Це не схоже на посилання з Легко');
+    await expect(page.getByRole('alert')).toHaveText('Це не схоже на посилання з Home Fit');
     await expect(page).toHaveURL(/\/$/);
   });
 });

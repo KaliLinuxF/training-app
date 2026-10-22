@@ -1,4 +1,4 @@
-# Легко
+# Home Fit (раніше «Легко»)
 
 A personal weight-loss tracker for a few people, each with their own account and completely separate data: a
 mobile-first PWA with a Ukrainian UI, installed on an iPhone home screen and also used on desktop. Production:

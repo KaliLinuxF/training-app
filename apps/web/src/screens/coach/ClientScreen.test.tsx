@@ -59,7 +59,7 @@ describe('ClientScreen header', () => {
     const { spy } = await open(`/coach/${SOFIA.id}`);
     expect(spy).toHaveBeenCalledExactlyOnceWith(SOFIA.id);
     expect(screen.getByRole('heading', { level: 1, name: 'sofia' })).toBeTruthy();
-    expect(screen.getByText(/^У Легко з \d+ \S+ 2026 · активність: сьогодні, \d\d:\d\d$/)).toBeTruthy();
+    expect(screen.getByText(/^У Home Fit з \d+ \S+ 2026 · активність: сьогодні, \d\d:\d\d$/)).toBeTruthy();
     // On the page background, so not the kit's --paper-filled neutral pill alone: a card fill with a ring.
     const readOnly = screen.getByText('Лише перегляд');
     expect(readOnly.className).toMatch(/readOnly/);
@@ -89,7 +89,7 @@ describe('ClientScreen header', () => {
     const petro = client(6, 'petro', { createdAt: NOW.getTime() - 10 * 86_400_000, lastSeenAt: null });
     await open(`/coach/${petro.id}`, { client: petro, data: { ...empty(), foods: [] } });
     expect(screen.getAllByText(/не входили/i).map((el) => el.textContent)).toEqual(['Ще не входили']);
-    expect(screen.getByText(/^У Легко з \d+ \S+ 2026$/)).toBeTruthy();
+    expect(screen.getByText(/^У Home Fit з \d+ \S+ 2026$/)).toBeTruthy();
   });
 
   it('gives neutral status pills on the page background a visible surface', async () => {

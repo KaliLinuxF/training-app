@@ -216,7 +216,7 @@ function buildBanner(data: AppData, showInstallHint: boolean): HomeBanner | null
   if (showInstallHint) {
     return {
       id: 'install',
-      title: 'Встанови Легко на iPhone',
+      title: 'Встанови Home Fit на iPhone',
       sub: 'Так працюватимуть нагадування',
       cta: 'Як?',
       action: { mode: 'install' },

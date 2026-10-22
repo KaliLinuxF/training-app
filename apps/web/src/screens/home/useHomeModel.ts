@@ -35,7 +35,7 @@ export interface InstallHint {
   dismiss: () => void;
 }
 
-/** «Встанови Легко на iPhone» banner state; dismissing it is remembered on the device. */
+/** «Встанови Home Fit на iPhone» banner state; dismissing it is remembered on the device. */
 export function useInstallHint(): InstallHint {
   const [visible, setVisible] = useState(shouldShowInstallHint);
   const dismiss = useCallback(() => {

@@ -54,7 +54,7 @@ test.describe('invite', () => {
     const { path } = await admin.createInvite('e2e invite');
     try {
       await page.goto(path);
-      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
       // The token left the address bar at once (it lives in sessionStorage for a reload).
       expect(new URL(page.url()).hash).toBe('');
       expect(new URL(page.url()).pathname).toBe('/invite');
@@ -153,7 +153,7 @@ test.describe('invite on a signed-in device', () => {
 
     await page.getByRole('button', { name: 'Вийти й продовжити', exact: true }).click();
     await page
-      .getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' })
+      .getByRole('alertdialog', { name: 'Вийти з Home Fit на цьому пристрої?' })
       .getByRole('button', { name: 'Вийти', exact: true })
       .click();
 
@@ -245,7 +245,7 @@ test.describe('iPhone Safari (D29)', () => {
     try {
       await openInvite(page, path);
       await expect(
-        page.getByText('Легко вже на початковому екрані? Скопіюй посилання й встав його там: «Маю посилання».'),
+        page.getByText('Home Fit вже на початковому екрані? Скопіюй посилання й встав його там: «Маю посилання».'),
       ).toBeVisible();
       await expect(page.getByRole('button', { name: 'Скопіювати посилання', exact: true })).toBeVisible();
 
@@ -255,7 +255,7 @@ test.describe('iPhone Safari (D29)', () => {
       await expect(page.getByText(`Імʼя для входу: ${username}`)).toBeVisible();
       await expect(
         page.getByText(
-          'Нагадування приходять у застосунок на початковому екрані. Додай Легко туди й один раз увійди з цим імʼям і паролем.',
+          'Нагадування приходять у застосунок на початковому екрані. Додай Home Fit туди й один раз увійди з цим імʼям і паролем.',
         ),
       ).toBeVisible();
       await expect(page.getByRole('list').getByRole('listitem').first()).toBeVisible();
@@ -285,7 +285,7 @@ test.describe('iPhone Safari (D29)', () => {
         .fill(`${BASE_URL}${path}`);
       await page.getByRole('button', { name: 'Відкрити', exact: true }).click();
 
-      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Легко' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'Запрошення в Home Fit' })).toBeVisible();
       expect(new URL(page.url()).pathname).toBe('/invite');
       expect(new URL(page.url()).hash).toBe('');
       await register(page, username, `e2e-pass-${username}`);

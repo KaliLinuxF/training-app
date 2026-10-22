@@ -11,9 +11,9 @@ let s: TestServer;
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'legko-static-'));
   mkdirSync(join(root, 'assets'));
-  writeFileSync(join(root, 'index.html'), '<!doctype html><title>Легко</title>');
+  writeFileSync(join(root, 'index.html'), '<!doctype html><title>Home Fit</title>');
   writeFileSync(join(root, 'sw.js'), 'self.addEventListener("push", () => {});');
-  writeFileSync(join(root, 'manifest.webmanifest'), '{"name":"Легко"}');
+  writeFileSync(join(root, 'manifest.webmanifest'), '{"name":"Home Fit"}');
   writeFileSync(join(root, 'apple-touch-icon.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   writeFileSync(join(root, 'assets', 'index-B4x9Qz1a.js'), 'console.log(1)');
   writeFileSync(join(root, 'assets', 'index-C2pL0aZx.css'), 'body{}');
@@ -73,7 +73,7 @@ describe('static web app', () => {
       expect(res.status, path).toBe(200);
       expect(res.headers.get('Content-Type')).toContain('text/html');
       expect(res.headers.get('Cache-Control')).toBe('no-cache');
-      expect(await res.text()).toContain('<title>Легко</title>');
+      expect(await res.text()).toContain('<title>Home Fit</title>');
     }
   });
 

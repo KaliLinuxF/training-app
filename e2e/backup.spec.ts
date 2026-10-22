@@ -276,9 +276,9 @@ test.describe('backup', () => {
     await app.gotoSettings('Дані і копія');
     const native = watchNativeDialogs(page);
     await backupInput(page).setInputFiles(file('{"days": "nope"}', 'random.json'));
-    await expect(app.toast('Файл не схожий на резервну копію «Легко»')).toBeVisible();
+    await expect(app.toast('Файл не схожий на резервну копію «Home Fit»')).toBeVisible();
     await backupInput(page).setInputFiles(file('not json at all', 'notes.json'));
-    await expect(app.toast('Файл не схожий на резервну копію «Легко»')).toBeVisible();
+    await expect(app.toast('Файл не схожий на резервну копію «Home Fit»')).toBeVisible();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
     expect(native).toEqual([]);
     expect(Object.keys((await server.getData()).days)).toHaveLength(65);
@@ -379,7 +379,7 @@ test.describe('account', () => {
     await app.gotoSettings('Акаунт');
     const native = watchNativeDialogs(page);
     expect((await app.deviceCache()).data).toBeTruthy();
-    const ask = page.getByRole('alertdialog', { name: 'Вийти з Легко на цьому пристрої?' });
+    const ask = page.getByRole('alertdialog', { name: 'Вийти з Home Fit на цьому пристрої?' });
 
     await logoutButton(page).click();
     await expect(ask).toContainText('Усі записи залишаться на сервері.');
