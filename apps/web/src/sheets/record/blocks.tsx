@@ -5,9 +5,10 @@
 import { LIMITS } from '@legko/shared';
 import { useId, useState } from 'react';
 import { flushSync } from 'react-dom';
-import { Button, Field, TextArea, TrainingToggle } from '@/ui';
+import { Button, Field, Pill, TextArea, TrainingToggle } from '@/ui';
 import { FieldError } from '../fields/fields';
 import type { RecordDraft, RecordErrors, RecordMode } from './model';
+import { JUST_MARK_LABEL, TYPES_NOTES_LABEL } from './workoutSheetModel';
 import { TypePicker } from './TypePicker';
 import s from './blocks.module.css';
 
@@ -25,6 +26,25 @@ export interface WorkoutBlockProps {
   errors: RecordErrors;
   set: SetDraft;
   customTypes: readonly string[];
+  /**
+   * - `toggle` — ✓ / ✕ as always (default);
+   * - `labelled` — «Тренування» with the workouts above it: the toggle under «Або просто відміть»;
+   * - `recorded` — the day has a done session (W5): no ✓ / ✕ (it cannot contradict the session), a static «✓ Було»
+   *   mark in «Запис дня», the types under «Типи і нотатки» in «Тренування».
+   */
+  marking?: 'toggle' | 'labelled' | 'recorded';
+}
+
+/** The static mark that replaces ✓ / ✕ on a day with a done session (read as «Тренування записано»). */
+export function RecordedMark() {
+  return (
+    <span className={s.recorded}>
+      <Pill tone="acc2" size="sm">
+        <span aria-hidden="true">✓ Було</span>
+        <span className="visually-hidden">Тренування записано</span>
+      </Pill>
+    </span>
+  );
 }
 
 /**
@@ -32,7 +52,7 @@ export interface WorkoutBlockProps {
  * «Тренування»; in «Тренування» the heading names it (the toggle group keeps the name «Тренування»)
  * and the chips get a «Тип» label. «✕» drops the types.
  */
-export function WorkoutBlock({ mode, draft, errors, set, customTypes }: WorkoutBlockProps) {
+export function WorkoutBlock({ mode, draft, errors, set, customTypes, marking = 'toggle' }: WorkoutBlockProps) {
   const errId = useId();
   const onTrained = (trained: boolean) => set(trained ? { trained } : { trained, types: [] });
   const toggle = <TrainingToggle size="lg" value={draft.trained} onChange={onTrained} />;
@@ -44,15 +64,23 @@ export function WorkoutBlock({ mode, draft, errors, set, customTypes }: WorkoutB
   if (mode === 'day') {
     return (
       <Field label="Тренування">
-        {toggle}
+        {marking === 'recorded' ? <RecordedMark /> : toggle}
         {picker}
         {error}
       </Field>
     );
   }
+  if (marking === 'recorded') {
+    return picker ? (
+      <Field label={TYPES_NOTES_LABEL}>
+        {picker}
+        {error}
+      </Field>
+    ) : null;
+  }
   return (
     <>
-      {toggle}
+      {marking === 'labelled' ? <Field label={JUST_MARK_LABEL}>{toggle}</Field> : toggle}
       {picker && (
         <Field label="Тип">
           {picker}

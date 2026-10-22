@@ -248,11 +248,11 @@ function pick(title: string) {
 }
 
 describe('«Що записати?» menu', () => {
-  it('lists the four actions and «Повний запис дня» — no date navigator, no «Зберегти»', () => {
+  it('lists the five actions and «Повний запис дня» — no date navigator, no «Зберегти»', () => {
     renderHost();
     act(() => ui.openSheet(TODAY, 'menu'));
     const menu = screen.getByRole('dialog', { name: 'Що записати?' });
-    for (const title of ['Їжа', 'Тренування', 'Вага', 'Заміри']) expect(menuRow(title)).toBeTruthy();
+    for (const title of ['Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри']) expect(menuRow(title)).toBeTruthy();
     expect(within(menu).getByRole('button', { name: 'Повний запис дня' }).textContent).toBe(
       'Повний запис дня →',
     );
@@ -260,12 +260,12 @@ describe('«Що записати?» menu', () => {
     expect(within(menu).queryByRole('button', { name: 'Зберегти' })).toBeNull();
     expect(within(menu).queryByRole('button', { name: 'Попередній день' })).toBeNull();
     expect(within(menu).queryByRole('textbox')).toBeNull();
-    // Tab order: ✕, the four rows, «Повний запис дня».
+    // Tab order: ✕, the five rows, «Повний запис дня».
     expect(
       within(menu)
         .getAllByRole('button')
         .map((b) => b.getAttribute('aria-label') ?? b.textContent?.split(' ')[0]),
-    ).toEqual(['Закрити', 'Їжа', 'Тренування', 'Вага', 'Заміри', 'Повний запис дня']);
+    ).toEqual(['Закрити', 'Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри', 'Повний запис дня']);
     // Today: no date line.
     expect(within(menu).queryByText(/жовтня ·/)).toBeNull();
   });

@@ -33,7 +33,7 @@ async function center(locator: Locator): Promise<{ x: number; y: number }> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
-const MENU_ROWS = ['Їжа', 'Тренування', 'Вага', 'Заміри'] as const;
+const MENU_ROWS = ['Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри'] as const;
 
 /** «+» (tab bar) / «+ Записати день» (sidebar) → the «Що записати?» menu. */
 async function openMenu(app: App): Promise<Locator> {
@@ -52,14 +52,14 @@ const settled = (sheet: Locator): Promise<unknown> =>
   sheet.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
 
 test.describe('«+» → «Що записати?»', () => {
-  test('four big rows and «Повний запис дня →»; no date navigator, no «Зберегти»; Escape closes without asking', async ({
+  test('five big rows and «Повний запис дня →»; no date navigator, no «Зберегти»; Escape closes without asking', async ({
     app,
     page,
   }) => {
     await app.goto('/');
     const menu = await openMenu(app);
     const rows = menu.getByRole('list').getByRole('button');
-    await expect(rows).toHaveCount(4);
+    await expect(rows).toHaveCount(5);
     for (const [i, title] of MENU_ROWS.entries()) {
       await expect(rows.nth(i)).toHaveAccessibleName(new RegExp(`^${title}`));
       const box = await rows.nth(i).boundingBox();
@@ -71,6 +71,8 @@ test.describe('«+» → «Що записати?»', () => {
     await expect(menuRow(menu, 'Їжа')).not.toContainText('ккал');
     // The demo seed's Wednesday is a planned workout day, not marked yet.
     await expect(menuRow(menu, 'Тренування')).toContainText('За планом');
+    // No steps today in the demo seed: the row has no status.
+    await expect(menuRow(menu, 'Кроки')).toHaveText(/^Кроки\s*За день, вручну$/);
     await expect(menu.getByRole('button', { name: 'Повний запис дня' })).toHaveText('Повний запис дня →');
     await expect(menu.getByRole('button', { name: 'Зберегти' })).toHaveCount(0);
     await expect(menu.getByRole('button', { name: 'Попередній день' })).toHaveCount(0);
@@ -330,7 +332,7 @@ test.describe('«+» → «Що записати?»', () => {
     expect(Math.abs(box.x + box.width / 2 - viewport.width / 2)).toBeLessThanOrEqual(2);
     expect(Math.abs(box.y + box.height / 2 - viewport.height / 2)).toBeLessThanOrEqual(2);
 
-    // ✕ → Їжа → Тренування → Вага → Заміри → Повний запис дня.
+    // ✕ → Їжа → Тренування → Кроки → Вага → Заміри → Повний запис дня.
     await expect(menu).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(menu.getByRole('button', { name: 'Закрити' })).toBeFocused();
@@ -341,7 +343,7 @@ test.describe('«+» → «Що записати?»', () => {
     await page.keyboard.press('Tab');
     await expect(menu.getByRole('button', { name: 'Повний запис дня' })).toBeFocused();
 
-    for (let i = 0; i < 4; i++) await page.keyboard.press('Shift+Tab');
+    for (let i = 0; i < MENU_ROWS.length; i++) await page.keyboard.press('Shift+Tab');
     await expect(menuRow(menu, 'Їжа')).toBeFocused();
     await menu.evaluate((el) => el.setAttribute('data-e2e-swap', 'same'));
     await page.keyboard.press('Enter');

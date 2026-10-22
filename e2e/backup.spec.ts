@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import type { Download, Page } from '@playwright/test';
 import { addDays, DEFAULT_MEAL_TYPES, type AppData } from '../packages/shared/src/index';
-import { demo, meals, MEALS_GOALS, MEALS_TODAY, onboarded } from './fixtures/data';
+import { demo, meals, MEALS_GOALS, MEALS_TODAY, onboarded, training } from './fixtures/data';
 import { USERNAME_LABEL, type App } from './support/app';
 import { TODAY } from './support/env';
 import { createUser } from './support/server';
@@ -320,6 +320,46 @@ test.describe('backup', () => {
     // The restored day still reads as one food text.
     await app.goto('/calendar?date=2026-10-01');
     await expect(app.region('1 жовтня 2026')).toContainText('Імпортований день');
+  });
+
+  test.describe('with workouts and steps', () => {
+    test.use({ seed: 'training' });
+
+    test('the copy (still legko-<date>.json) carries workouts, sessions, own exercises, steps and the steps goal', async ({
+      app,
+      page,
+      server,
+    }) => {
+      const seeded = training();
+      await app.gotoSettings('Дані і копія');
+      await expect(app.region('Дані')).toContainText('Усе синхронізовано');
+      const download = page.waitForEvent('download');
+      await page.getByRole('link', { name: 'Завантажити резервну копію' }).click();
+      const saved = await download;
+      expect(saved.suggestedFilename()).toMatch(/^legko-\d{4}-\d{2}-\d{2}\.json$/);
+      const copy = JSON.parse(await readFile(await saved.path(), 'utf8')) as AppData;
+      expect(copy.workouts).toEqual(seeded.workouts);
+      expect(copy.exercises).toEqual(seeded.exercises);
+      expect(copy.sessions).toEqual(seeded.sessions);
+      expect(copy.steps).toEqual(seeded.steps);
+      expect(copy.settings.stepsGoal).toBe(8000);
+      expect(copy).toEqual(await server.exportData());
+
+      // A fresh account, then the copy: everything comes back.
+      await server.importData(onboarded());
+      await app.reload();
+      await restore(app, copy);
+      expect(await server.getData()).toEqual(copy);
+    });
+
+    test('restoring an older copy (no workouts or steps) clears them, as restoring means', async ({ app, server }) => {
+      await app.gotoSettings('Дані і копія');
+      await restore(app, oldFormatBackup());
+      const stored = await server.getData();
+      expect(stored).toMatchObject({ exercises: [], workouts: [], sessions: [], steps: [] });
+      expect(stored.settings.stepsGoal).toBeNull();
+      expect(stored.days).toEqual(backup().days);
+    });
   });
 
   test.describe('with meals and macro goals', () => {

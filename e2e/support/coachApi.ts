@@ -103,6 +103,8 @@ export async function seedClient(
 }
 
 const SECRET_KEY = /password|hash|token|session|endpoint|p256dh|^auth$|invite/i;
+/** Workout sessions (schema v5) are not sign-in sessions: these keys are allowed although the pattern matches. */
+const WORKOUT_SESSION_KEYS: ReadonlySet<string> = new Set(['sessions', 'deletedSessions']);
 
 /**
  * Paths (`clients[0].client.passwordHash`) of every object key in `value`, at any depth, whose name looks like a
@@ -118,7 +120,7 @@ export function secretKeysIn(value: unknown): string[] {
     if (typeof v !== 'object' || v === null) return;
     for (const [key, child] of Object.entries(v)) {
       const childPath = path ? `${path}.${key}` : key;
-      if (SECRET_KEY.test(key)) found.push(childPath);
+      if (SECRET_KEY.test(key) && !WORKOUT_SESSION_KEYS.has(key)) found.push(childPath);
       walk(child, childPath);
     }
   };

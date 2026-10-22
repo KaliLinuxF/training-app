@@ -30,9 +30,12 @@ import { ConfigError, loadConfig, resolveDataDir } from '../config';
 import {
   downgradeSchemaV3,
   downgradeSchemaV4,
+  downgradeSchemaV5,
   DowngradeRefused,
   DOWNGRADE_V4_FROM,
+  DOWNGRADE_V5_FROM,
   type DowngradeReport,
+  type DowngradeV5Report,
   type UserCounts,
 } from '../db/downgrade';
 import { MIGRATIONS, schemaVersion } from '../db/migrations';
@@ -79,12 +82,15 @@ Accounts (docs/multi-user.md §7):
 Rollback:
   downgrade-schema [--keep <username>] [--drop-others]
       Stop the app first. Saves backups/legko-pre-down-v<N>-<date>.db, then
+      v5 → v4 (the build before workouts and steps): drops every exercise, workout, workout session and steps
+        entry (prints the counts per account); every account and all other data stay; --keep and
+        --drop-others are refused;
       v4 → v3 (the build before accounts): keeps ONE account (--keep, or the only one) with its password,
         sessions, settings, data and photos; refused while another account owns data unless --drop-others
         (drops it and prints the counts); invites, reset links and AI counts go;
       v3 → v2 (the build before meals): drops the meal structure and the macros; every day keeps its food
         text, kcal and photos.
-      Run it only when deploy.sh status shows a previous image from before the users release.
+      Run it only when deploy.sh status shows a previous image from before that release (one step per run).
       Then run deploy.sh rollback — and no other command of this build in between.
 
 The account commands never migrate an existing database: they refuse one at an older schema (the server migrates
@@ -478,8 +484,28 @@ function printV4Report(io: CliIo, file: string, report: DowngradeReport): void {
   );
 }
 
+function printV5Report(io: CliIo, file: string, report: DowngradeV5Report): void {
+  const lines = report.dropped.length
+    ? report.dropped
+        .map(
+          (u) =>
+            `  ${u.username}: exercises ${u.counts.exercises}, workouts ${u.counts.workouts}, ` +
+            `sessions ${u.counts.workout_sessions}, steps ${u.counts.steps}`,
+        )
+        .join('\n')
+    : '  (no accounts)';
+  io.stdout.write(
+    `Schema downgraded to v4 (${file}).\n` +
+      `Saved first: ${report.snapshot}\n` +
+      `Dropped (rows per account):\n${lines}\n` +
+      'Kept: every account, its days (with the workout marks and types), weigh-ins, measurements, meals, photos and settings.\n' +
+      'Next: deploy/deploy.sh rollback. (Run downgrade-schema again only to go back further, to the build before accounts.)\n',
+  );
+}
+
 /**
- * Rollback helper (DEPLOY.md): opens the database WITHOUT migrating. v4 → v3 (`downgradeSchemaV4`), or v3 → v2;
+ * Rollback helper (DEPLOY.md): opens the database WITHOUT migrating. v5 → v4 (`downgradeSchemaV5`), v4 → v3
+ * (`downgradeSchemaV4`), or v3 → v2;
  * anything else is refused. Each saves a snapshot first and runs in one transaction.
  */
 function downgradeSchema(io: CliIo, args: readonly string[]): ExitCode {
@@ -493,6 +519,16 @@ function downgradeSchema(io: CliIo, args: readonly string[]): ExitCode {
     const date = zonedNow(BACKUP_TIMEZONE, clockOf(io)()).date;
     const backups = backupsDir(dirname(file));
     const version = schemaVersion(db);
+    if (version === DOWNGRADE_V5_FROM) {
+      if (keep !== undefined || dropOthers) {
+        throw new Refused(
+          `--keep and --drop-others only apply to a schema v4 database; this one is v${version}. Nothing was changed.\n` +
+            'Run downgrade-schema without them first (v5 → v4 keeps every account).',
+        );
+      }
+      printV5Report(io, file, downgradeSchemaV5(db, backups, date));
+      return 0;
+    }
     if (version === DOWNGRADE_V4_FROM) {
       printV4Report(io, file, downgradeSchemaV4(db, backups, date, { keep, dropOthers }));
       return 0;

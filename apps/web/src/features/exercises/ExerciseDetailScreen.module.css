@@ -1,0 +1,92 @@
+/* Desktop pane next to the library list: one column of cards, 14 apart. */
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.paneTitle {
+  padding-top: 0;
+}
+
+.mapCard {
+  align-items: center;
+  padding: 14px 18px;
+}
+
+.factsCard {
+  padding: 4px 18px;
+}
+
+.facts {
+  margin: 0;
+}
+
+.fact {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 12px;
+  padding: 11px 0;
+}
+
+.fact + .fact {
+  border-top: 1px solid var(--line2);
+}
+
+.fact dt {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.fact dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.chartTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
+}
+
+.single {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--ink2);
+}
+
+.muted {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}
+
+.notFound {
+  gap: 12px;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.danger {
+  color: var(--accD);
+}

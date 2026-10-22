@@ -10,18 +10,29 @@ import {
   mealContentParts,
   normalizeMeal,
 } from './meals';
+import { WEEK_ORDER } from './format';
+import { findExercise } from './exerciseLibrary';
 import { LIMITS, type FoodUse, type Op } from './schemas';
+import { compareSessions, setForKind } from './workouts';
 import type {
   AppData,
   DayEntry,
   DayMeta,
+  Exercise,
   FoodItem,
   ISODate,
   MacroKey,
   Meal,
   MeasureValues,
+  MuscleId,
   Settings,
   SettingsPut,
+  StepsEntry,
+  Weekday,
+  Workout,
+  WorkoutItem,
+  WorkoutSession,
+  SessionExercise,
 } from './types';
 
 const byDate = <T extends { date: string }>(a: T, b: T): number =>
@@ -317,14 +328,207 @@ export function reduceDay(stored: DayEntry | undefined, op: DayOp): DayEntry | u
   }
 }
 
-/** `settings.put`: an absent `mealTypes` / `macroGoals` (old clients) keeps the stored value. */
+/** `settings.put`: an absent `mealTypes` / `macroGoals` / `stepsGoal` (old clients) keeps the stored value. */
 export function mergeSettingsPut(stored: Settings, value: SettingsPut): Settings {
   return {
     ...value,
     customTypes: normalizeTypeNames(value.customTypes),
     mealTypes: normalizeTypeNames(value.mealTypes ?? stored.mealTypes),
     macroGoals: value.macroGoals ?? stored.macroGoals,
+    stepsGoal: value.stepsGoal === undefined ? stored.stepsGoal : value.stepsGoal,
   };
+}
+
+// ---- workouts and steps (docs/workouts-steps-rebrand.md §1.3) ----------------------------------
+
+/** Trimmed, single spaces, at most `max` characters. */
+const cleanName = (name: string, max: number): string => name.trim().replace(/\s+/g, ' ').slice(0, max).trim();
+
+const uniqueList = <T>(list: readonly T[]): T[] => [...new Set(list)];
+
+/** Primary unique (≤ 6); secondary unique, minus primary (≤ 8). */
+function cleanMuscles(primary: readonly MuscleId[], secondary: readonly MuscleId[]): Pick<Exercise, 'primary' | 'secondary'> {
+  const p = uniqueList(primary).slice(0, LIMITS.primaryMuscles);
+  const s = uniqueList(secondary)
+    .filter((m) => !p.includes(m))
+    .slice(0, LIMITS.secondaryMuscles);
+  return { primary: p, secondary: s };
+}
+
+const cleanMet = (met: number): number => clampNum(Math.round(met * 10) / 10, LIMITS.met.min, LIMITS.met.max);
+
+function clampNum(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+/** Name cleaned, muscles unique and disjoint, MET to one decimal in bounds. */
+export function normalizeExercise(e: Exercise): Exercise {
+  return {
+    id: e.id,
+    name: cleanName(e.name, LIMITS.exerciseName),
+    kind: e.kind,
+    ...cleanMuscles(e.primary, e.secondary),
+    equipment: e.equipment,
+    met: cleanMet(e.met),
+  };
+}
+
+const firstOfKey = <T extends { key: string }>(list: readonly T[]): T[] => {
+  const seen = new Set<string>();
+  return list.filter((x) => (seen.has(x.key) ? false : (seen.add(x.key), true)));
+};
+
+/**
+ * Name cleaned, days unique in WEEK_ORDER, duplicate item keys → first wins, ≤ 30 items / 20 sets. Items of a
+ * library exercise keep only the set fields of its kind (an own exercise's kind is not known here: kept as sent).
+ */
+export function normalizeWorkout(w: Workout): Workout {
+  const days = WEEK_ORDER.filter((d) => w.days.includes(d)) as Weekday[];
+  const items = firstOfKey(w.items)
+    .slice(0, LIMITS.workoutItems)
+    .map((item): WorkoutItem => {
+      const kind = findExercise([], item.exerciseId)?.kind;
+      const sets = item.sets.slice(0, LIMITS.plannedSets).map((s) => (kind ? setForKind(kind, s) : { ...s }));
+      return {
+        key: item.key,
+        exerciseId: item.exerciseId,
+        sets,
+        restSec: clampNum(Math.round(item.restSec), LIMITS.restSec.min, LIMITS.restSec.max),
+      };
+    });
+  return { id: w.id, name: cleanName(w.name, LIMITS.workoutName), days, items };
+}
+
+function normalizeSessionExercise(e: SessionExercise): SessionExercise {
+  return {
+    key: e.key,
+    exerciseId: e.exerciseId,
+    name: cleanName(e.name, LIMITS.exerciseName),
+    kind: e.kind,
+    met: cleanMet(e.met),
+    equipment: e.equipment,
+    ...cleanMuscles(e.primary, e.secondary),
+    restSec: clampNum(Math.round(e.restSec), LIMITS.restSec.min, LIMITS.restSec.max),
+    skipped: e.skipped === true,
+    sets: e.sets.slice(0, LIMITS.sessionSets).map((s) => ({ ...setForKind(e.kind, s), done: s.done === true })),
+  };
+}
+
+/**
+ * Names cleaned, duplicate exercise keys → first wins, set fields of the snapshot kind only, `status: 'active'`
+ * forces `finishedAt: null`, `durationSec` rounded and clamped to 0…86 400, missing `rev` → 0, missing `deviceId` →
+ * null, notes ≤ 1000.
+ */
+export function normalizeSession(s: WorkoutSession): WorkoutSession {
+  const duration =
+    typeof s.durationSec === 'number' && Number.isFinite(s.durationSec)
+      ? clampNum(Math.round(s.durationSec), LIMITS.sessionSec.min, LIMITS.sessionSec.max)
+      : null;
+  const rev = typeof s.rev === 'number' && Number.isFinite(s.rev) ? clampNum(Math.floor(s.rev), 0, LIMITS.rev.max) : 0;
+  return {
+    id: s.id,
+    date: s.date,
+    workoutId: s.workoutId ?? null,
+    name: cleanName(s.name, LIMITS.workoutName),
+    createdAt: s.createdAt,
+    startedAt: s.startedAt ?? null,
+    finishedAt: s.status === 'active' ? null : (s.finishedAt ?? null),
+    durationSec: duration,
+    status: s.status,
+    exercises: firstOfKey(s.exercises).slice(0, LIMITS.sessionExercises).map(normalizeSessionExercise),
+    notes: (s.notes ?? '').slice(0, LIMITS.sessionNotes),
+    rev,
+    deviceId: s.deviceId ?? null,
+  };
+}
+
+export type ExerciseOp = Extract<Op, { kind: 'exercise.put' | 'exercise.delete' }>;
+export type WorkoutOp = Extract<Op, { kind: 'workout.put' | 'workout.delete' }>;
+export type SessionOp = Extract<Op, { kind: 'session.put' | 'session.delete' }>;
+export type StepsOp = Extract<Op, { kind: 'steps.put' | 'steps.delete' }>;
+
+/** Upsert by id in place; a new one is appended only below `max` (else no change). */
+function upsertById<T extends { id: string }>(list: readonly T[], value: T, max: number): readonly T[] {
+  const i = list.findIndex((x) => x.id === value.id);
+  if (i >= 0) {
+    const next = [...list];
+    next[i] = value;
+    return next;
+  }
+  if (list.length >= max) return list;
+  return [...list, value];
+}
+
+/** Her own exercises: put = upsert (a new one beyond 300 → no change), delete = remove (no cascade). */
+export function reduceExercises(list: readonly Exercise[], op: ExerciseOp): Exercise[] {
+  if (op.kind === 'exercise.delete') return list.filter((e) => e.id !== op.id);
+  return [...upsertById(list, normalizeExercise(op.value), LIMITS.customExercises)];
+}
+
+/** Her workouts: put = upsert keeping the position (a new one beyond 50 → no change), delete = remove. */
+export function reduceWorkouts(list: readonly Workout[], op: WorkoutOp): Workout[] {
+  if (op.kind === 'workout.delete') return list.filter((w) => w.id !== op.id);
+  return [...upsertById(list, normalizeWorkout(op.value), LIMITS.workouts)];
+}
+
+export interface SessionState {
+  sessions: WorkoutSession[];
+  deletedSessions: string[];
+}
+
+/** Tombstones are kept sorted by id (a canonical order both sides store); beyond the cap the smallest ids go. */
+function addTombstone(list: readonly string[], id: string): string[] {
+  if (list.includes(id)) return [...list];
+  const next = [...list, id].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return next.length > LIMITS.deletedSessions ? next.slice(next.length - LIMITS.deletedSessions) : next;
+}
+
+/**
+ * Why a `session.put` of `value` (normalised) is a no-op over `stored` (W13), or null when it applies: the id has a
+ * tombstone; a lower `rev`; an `active` put over a stored `done`; a NEW session on a date that already has 10.
+ * Shared by the client reducer and the server's row path.
+ */
+export function sessionPutBlocked(
+  value: WorkoutSession,
+  stored: WorkoutSession | undefined,
+  tombstoned: boolean,
+  sessionsOnDate: number,
+): 'deleted' | 'stale_rev' | 'reopen' | 'day_full' | null {
+  if (tombstoned) return 'deleted';
+  if (stored) {
+    if (value.rev < stored.rev) return 'stale_rev';
+    if (value.status === 'active' && stored.status === 'done') return 'reopen';
+    return null;
+  }
+  return sessionsOnDate >= LIMITS.sessionsPerDay ? 'day_full' : null;
+}
+
+/** Sessions with the monotonic merge rules (W13); `session.delete` removes it and keeps a tombstone. */
+export function reduceSessions(state: SessionState, op: SessionOp): SessionState {
+  if (op.kind === 'session.delete') {
+    return {
+      sessions: state.sessions.filter((s) => s.id !== op.id),
+      deletedSessions: addTombstone(state.deletedSessions, op.id),
+    };
+  }
+  const value = normalizeSession(op.value);
+  const stored = state.sessions.find((s) => s.id === value.id);
+  const onDate = state.sessions.filter((s) => s.date === value.date).length;
+  if (sessionPutBlocked(value, stored, state.deletedSessions.includes(value.id), onDate)) return state;
+  const sessions = state.sessions.filter((s) => s.id !== value.id);
+  sessions.push(value);
+  sessions.sort(compareSessions);
+  return { sessions, deletedSessions: state.deletedSessions };
+}
+
+/** Steps: put = upsert by date (sorted by date), delete = remove. */
+export function reduceSteps(list: readonly StepsEntry[], op: StepsOp): StepsEntry[] {
+  const rest = list.filter((s) => s.date !== op.date);
+  if (op.kind === 'steps.put') {
+    rest.push({ date: op.date, steps: op.steps });
+    rest.sort(byDate);
+  }
+  return rest;
 }
 
 // ---- «Часті страви» ------------------------------------------------------------------------------
@@ -423,6 +627,23 @@ export function applyOp(data: AppData, op: Op): AppData {
       const key = foodKey(op.name);
       return { ...data, foods: data.foods.filter((f) => foodKey(f.name) !== key) };
     }
+    case 'exercise.put':
+    case 'exercise.delete':
+      return { ...data, exercises: reduceExercises(data.exercises ?? [], op) };
+    case 'workout.put':
+    case 'workout.delete':
+      return { ...data, workouts: reduceWorkouts(data.workouts ?? [], op) };
+    case 'session.put':
+    case 'session.delete': {
+      const next = reduceSessions(
+        { sessions: data.sessions ?? [], deletedSessions: data.deletedSessions ?? [] },
+        op,
+      );
+      return { ...data, sessions: next.sessions, deletedSessions: next.deletedSessions };
+    }
+    case 'steps.put':
+    case 'steps.delete':
+      return { ...data, steps: reduceSteps(data.steps ?? [], op) };
   }
 }
 

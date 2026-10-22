@@ -4,14 +4,19 @@
  * Every visible string and every accessible name is formatted here, so the components only lay them out.
  */
 import {
+  activeSession,
+  dayBurned,
   dLong,
+  doneSessionsOn,
   dWeekdayLong,
   f0,
   f1,
   fN,
+  formatDuration,
   hasMeals,
   sgn,
   weekdayOf,
+  workoutsOn,
   type AppData,
   type DayEntry,
   type ISODate,
@@ -26,6 +31,8 @@ import {
   MEASURE_PARAMS,
   measureCheck,
   measureSummary,
+  stepsOn,
+  stepsText,
   weekSummary,
   weighCheck,
   weightSummary,
@@ -121,17 +128,36 @@ export interface HomeFoodRow {
   label: string;
 }
 
+/**
+ * What sits beside the Тренування row (docs/workouts-steps-rebrand.md §3.13):
+ * - `toggle` — the inline ✓ / ✕ (a day without workout details);
+ * - `continue` — a live session (any date, W14): «Продовжити» → its screen;
+ * - `start` — one workout scheduled today and nothing marked: «Почати» starts it;
+ * - `choose` — 2+ scheduled: «Почати» opens the «Тренування» sheet to pick one;
+ * - `recorded` — a done session today: the static «✓ Було» mark (no ✕, W5).
+ */
+export type HomeTrainingAction =
+  | { kind: 'toggle' }
+  | { kind: 'continue'; sessionId: string; label: string }
+  | { kind: 'start'; workoutId: string; label: string }
+  | { kind: 'choose'; label: string }
+  | { kind: 'recorded' };
+
 export interface HomeTrainingRow {
   /** Pressed option of the inline ✓ / ✕. */
   trained: boolean | null;
-  /** «За планом о 18:00» | «Ще не відмічено» | «Кардіо, Прес» | «Було · додай тип» | «Не було». */
+  /**
+   * «За планом о 18:00» | «Ще не відмічено» | «Кардіо, Прес» | «Було · додай тип» | «Не було» | «Триває · 12 хв» |
+   * «Сьогодні: Ноги + прес» | «Ноги + прес»; then « · 8 400 кроків» and, with a done session, « · спалено 410 ккал».
+   */
   sub: string;
   /** `undefined` = the row's default sub colour. */
   subTone: 'muted' | 'acc' | undefined;
   /** A planned workout day that is not marked yet. */
   due: boolean;
-  /** Accessible name, «Тренування: …». */
+  /** Accessible name, «Тренування: Ноги + прес. 8 400 кроків. Спалено 410 ккал». */
   label: string;
+  action: HomeTrainingAction;
 }
 
 export interface HomeScheduleRow {
@@ -175,6 +201,8 @@ export interface HomeModel {
 export interface HomeModelOptions {
   /** Current time, for the greeting. */
   now: Date;
+  /** Current time in ms for a live workout («Триває · 12 хв»); default `now`. */
+  clock?: number;
   online: boolean;
   /** iPhone in Safari and the hint was not dismissed. */
   showInstallHint: boolean;
@@ -334,34 +362,79 @@ function buildFood(data: AppData, today: ISODate): HomeFoodRow {
   };
 }
 
-function buildWorkout(data: AppData, today: ISODate): HomeTrainingRow {
+/** «Ноги + прес», «Ноги + прес і ще 1». */
+function namesText(names: readonly string[]): string {
+  const [first = ''] = names;
+  return names.length > 1 ? `${first} і ще ${names.length - 1}` : first;
+}
+
+/** The day mark alone (a day without workout details): today's behaviour before workouts existed. */
+function markState(data: AppData, today: ISODate): Pick<HomeTrainingRow, 'sub' | 'subTone' | 'due'> & { speech: string } {
   const entry = data.days[today];
   const { onboarded, rem } = data.settings;
   const trained = entry?.trained ?? null;
-  let sub: string;
-  let subTone: HomeTrainingRow['subTone'];
-  let due = false;
-  let label: string;
   if (trained === true) {
     const types = entry?.types.join(', ') ?? '';
-    sub = types || 'Було · додай тип';
-    subTone = types ? undefined : 'acc';
-    label = types ? `Тренування: ${types}` : `Тренування: ${lowerFirst(sub)}`;
-  } else if (trained === false) {
-    sub = 'Не було';
-    subTone = undefined;
-    label = `Тренування: ${lowerFirst(sub)}`;
-  } else if (onboarded && rem.workout.on && rem.workout.days.includes(weekdayOf(today))) {
-    sub = `За планом о ${rem.workout.time}`;
-    subTone = 'acc';
-    due = true;
-    label = `Тренування: ${lowerFirst(sub)}`;
-  } else {
-    sub = 'Ще не відмічено';
-    subTone = 'muted';
-    label = `Тренування: ${lowerFirst(sub)}`;
+    const sub = types || 'Було · додай тип';
+    return { sub, subTone: types ? undefined : 'acc', due: false, speech: types || lowerFirst(sub) };
   }
-  return { trained, sub, subTone, due, label };
+  if (trained === false) return { sub: 'Не було', subTone: undefined, due: false, speech: 'не було' };
+  if (onboarded && rem.workout.on && rem.workout.days.includes(weekdayOf(today))) {
+    const sub = `За планом о ${rem.workout.time}`;
+    return { sub, subTone: 'acc', due: true, speech: lowerFirst(sub) };
+  }
+  return { sub: 'Ще не відмічено', subTone: 'muted', due: false, speech: 'ще не відмічено' };
+}
+
+function buildWorkout(data: AppData, today: ISODate, clock: number): HomeTrainingRow {
+  const trained = data.days[today]?.trained ?? null;
+  const live = activeSession(data, clock);
+  const done = doneSessionsOn(data, today);
+  const scheduled = workoutsOn(data.workouts ?? [], today);
+
+  let base: Pick<HomeTrainingRow, 'sub' | 'subTone' | 'due'>;
+  let speech: string;
+  let action: HomeTrainingAction;
+  if (live) {
+    const elapsed = formatDuration(Math.max(0, clock - (live.startedAt ?? clock)) / 1000);
+    base = { sub: `Триває · ${elapsed}`, subTone: 'acc', due: false };
+    speech = `${live.name} триває ${elapsed.replace(NB, ' ')}`;
+    action = { kind: 'continue', sessionId: live.id, label: `Продовжити тренування «${live.name}»` };
+  } else if (done.length > 0) {
+    const names = done.length > 1 ? `${done.length} ${trainingsWord(done.length)}` : (done[0]?.name ?? '');
+    base = { sub: names, subTone: undefined, due: false };
+    speech = names;
+    action = { kind: 'recorded' };
+  } else if (scheduled.length > 0 && trained === null) {
+    const names = namesText(scheduled.map((w) => w.name));
+    base = { sub: `Сьогодні: ${names}`, subTone: 'acc', due: true };
+    speech = `сьогодні ${names}`;
+    const [only] = scheduled;
+    action =
+      scheduled.length === 1 && only
+        ? { kind: 'start', workoutId: only.id, label: `Почати тренування «${only.name}»` }
+        : { kind: 'choose', label: 'Почати тренування: обрати' };
+  } else {
+    const mark = markState(data, today);
+    base = { sub: mark.sub, subTone: mark.subTone, due: mark.due };
+    speech = mark.speech;
+    action = { kind: 'toggle' };
+  }
+
+  // Then the day's steps and, with a done session, the burned kcal (display only, W8).
+  const parts = [base.sub];
+  const sentences = [`Тренування: ${speech}`];
+  const steps = stepsOn(data, today);
+  if (steps !== null) {
+    parts.push(stepsText(steps));
+    sentences.push(stepsText(steps).replace(/\s/g, ' '));
+  }
+  const burned = done.length > 0 ? dayBurned(data, today) : null;
+  if (burned) {
+    parts.push(`спалено${NB}${f0(burned.total)}${NB}ккал`);
+    sentences.push(`Спалено ${f0(burned.total).replace(/\s/g, ' ')} ккал`);
+  }
+  return { trained, ...base, sub: parts.join(' · '), label: sentences.join('. '), action };
 }
 
 /** Wording of the weigh-in / measurement rows. */
@@ -507,7 +580,7 @@ export function buildHomeModel(data: AppData, today: ISODate, opts: HomeModelOpt
     hero: buildHero(data),
     rows: {
       food: buildFood(data, today),
-      workout: buildWorkout(data, today),
+      workout: buildWorkout(data, today, opts.clock ?? opts.now.getTime()),
       weight: buildWeight(data, today),
       measure: buildMeasure(data, today),
     },

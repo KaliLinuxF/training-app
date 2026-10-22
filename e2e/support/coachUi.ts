@@ -5,7 +5,7 @@
  */
 import { expect, type Locator, type Page } from '@playwright/test';
 
-export type ClientTab = 'Огляд' | 'Прогрес' | 'Календар' | 'Харчування';
+export type ClientTab = 'Огляд' | 'Прогрес' | 'Календар' | 'Харчування' | 'Тренування';
 export type ShowFilter = 'Потребують уваги' | 'Усі';
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,6 +99,14 @@ export async function clientTab(page: Page, tab: ClientTab): Promise<void> {
 /** The read-only day of «Календар» (its card is named by the date «13 жовтня 2026»). */
 export function dayView(page: Page): Locator {
   return page.getByRole('region', { name: /^\d{1,2} \S+ \d{4}$/ });
+}
+
+/**
+ * A done session's group: «12 жовтня · Ноги + прес» in «Тренування», «Ноги + прес» under a day of «Календар»
+ * (docs/workouts-steps-rebrand.md §3.18).
+ */
+export function sessionGroup(page: Page, title: string): Locator {
+  return page.getByRole('region', { name: title, exact: true });
 }
 
 /** Whether the main navigation offers «Клієнти». */

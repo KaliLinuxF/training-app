@@ -7,15 +7,24 @@
 import {
   addDays,
   API,
+  compareSessions,
   defaultSettings,
+  findExercise,
   meResponseSchema,
   normalizeDay,
   parse,
+  sessionExerciseFrom,
   todayISO,
   USER_HEADER,
   type AppData,
   type DayEntry,
+  type Exercise,
   type Meal,
+  type SetValues,
+  type Weekday,
+  type Workout,
+  type WorkoutItem,
+  type WorkoutSession,
 } from '@legko/shared';
 
 const FOODS = [
@@ -78,7 +87,12 @@ function demoMeals(date: string, food: string, kcal: number, withPosition: boole
   });
 }
 
-export function demoData(today: string): AppData {
+export interface DemoOptions {
+  /** Adds workouts, sessions, an own exercise, steps and a steps goal (dev seed, e2e 'training'). Default false. */
+  training?: boolean;
+}
+
+export function demoData(today: string, { training = false }: DemoOptions = {}): AppData {
   let r = 11;
   const rnd = () => {
     r = (r * 16807) % 2147483647;
@@ -92,6 +106,11 @@ export function demoData(today: string): AppData {
     measures: [],
     foods: [],
     settings: { ...defaultSettings(), onboarded: true },
+    exercises: [],
+    workouts: [],
+    sessions: [],
+    steps: [],
+    deletedSessions: [],
   };
   let k = 0;
   for (let d = s; d <= today; d = addDays(d, 1)) {
@@ -170,7 +189,113 @@ export function demoData(today: string): AppData {
     },
     { name: 'Яблуко', portion: '1 шт', kcal: 80, count: 4, lastUsed: used },
   ];
+  if (training) addTraining(data, today);
   return data;
+}
+
+// ---- training (docs/workouts-steps-rebrand.md §1.8) --------------------------------------------
+
+const values = (over: Partial<SetValues>): SetValues => ({ reps: null, kg: null, sec: null, min: null, km: null, ...over });
+const sets = (n: number, over: Partial<SetValues>): SetValues[] => Array.from({ length: n }, () => values(over));
+const item = (key: string, exerciseId: string, planned: SetValues[], restSec: number): WorkoutItem => ({
+  key,
+  exerciseId,
+  sets: planned,
+  restSec,
+});
+
+export const DEMO_LEGS: Workout = {
+  id: 'demoWorkoutLegs',
+  name: 'Ноги + прес',
+  days: [1, 3],
+  items: [
+    item('legs1', 'lib.back-squat', sets(3, { reps: 12, kg: 40 }), 90),
+    item('legs2', 'lib.romanian-deadlift', sets(3, { reps: 10, kg: 35 }), 90),
+    item('legs3', 'lib.crunch', sets(3, { reps: 20 }), 60),
+    item('legs4', 'lib.plank', sets(3, { sec: 45 }), 45),
+  ],
+};
+
+export const DEMO_UPPER: Workout = {
+  id: 'demoWorkoutUpper',
+  name: 'Верх тіла',
+  days: [5],
+  items: [
+    item('upper1', 'lib.dumbbell-bench-press', sets(3, { reps: 10, kg: 12 }), 90),
+    item('upper2', 'lib.lat-pulldown', sets(3, { reps: 12, kg: 30 }), 90),
+    item('upper3', 'lib.dumbbell-shoulder-press', sets(3, { reps: 10, kg: 8 }), 90),
+    item('upper4', 'lib.biceps-curl', sets(3, { reps: 12, kg: 6 }), 60),
+  ],
+};
+
+export const DEMO_OWN_EXERCISE: Exercise = {
+  id: 'demoStepAerobic',
+  name: 'Степ-аеробіка',
+  kind: 'cardio',
+  primary: ['quads', 'calves'],
+  secondary: ['glutes'],
+  equipment: 'other',
+  met: 7.0,
+};
+
+const SCHEDULE: Partial<Record<Weekday, Workout>> = { 1: DEMO_LEGS, 3: DEMO_LEGS, 5: DEMO_UPPER };
+const DURATION_SEC: Record<string, number> = { [DEMO_LEGS.id]: 2880, [DEMO_UPPER.id]: 2520 };
+
+/** A done session of `workout` on `date` (18:00 local), every planned set done; squat weight per `squatKg`. */
+function demoSession(workout: Workout, date: string, squatKg: number): WorkoutSession {
+  const id = `demo${date.replace(/-/g, '')}`;
+  const start = parse(date).getTime() + 18 * 3_600_000;
+  const duration = DURATION_SEC[workout.id] ?? 2700;
+  const exercises = workout.items.map((planned, i) => {
+    const exercise = findExercise([], planned.exerciseId);
+    if (!exercise) throw new Error(`demo: no ${planned.exerciseId}`);
+    const entry = sessionExerciseFrom(exercise, planned, null, { key: `${id}-${i}`, done: true });
+    if (exercise.id === 'lib.back-squat') entry.sets = entry.sets.map((s) => ({ ...s, kg: squatKg }));
+    return entry;
+  });
+  return {
+    id,
+    date,
+    workoutId: workout.id,
+    name: workout.name,
+    createdAt: start,
+    startedAt: start,
+    finishedAt: start + duration * 1000,
+    durationSec: duration,
+    status: 'done',
+    exercises,
+    notes: '',
+    rev: 1,
+    deviceId: null,
+  };
+}
+
+/**
+ * Deterministic training on top of the demo: the two workouts and the own exercise; done sessions on the plan days of
+ * the 3 weeks before today that the demo marks trained (their types stay as stored) — the latest «Ноги + прес» with
+ * squat 40 kg (every set done: the hint shows, 40 kg is the record), the one before 37,5 kg, older ones 35 kg; steps
+ * on 12 of the 14 days before today (5 200–11 800); steps goal 8 000; nothing today.
+ */
+function addTraining(data: AppData, today: string): void {
+  data.exercises = [{ ...DEMO_OWN_EXERCISE, primary: [...DEMO_OWN_EXERCISE.primary], secondary: [...DEMO_OWN_EXERCISE.secondary] }];
+  data.workouts = [DEMO_LEGS, DEMO_UPPER].map((w) => structuredClone(w));
+  data.settings = { ...data.settings, stepsGoal: 8000 };
+
+  const planned: { date: string; workout: Workout }[] = [];
+  for (let back = 21; back >= 1; back--) {
+    const date = addDays(today, -back);
+    const workout = SCHEDULE[parse(date).getDay() as Weekday];
+    if (workout && data.days[date]?.trained === true) planned.push({ date, workout });
+  }
+  const legs = planned.filter((p) => p.workout.id === DEMO_LEGS.id).map((p) => p.date);
+  const squatKg = (date: string): number =>
+    date === legs.at(-1) ? 40 : date === legs.at(-2) ? 37.5 : 35;
+  data.sessions = planned.map((p) => demoSession(p.workout, p.date, squatKg(p.date))).sort(compareSessions);
+
+  for (let back = 14; back >= 1; back--) {
+    if (back === 5 || back === 11) continue;
+    data.steps.push({ date: addDays(today, -back), steps: 5200 + Math.round(((back * 2900) % 6601) / 50) * 50 });
+  }
 }
 
 export const DEFAULT_SEED_USERNAME = 'anna';
@@ -181,6 +306,8 @@ export interface SeedOptions {
   username: string;
   password: string;
   today: string;
+  /** Passed to `demoData` (the dev CLI seeds the training too). */
+  training?: boolean;
   /** Injectable for tests (the app's `request`). */
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
@@ -194,6 +321,7 @@ export async function seedDemo({
   username,
   password,
   today,
+  training = false,
   fetch: request = fetch,
 }: SeedOptions): Promise<string> {
   const headers = { 'Content-Type': 'application/json', Origin: origin };
@@ -210,7 +338,7 @@ export async function seedDemo({
   const res = await request(`${origin}${API.import}`, {
     method: 'POST',
     headers: { ...headers, Cookie: cookie, [USER_HEADER]: me.data.user.id },
-    body: JSON.stringify(demoData(today)),
+    body: JSON.stringify(demoData(today, { training })),
   });
   if (!res.ok) throw new Error(`Import failed: ${res.status} ${await res.text()}`);
   return me.data.user.id;
@@ -231,6 +359,7 @@ async function main(): Promise<void> {
     username,
     password: arg('password', process.env.DEV_PASSWORD),
     today: arg('today', todayISO()),
+    training: true,
   });
   console.log(`Seeded demo data into ${username} at ${origin}`);
 }

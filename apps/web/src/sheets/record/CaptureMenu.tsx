@@ -41,7 +41,7 @@ function statusView(status: CaptureMenuStatus | null): StatusView {
   }
 }
 
-/** «Що записати?»: four big rows in the thumb zone, then «Повний запис дня →». */
+/** «Що записати?»: five big rows in the thumb zone, then «Повний запис дня →». */
 export function CaptureMenu({ rows, dateLine, onPick }: CaptureMenuProps) {
   return (
     <div className={s.menu}>

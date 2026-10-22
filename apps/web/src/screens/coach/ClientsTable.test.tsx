@@ -28,6 +28,8 @@ function Harness({ onSort }: { onSort?: (s: SortState) => void }) {
 const table = () => screen.getByRole('table');
 const header = (name: RegExp) => screen.getByRole('columnheader', { name });
 const bodyRows = () => within(table()).getAllByRole('row').slice(1);
+/** NO-BREAK SPACEs (digit groups) as plain spaces. */
+const unbreak = (text: string | null | undefined): string => (text ?? '').replace(/\u00a0/g, ' ');
 
 beforeEach(() => at('/coach'));
 
@@ -38,13 +40,13 @@ afterEach(() => {
 });
 
 describe('ClientsTable a11y', () => {
-  it('is a captioned table in a focusable region with 8 column headers and a row header per client', () => {
+  it('is a captioned table in a focusable region with 9 column headers and a row header per client', () => {
     renderPage(<Harness />);
     const region = screen.getByRole('region', { name: 'Клієнти · за 7 днів' });
     expect(region.getAttribute('tabindex')).toBe('0');
     expect(within(region).getByRole('table')).toBe(table());
     const cols = table().querySelectorAll('th[scope="col"]');
-    expect(cols).toHaveLength(8);
+    expect(cols).toHaveLength(9);
     for (const th of cols) {
       expect(th.querySelectorAll('button')).toHaveLength(1);
       expect(th.getAttribute('aria-sort')).toBe('none');
@@ -71,6 +73,31 @@ describe('ClientsTable a11y', () => {
     expect(olya?.textContent).toContain('−1,6 від старту');
   });
 
+  it('shows «Кроки» after «Тренування»: the average with the goal muted, a faint «—» without steps', () => {
+    renderPage(<Harness />);
+    const heads = [...table().querySelectorAll('th[scope="col"]')];
+    const steps = header(/^Кроки/);
+    expect(heads.indexOf(steps)).toBe(heads.indexOf(header(/^Тренування/)) + 1);
+    expect(steps.getAttribute('title')).toBe('середнє за день');
+    const col = heads.indexOf(steps) - 1;
+    const cellOf = (name: string) => {
+      const tr = bodyRows().find((r) => within(r).getByRole('link').textContent === name) as HTMLElement;
+      return tr.querySelectorAll('td')[col] as HTMLElement;
+    };
+    const sofia = cellOf('sofia');
+    const shown = sofia.querySelector('[aria-hidden="true"]') as HTMLElement;
+    expect(unbreak(shown.textContent)).toBe('8 300 / 8 000');
+    expect(unbreak(shown.querySelector('[class*="muted"]')?.textContent)).toBe(' / 8 000');
+    expect(unbreak(sofia.querySelector('.visually-hidden')?.textContent)).toBe(
+      'кроків у середньому 8 300 на день за 7 днів, ціль 8 000',
+    );
+    const olya = cellOf('olya');
+    expect(olya.querySelector('[class*="faint"]')?.textContent).toBe('—');
+    fireEvent.click(within(steps).getByRole('button'));
+    expect(steps.getAttribute('aria-sort')).toBe('ascending');
+    expect(within(bodyRows()[0] as HTMLElement).getByRole('link').textContent).toBe('sofia');
+  });
+
   it('cycles aria-sort with Enter on a header button: ascending → descending → none', () => {
     const onSort = vi.fn();
     renderPage(<Harness onSort={onSort} />);
@@ -78,7 +105,7 @@ describe('ClientsTable a11y', () => {
     button().focus();
     fireEvent.keyDown(button(), { key: 'Enter' });
     expect(header(/Клієнт/).getAttribute('aria-sort')).toBe('ascending');
-    expect(table().querySelectorAll('[aria-sort="none"]')).toHaveLength(7);
+    expect(table().querySelectorAll('[aria-sort="none"]')).toHaveLength(8);
     expect(within(bodyRows()[0] as HTMLElement).getByRole('link').textContent).toBe('ivan');
     fireEvent.keyDown(button(), { key: 'Enter' });
     expect(header(/Клієнт/).getAttribute('aria-sort')).toBe('descending');
@@ -145,7 +172,7 @@ describe('ClientsTable layout (CSS contract)', () => {
     expect(cssValue(css, '.scroller', 'max-height', '(min-width: 900px) and (hover: hover) and (pointer: fine)')).toBe(
       'calc(100dvh - 220px)',
     );
-    expect(cssValue(css, '.table', 'min-width')).toBe('880px');
+    expect(cssValue(css, '.table', 'min-width')).toBe('940px');
     expect(cssValue(css, '.th', 'position')).toBe('sticky');
     expect(cssValue(css, '.th', 'top')).toBe('0');
     expect(cssValue(css, '.th', 'z-index')).toBe('2');
@@ -164,7 +191,7 @@ describe('ClientsTable layout (CSS contract)', () => {
 
   it('is the containing block of the cells’ visually hidden long forms, so they never widen the page', () => {
     // `.visually-hidden` is absolutely positioned: without a positioned region it escapes the region's clipping at
-    // its static place in the 880px table (the page scrolled sideways at 900–1099px windows).
+    // its static place in the 940px table (the page scrolled sideways at 900–1099px windows).
     expect(cssValue(css, '.scroller', 'position')).toBe('relative');
     expect(cssValue(css, '.surface', 'position')).toBe('relative');
     expect(cssValue(css, '.surface', 'overflow')).toBe('clip');

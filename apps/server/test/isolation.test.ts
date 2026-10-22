@@ -3,10 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   API,
+  coachClientPath,
+  coachClientsPath,
   defaultSettings,
+  emptyData,
   photoThumbUrl,
   photoUrl,
   type AppData,
+  type CoachClientResponse,
+  type CoachClientsResponse,
   type FoodStatusResponse,
   type Meal,
   type Op,
@@ -15,7 +20,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { UserId } from '../src/db/users';
 import type { FoodEstimator } from '../src/food/estimator';
 import { PHOTO_GC_GRACE_MS } from '../src/photos/store';
-import { createTestServer, fakeJpeg, json, type TestServer, type TestServerOptions } from './helpers';
+import {
+  ADMIN_PASSWORD,
+  createTestServer,
+  fakeJpeg,
+  json,
+  type TestServer,
+  type TestServerOptions,
+} from './helpers';
 
 /**
  * Security-critical (docs/multi-user.md §3–§5, §11.1): user B can never read, change or delete what belongs to user A —
@@ -50,7 +62,42 @@ const OWNED_TABLES = [
   'push_subscriptions',
   'reminder_log',
   'ai_usage',
+  'exercises',
+  'workouts',
+  'workout_sessions',
+  'steps',
 ] as const;
+
+/** A's workouts and steps (schema v5); B reuses exactly these ids. */
+const A_EXERCISE = 'ownExercise01';
+const A_WORKOUT = 'workout00001';
+const A_SESSION = 'session00001';
+const workoutSession = (name: string, rev = 0): Op => ({
+  kind: 'session.put',
+  value: {
+    id: A_SESSION,
+    date: D1,
+    workoutId: A_WORKOUT,
+    name,
+    createdAt: 1,
+    startedAt: null,
+    finishedAt: null,
+    durationSec: 1800,
+    status: 'done',
+    exercises: [],
+    notes: '',
+    rev,
+    deviceId: null,
+  },
+});
+const ownExercise = (name: string): Op => ({
+  kind: 'exercise.put',
+  value: { id: A_EXERCISE, name, kind: 'cardio', primary: ['quads'], secondary: [], equipment: 'other', met: 7 },
+});
+const ownWorkout = (name: string): Op => ({
+  kind: 'workout.put',
+  value: { id: A_WORKOUT, name, days: [1, 3], items: [] },
+});
 
 /** Every stored row of one user, column for column (the "byte-identical" check). */
 function rowsOf(s: TestServer, id: UserId): Record<string, unknown[]> {
@@ -127,8 +174,19 @@ async function twoUsers(options: TestServerOptions = {}) {
     { kind: 'food.use', date: D1, value: { name: DISH, portion: '300 г', kcal: 180, protein: 6 } },
     {
       kind: 'settings.put',
-      value: { ...defaultSettings(), goal: 57, timezone: 'Europe/Warsaw', mealTypes: ['Сніданок', 'Ланч'] },
+      value: {
+        ...defaultSettings(),
+        goal: 57,
+        timezone: 'Europe/Warsaw',
+        mealTypes: ['Сніданок', 'Ланч'],
+        stepsGoal: 9000,
+      },
     },
+    ownExercise('Вправа A'),
+    ownWorkout('Тренування A'),
+    workoutSession('Сесія A'),
+    { kind: 'session.delete', id: 'sessionGoneA1' },
+    { kind: 'steps.put', date: D1, steps: 8400 },
   ];
   expect((await ops(a, aOps)).status).toBe(200);
   await s.call(API.pushSubscribe, { cookie: a.cookie, body: { subscription: subscription('a') } });
@@ -145,7 +203,7 @@ describe('B cannot read A’s data', () => {
     expect(aData.days[D1]?.food).toBe('Омлет');
 
     const own = await dataOf(b);
-    expect(own).toEqual({ days: {}, weights: [], measures: [], foods: [], settings: defaultSettings() });
+    expect(own).toEqual({ ...emptyData(), settings: defaultSettings() });
 
     const exported = await s.call(API.export, { cookie: b.cookie });
     expect(exported.status).toBe(200);
@@ -233,7 +291,7 @@ describe('B cannot modify or delete A’s data', () => {
     expect((await dataOf(b)).days).toEqual(backup.days);
 
     // An empty import by B wipes B only.
-    const empty: AppData = { days: {}, weights: [], measures: [], foods: [], settings: defaultSettings() };
+    const empty: AppData = { ...emptyData(), settings: defaultSettings() };
     expect((await s.call(API.import, { cookie: b.cookie, body: empty })).status).toBe(200);
     expect(rowsOf(s, a.id)).toEqual(aBefore);
     expect(await dataOf(b)).toEqual(empty);
@@ -419,5 +477,81 @@ describe('AI allowance', () => {
     });
     expect(rowsOf(s, a.id).ai_usage).toEqual([{ user_id: a.id, date: D2, count: 1 }]);
     expect(rowsOf(s, b.id).ai_usage).toEqual([{ user_id: b.id, date: D2, count: 2 }]);
+  });
+});
+
+describe('workouts and steps (schema v5): B never reads or changes A’s', () => {
+  it('B’s ops with A’s ids stay B’s own; A’s rows are byte-identical', async () => {
+    const { s, a, b, ops, dataOf, aBefore, aData } = await twoUsers();
+    expect(aData.exercises.map((e) => e.name)).toEqual(['Вправа A']);
+    expect(aData.sessions.map((x) => x.name)).toEqual(['Сесія A']);
+    expect(aData.deletedSessions).toEqual(['sessionGoneA1']);
+
+    const res = await ops(b, [
+      ownExercise('Вправа B'),
+      { kind: 'exercise.delete', id: A_EXERCISE },
+      ownExercise('Вправа B2'),
+      ownWorkout('Тренування B'),
+      { kind: 'workout.delete', id: A_WORKOUT },
+      workoutSession('Сесія B', 99),
+      { kind: 'session.delete', id: A_SESSION },
+      { kind: 'session.put', value: { ...(workoutSession('Сесія B3', 100) as { value: object }).value, id: 'sessionGoneA1' } },
+      { kind: 'steps.put', date: D1, steps: 100 },
+      { kind: 'steps.delete', date: D1 },
+      { kind: 'steps.put', date: D2, steps: 200 },
+    ]);
+    expect(res.status).toBe(200);
+    expect(rowsOf(s, a.id)).toEqual(aBefore);
+    expect(await dataOf(a)).toEqual(aData);
+
+    const own = await dataOf(b);
+    expect(own.exercises.map((e) => e.name)).toEqual(['Вправа B2']);
+    expect(own.workouts).toEqual([]);
+    // B deleted «their» session id: a tombstone of B's; A's tombstone never blocks B's put of the same id.
+    expect(own.sessions.map((x) => x.name)).toEqual(['Сесія B3']);
+    expect(own.deletedSessions).toEqual([A_SESSION]);
+    expect(own.steps).toEqual([{ date: D2, steps: 200 }]);
+    expect(own.settings.stepsGoal).toBeNull();
+    const text = JSON.stringify(own);
+    for (const secret of ['Вправа A', 'Тренування A', 'Сесія A', '8400']) expect(text).not.toContain(secret);
+  });
+
+  it('an own exercise with a lib.* id is refused: nothing applied to anyone', async () => {
+    const { s, a, b, ops, aBefore } = await twoUsers();
+    const bBefore = rowsOf(s, b.id);
+    const res = await ops(b, [
+      { kind: 'steps.put', date: D1, steps: 5000 },
+      {
+        kind: 'exercise.put',
+        value: { id: 'lib.plank', name: 'Планка', kind: 'time', primary: ['abs'], secondary: [], equipment: 'bodyweight', met: 3 },
+      },
+    ]);
+    expect(res.status).toBe(400);
+    expect(rowsOf(s, a.id)).toEqual(aBefore);
+    expect(rowsOf(s, b.id)).toEqual(bBefore);
+  });
+
+  it('the coach reads A’s workouts read-only (GET only); a non-admin is refused', async () => {
+    const { s, a, b, aBefore } = await twoUsers();
+    const admin = await s.login('admin', ADMIN_PASSWORD);
+    const detail = await s.call(coachClientPath(a.id), { cookie: admin });
+    expect(detail.status).toBe(200);
+    const body = await json<CoachClientResponse>(detail);
+    expect(body.data.sessions.map((x) => x.name)).toEqual(['Сесія A']);
+    expect(body.data.steps).toEqual([{ date: D1, steps: 8400 }]);
+    expect(body.data.deletedSessions).toEqual([]);
+    const list = await json<CoachClientsResponse>(
+      await s.call(coachClientsPath({ from: '2026-10-01', to: '2026-10-15' }), { cookie: admin }),
+    );
+    const item = list.clients.find((c) => c.client.id === a.id);
+    expect(item?.sessions.map((x) => x.name)).toEqual(['Сесія A']);
+    expect(item?.steps).toEqual([{ date: D1, steps: 8400 }]);
+    expect(item?.schedule).toEqual([{ id: A_WORKOUT, name: 'Тренування A', days: [1, 3] }]);
+    for (const method of ['POST', 'PUT', 'DELETE'] as const) {
+      const res = await s.call(coachClientPath(a.id), { method, cookie: admin, body: { ops: [ownWorkout('X')] } });
+      expect(res.status, method).not.toBe(200);
+    }
+    expect((await s.call(coachClientPath(a.id), { cookie: b.cookie })).status).toBe(403);
+    expect(rowsOf(s, a.id)).toEqual(aBefore);
   });
 });

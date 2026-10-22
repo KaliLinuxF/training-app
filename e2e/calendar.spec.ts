@@ -7,7 +7,7 @@ const grid = (page: Page) => page.getByRole('group', { name: /^\S+ 2026$/ });
 /** The header shortcut back to today (exact: day cells contain «сьогодні» too). */
 const todayShortcut = (page: Page) => page.getByRole('button', { name: 'Сьогодні', exact: true });
 /** A row of the day card; its short name starts with the row title («Вага: 65,7 кг»). */
-const row = (day: Locator, title: 'Їжа' | 'Тренування' | 'Вага' | 'Заміри' | 'Нотатки') =>
+const row = (day: Locator, title: 'Їжа' | 'Тренування' | 'Кроки' | 'Вага' | 'Заміри' | 'Нотатки') =>
   day.getByRole('button', { name: new RegExp(`^${title}`) });
 
 /** 7 October is a legacy day (logged before meals existed): one food text, 1 880 ккал (over the 1 700 goal). */
@@ -215,7 +215,7 @@ test.describe('calendar', () => {
     await app.goto('/calendar?date=2026-10-05');
     const oct5 = app.region('5 жовтня 2026');
     // Every row (and the footer) announces the dialog it opens, like Home's rows; the inline ✓ / ✕ do not.
-    for (const title of ['Їжа', 'Тренування', 'Вага', 'Заміри'] as const) {
+    for (const title of ['Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри'] as const) {
       await expect(row(oct5, title)).toHaveAttribute('aria-haspopup', 'dialog');
     }
     await expect(oct5.getByRole('button', { name: 'Заповнити день' })).toHaveAttribute(

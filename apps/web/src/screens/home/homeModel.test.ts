@@ -1,4 +1,5 @@
 import {
+  dayBurned,
   emptyData,
   f0,
   normalizeDay,
@@ -11,6 +12,7 @@ import {
   type WeeklyReminder,
 } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
+import { session, walk, workout } from '@/lib/stats/workouts.testing';
 import {
   buildHomeModel,
   foodSubTone,
@@ -497,6 +499,7 @@ describe('«Тренування» row', () => {
       subTone: 'acc',
       due: true,
       label: 'Тренування: за планом о 18:00',
+      action: { kind: 'toggle' },
     });
   });
 
@@ -507,6 +510,7 @@ describe('«Тренування» row', () => {
       subTone: 'muted',
       due: false,
       label: 'Тренування: ще не відмічено',
+      action: { kind: 'toggle' },
     });
   });
 
@@ -531,6 +535,7 @@ describe('«Тренування» row', () => {
       subTone: undefined,
       due: false,
       label: 'Тренування: Кардіо, Прес',
+      action: { kind: 'toggle' },
     });
   });
 
@@ -541,6 +546,7 @@ describe('«Тренування» row', () => {
       subTone: 'acc',
       due: false,
       label: 'Тренування: було · додай тип',
+      action: { kind: 'toggle' },
     });
   });
 
@@ -551,6 +557,7 @@ describe('«Тренування» row', () => {
       subTone: undefined,
       due: false,
       label: 'Тренування: не було',
+      action: { kind: 'toggle' },
     });
   });
 });
@@ -811,5 +818,97 @@ describe('never shows NaN, undefined, null or Infinity', () => {
     for (const text of texts) expect(text).not.toMatch(/NaN|undefined|null|Infinity/);
     expect(Number.isFinite(m.hero.pct)).toBe(true);
     for (const row of [m.rows.food.meter]) if (row) expect(Number.isFinite(row.value)).toBe(true);
+  });
+});
+
+describe('«Тренування» row with workouts and steps (§3.13)', () => {
+  /** 2026-10-14 is a Wednesday: «Ноги + прес» (Пн, Ср) is scheduled. */
+  const AT_10 = Date.UTC(2026, 9, 14, 7);
+  const opts = (clock = AT_10): HomeModelOptions => ({ ...MORNING, clock });
+  const row = (data: AppData, clock = AT_10) => buildHomeModel(data, WEDNESDAY, opts(clock)).rows.workout;
+  const flat = (text: string) => text.replace(/\s/g, ' ');
+
+  it('a scheduled workout, nothing marked: «Сьогодні: Ноги + прес» and «Почати» starts it', () => {
+    const r = row(onboarded({ workouts: [workout()] }));
+    expect(r.sub).toBe('Сьогодні: Ноги + прес');
+    expect(r.subTone).toBe('acc');
+    expect(r.due).toBe(true);
+    expect(r.action).toEqual({
+      kind: 'start',
+      workoutId: 'workoutLegs01',
+      label: 'Почати тренування «Ноги + прес»',
+    });
+    expect(r.label).toBe('Тренування: сьогодні Ноги + прес');
+  });
+
+  it('two scheduled: «… і ще 1», and «Почати» opens the sheet to pick one', () => {
+    const r = row(onboarded({ workouts: [workout(), workout({ id: 'workoutUpper1', name: 'Верх тіла', days: [3] })] }));
+    expect(r.sub).toBe('Сьогодні: Ноги + прес і ще 1');
+    expect(r.action.kind).toBe('choose');
+  });
+
+  it('a scheduled day she already marked keeps the ✓ / ✕', () => {
+    const data = onboarded({ workouts: [workout()], days: { [WEDNESDAY]: day({ trained: false }) } });
+    expect(row(data)).toMatchObject({ sub: 'Не було', action: { kind: 'toggle' } });
+  });
+
+  it('not scheduled today: the plain mark, as before', () => {
+    const data = onboarded({ workouts: [workout({ days: [5] })] });
+    expect(row(data)).toMatchObject({ sub: 'За планом о 18:00', action: { kind: 'toggle' } });
+  });
+
+  it('a live session (any date): «Триває · 12 хв» and «Продовжити»', () => {
+    const started = AT_10 - 12 * 60_000;
+    const live = session({ id: 'liveSession01', status: 'active', startedAt: started, durationSec: null, date: '2026-10-13' });
+    const r = row(onboarded({ workouts: [workout()], sessions: [live] }));
+    expect(flat(r.sub)).toBe('Триває · 12 хв');
+    expect(r.action).toEqual({ kind: 'continue', sessionId: 'liveSession01', label: 'Продовжити тренування «Ноги + прес»' });
+    expect(r.label).toBe('Тренування: Ноги + прес триває 12 хв');
+  });
+
+  it('a stale active session (over 6 h) is not live: the row falls back to the schedule', () => {
+    const stale = session({ status: 'active', startedAt: AT_10 - 7 * 3600_000, durationSec: null });
+    expect(row(onboarded({ workouts: [workout()], sessions: [stale] })).action.kind).toBe('start');
+  });
+
+  it('a done session today: its name, the static «Було» mark and the burned kcal', () => {
+    const data = onboarded({
+      workouts: [workout()],
+      sessions: [session()],
+      days: { [WEDNESDAY]: day({ trained: true, types: ['Низ тіла'] }) },
+    });
+    const r = row(data);
+    expect(r.action).toEqual({ kind: 'recorded' });
+    const kcal = buildHomeModel(data, WEDNESDAY, opts()).rows.workout.sub.split(' · ')[1];
+    expect(flat(kcal ?? '')).toMatch(/^спалено \d+ ккал$/);
+    expect(flat(r.sub).startsWith('Ноги + прес · спалено ')).toBe(true);
+    expect(r.label).toMatch(/^Тренування: Ноги \+ прес\. Спалено \d+ ккал$/);
+  });
+
+  it('two done sessions: «2 тренування»', () => {
+    const data = onboarded({ sessions: [session(), session({ name: 'Кардіо', exercises: [walk()] })] });
+    expect(flat(row(data).sub)).toMatch(/^2 тренування · спалено \d+ ккал$/);
+  });
+
+  it('steps join the sub and the name; the burned kcal shows only with a done session', () => {
+    const steps = onboarded({ steps: [{ date: WEDNESDAY, steps: 8400 }], days: { [WEDNESDAY]: day({ trained: true }) } });
+    const r = row(steps);
+    expect(flat(r.sub)).toBe('Було · додай тип · 8 400 кроків');
+    expect(r.label).toBe('Тренування: було · додай тип. 8 400 кроків');
+
+    const both = onboarded({ steps: [{ date: WEDNESDAY, steps: 8400 }], sessions: [session()] });
+    const b = row(both);
+    const burned = dayBurned(both, WEDNESDAY);
+    expect(flat(b.sub)).toBe(`Ноги + прес · 8 400 кроків · спалено ${flat(f0(burned?.total))} ккал`);
+    expect(b.label).toBe(`Тренування: Ноги + прес. 8 400 кроків. Спалено ${flat(f0(burned?.total))} ккал`);
+  });
+
+  it('the worst case stays one row: a 40-character name with steps and kcal', () => {
+    const name = 'Дуже довга назва тренування на сорок літ'.slice(0, 40);
+    expect(name).toHaveLength(40);
+    const data = onboarded({ steps: [{ date: WEDNESDAY, steps: 12345 }], sessions: [session({ name })] });
+    const r = row(data);
+    expect(r.sub.startsWith(name)).toBe(true);
+    expect(r.action.kind).toBe('recorded');
   });
 });

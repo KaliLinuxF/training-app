@@ -1,0 +1,24 @@
+.empty {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r24);
+  background: var(--card);
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}
+
+.newRow {
+  display: flex;
+}
+
+/* Desktop: the button keeps a readable width instead of spanning both columns. */
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .newRow > * {
+    max-width: 360px;
+  }
+}

@@ -16,3 +16,77 @@
   font-size: 14px;
   color: var(--muted);
 }
+
+/* «Тренування | Обʼєм» and its chart. */
+.chartBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chart {
+  position: relative;
+}
+
+/* Centred over the 130px plot when the period has nothing to draw. */
+.chartEmpty {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 130px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* «Спалено на тренуваннях ≈ 1 240 ккал · в сер. 177 ккал/день». */
+.burned {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* One exercise of «Найчастіші вправи»: name · bar · count (· chevron when it links). */
+.exercise {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(48px, 1fr) 28px;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.exerciseLink {
+  grid-template-columns: minmax(0, 1.4fr) minmax(48px, 1fr) 28px 16px;
+  border-radius: var(--r12);
+}
+
+.exerciseLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.exName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.exValue {
+  text-align: right;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.exChevron {
+  color: var(--faint);
+}

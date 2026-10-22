@@ -43,6 +43,7 @@ export function defaultSettings(): Settings {
     onboarded: false,
     mealTypes: [...DEFAULT_MEAL_TYPES],
     macroGoals: emptyMacroGoals(),
+    stepsGoal: null,
   };
 }
 
@@ -57,8 +58,48 @@ function macroGoalsOf(v: unknown): MacroGoals {
   return { protein: goalOrNull(v.protein), fat: goalOrNull(v.fat), carbs: goalOrNull(v.carbs) };
 }
 
+/** A stored steps goal: a whole number in its bounds, else null (none). */
+function stepsGoalOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= 1000 && v <= 50000 ? v : null;
+}
+
+/**
+ * AppData from an older server / cache / backup with the newer keys filled in (no validation, no sorting): missing
+ * exercises / workouts / sessions / steps / deletedSessions → [], settings.stepsGoal → null. Used where the data is
+ * not zod-parsed (the coach detail response, the web normaliser).
+ */
+export function withDataDefaults(data: Partial<AppData>): AppData {
+  const arr = <T>(v: T[] | undefined): T[] => (Array.isArray(v) ? v : []);
+  const settings: Partial<Settings> | undefined = isRecord(data.settings) ? data.settings : undefined;
+  return {
+    days: isRecord(data.days) ? (data.days as AppData['days']) : {},
+    weights: arr(data.weights),
+    measures: arr(data.measures),
+    foods: arr(data.foods),
+    settings: settings
+      ? ({ ...settings, stepsGoal: stepsGoalOf(settings.stepsGoal) } as Settings)
+      : defaultSettings(),
+    exercises: arr(data.exercises),
+    workouts: arr(data.workouts),
+    sessions: arr(data.sessions),
+    steps: arr(data.steps),
+    deletedSessions: arr(data.deletedSessions),
+  };
+}
+
 export function emptyData(): AppData {
-  return { days: {}, weights: [], measures: [], foods: [], settings: defaultSettings() };
+  return {
+    days: {},
+    weights: [],
+    measures: [],
+    foods: [],
+    settings: defaultSettings(),
+    exercises: [],
+    workouts: [],
+    sessions: [],
+    steps: [],
+    deletedSessions: [],
+  };
 }
 
 /** Fills in anything missing from a stored/partial settings object (older data, new fields). */
@@ -80,6 +121,7 @@ export function normalizeSettings(input: Partial<Settings> | null | undefined): 
       ? normalizeTypeNames(s.mealTypes.filter((t): t is string => typeof t === 'string'))
       : d.mealTypes,
     macroGoals: macroGoalsOf(s.macroGoals),
+    stepsGoal: stepsGoalOf(s.stepsGoal),
   };
 }
 

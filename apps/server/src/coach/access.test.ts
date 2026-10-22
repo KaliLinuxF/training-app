@@ -364,8 +364,11 @@ describe('readers handed to access', () => {
         'measures',
         'read',
         'recordSpan',
+        'sessionsBetween',
         'settings',
+        'stepsBetween',
         'weights',
+        'workouts',
       ]);
       expect(Object.isFrozen(reader)).toBe(true);
     }

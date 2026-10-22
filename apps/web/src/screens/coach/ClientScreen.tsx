@@ -13,7 +13,7 @@ import { PhotoUrlsProvider } from '@/lib/photoUrls';
 import { useIsDesktop } from '@/lib/platform';
 import { Card, cx, Pill, ScreenHeader, Segmented } from '@/ui';
 import { CalendarPanel } from './CalendarPanel';
-import { detailHref, parseDetailParams, TABS, type DetailParams } from './clientModel';
+import { DAYS_TABS, detailHref, parseDetailParams, TABS, type DetailParams } from './clientModel';
 import { neverSeenFlagged, pillsOf } from './clientsModel';
 import {
   COACH_COPY,
@@ -30,6 +30,7 @@ import { NutritionPanel } from './NutritionPanel';
 import { OverviewPanel } from './OverviewPanel';
 import { ProgressPanel } from './ProgressPanel';
 import { useCoachClient, useNow } from './useCoachData';
+import { WorkoutsPanel } from './WorkoutsPanel';
 import { scrollLeftToReveal, useScrollEdges } from './useScrollEdges';
 import s from './ClientScreen.module.css';
 
@@ -38,7 +39,7 @@ const PERIOD_OPTIONS = COACH_PERIODS.map((p) => ({ value: String(p) as `${CoachP
 
 /**
  * One client, read-only (`/coach/<id>`, admins only; docs/coach-cabinet.md §6.3–6.7): the header (since, activity,
- * goals, flags, «Лише перегляд»), the four tabs and the panel of the selected tab. Photos come through the coach
+ * goals, flags, «Лише перегляд»), the five tabs and the panel of the selected tab. Photos come through the coach
  * route (`PhotoUrlsProvider`). Every tab / period / day change replaces the entry and keeps its back stamp, so
  * «‹ Клієнти» returns to the list with its filters.
  */
@@ -85,7 +86,7 @@ function ClientPage({ id, response }: { id: string; response: CoachClientRespons
     [client, data, now, params.days],
   );
   const set = (patch: Partial<DetailParams>) => replace(detailHref(id, { ...params, ...patch }));
-  const showDays = params.tab === 'overview' || params.tab === 'nutrition';
+  const showDays = DAYS_TABS.includes(params.tab);
 
   return (
     <>
@@ -123,12 +124,13 @@ function ClientPage({ id, response }: { id: string; response: CoachClientRespons
       {params.tab === 'nutrition' && (
         <NutritionPanel clientId={id} data={data} today={today} params={params} />
       )}
+      {params.tab === 'workouts' && <WorkoutsPanel data={data} today={today} summary={summary} />}
     </>
   );
 }
 
 /**
- * «Огляд · Прогрес · Календар · Харчування» as links (each tab is a URL): a plain click replaces the entry keeping
+ * «Огляд · Прогрес · Календар · Харчування · Тренування» as links (each tab is a URL): a plain click replaces the entry keeping
  * its state; modified / middle clicks are left to the browser (wouter's Link skips them before `onClick`).
  */
 function Tabs({ id, params, onSelect }: { id: string; params: DetailParams; onSelect: (href: string) => void }) {

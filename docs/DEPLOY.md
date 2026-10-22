@@ -305,6 +305,53 @@ Retags `training-app:previous` as `latest`, recreates the app and waits for it t
 commit and deploy). If the bad release already migrated the database (`PRAGMA user_version`), the old code may not
 understand it: restore the backup taken before the deploy (see below). For risky releases make a manual backup first.
 
+### Rollback after the workouts and steps release (schema v5)
+
+The workouts and steps release (`docs/workouts-steps-rebrand.md`) migrates the database to schema **v5** on its first
+start. The migration is **additive**: four new per-account tables `exercises`, `workouts`, `workout_sessions` and
+`steps` (each keyed by `user_id`, deleted with the account); no existing row changes. Just before migrating it saves
+`data/backups/legko-pre-v5-<deploy day>.db` (automatic, like every schema step; never replaced — a second migration
+that day writes `…-2.db`). **The previous build refuses a v5 database** (`Database schema v5 is newer than this build
+(v4)`), so `deploy/deploy.sh rollback` alone crash-loops: downgrade the schema with the **new** image first.
+
+0. **Check what you would roll back to**: `deploy/deploy.sh status`. Downgrade only when `training-app:previous` is a
+   build from **before** this release; if it is already a v5 build, just run `deploy/deploy.sh rollback`.
+1. Downgrade with the app stopped, then roll back:
+
+   ```bash
+   ssh deploy@64.176.75.160
+   cd /opt/training-app
+   docker compose stop app
+   docker compose run --rm --no-deps app node /app/server/cli.js downgrade-schema
+   exit
+   deploy/deploy.sh rollback          # from your machine
+   ```
+
+   `downgrade-schema` on a v5 file saves `backups/legko-pre-down-v5-<Kyiv date>.db` first, then in one transaction
+   drops the four v5 tables and sets `user_version` 4. **Every account stays**, with its days (the ✓ marks and workout
+   types a session wrote stay on the days), weigh-ins, measurements, meals, photos and settings
+   (`settings.stepsGoal` may stay in the JSON; the v4 build ignores it). It prints, per account, how many exercises,
+   workouts, sessions and steps entries it dropped. `--keep` / `--drop-others` are refused on v5 (nothing changed):
+   they belong to the v4 → v3 step, which is a **second** run — only to go back further, to the build before accounts.
+   Run no other CLI command of the new image in between (its account commands refuse a v4 database anyway).
+2. `deploy/deploy.sh rollback` — the previous build starts on the v4 database.
+
+What is lost, and good to know:
+
+- **New-feature data written after the rollback survives only in the snapshot.** While the old build runs, the new
+  app's ops for workouts, sessions and steps are refused by the old server («Сервер відхилив одну зміну») and dropped
+  from the outbox. Everything the four tables held at the downgrade is in `legko-pre-down-v5-<date>.db` only; a later
+  re-upgrade starts with empty workouts and steps (restore that snapshot instead if they must come back, losing what
+  was logged on the old build).
+- **A backup made from an installed app before it updated has no workouts or steps**: the old bundle's
+  «Завантажити резервну копію» builds the file from its own device copy, which drops the new keys. Restoring such a
+  file later (with this or any newer build) replaces her workouts, sessions, own exercises, steps and steps goal with
+  nothing — that is what «Відновити з копії» means. Make the copy from an updated app (or `GET /api/export`) instead.
+- The backup download name stays `legko-<date>.json` (internal name, kept on purpose).
+- **Fallback**: stop the app, restore `backups/legko-pre-v5-<deploy day>.db` (the un-suffixed one) as in
+  [Restore from a backup file](#restore-from-a-backup-file), then `deploy/deploy.sh rollback`. This loses everything
+  logged after the deploy.
+
 ### Rollback after the users release (schema v4)
 
 The users release (accounts, `docs/multi-user.md`) migrates the database to schema **v4** on its first start: new

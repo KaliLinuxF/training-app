@@ -52,6 +52,63 @@ export function downgradeSchemaV3(db: Database, backups: string, date: ISODate):
   return snapshot;
 }
 
+// ── v5 → v4 (docs/workouts-steps-rebrand.md §1.8) ─────────────────────────────────────────────────────────────────
+
+export const DOWNGRADE_V5_FROM = 5;
+
+/** The v5-only tables, children of nothing else (drop order irrelevant beyond that). */
+export const V5_TABLES = ['workout_sessions', 'workouts', 'exercises', 'steps'] as const;
+export type V5Table = (typeof V5_TABLES)[number];
+
+/** Drops exactly what migration v5 added; nothing else changes (days keep `trained` / `types`). */
+export const DOWNGRADE_V5_SQL = `
+  DROP TABLE workout_sessions;
+  DROP TABLE workouts;
+  DROP TABLE exercises;
+  DROP TABLE steps;
+  PRAGMA user_version = 4;
+`;
+
+/** One scoped statement per table (sessions without the tombstones of deleted ones). */
+const V5_COUNT_SQL: Record<V5Table, string> = {
+  workout_sessions: "SELECT COUNT(*) AS n FROM workout_sessions WHERE user_id = ? AND status <> 'deleted'",
+  workouts: 'SELECT COUNT(*) AS n FROM workouts WHERE user_id = ?',
+  exercises: 'SELECT COUNT(*) AS n FROM exercises WHERE user_id = ?',
+  steps: 'SELECT COUNT(*) AS n FROM steps WHERE user_id = ?',
+};
+
+export interface V5Counts {
+  id: string;
+  username: string;
+  counts: Record<V5Table, number>;
+}
+
+export interface DowngradeV5Report {
+  snapshot: string;
+  /** What each account had in the dropped tables (every account, in `users.list()` order). */
+  dropped: V5Counts[];
+}
+
+/**
+ * Schema v5 → v4, for a rollback to the build before workouts and steps: writes
+ * `<backups>/legko-pre-down-v5-<date>.db` first (never replaced: `…-2.db` on a second run that date), then in one
+ * transaction drops the four v5 tables and sets `user_version = 4`. Every account is kept; `settings.stepsGoal` may
+ * stay in the settings JSON (the v4 build ignores it). Throws `DowngradeRefused` unless the database is v5.
+ */
+export function downgradeSchemaV5(db: Database, backups: string, date: ISODate): DowngradeV5Report {
+  refuseUnless(db, DOWNGRADE_V5_FROM);
+  const dropped = createUserRepo(db)
+    .list()
+    .map((user): V5Counts => {
+      const counts = {} as Record<V5Table, number>;
+      for (const table of V5_TABLES) counts[table] = num(db.prepare(V5_COUNT_SQL[table]).get(user.id) ?? { n: 0 }, 'n');
+      return { id: user.id, username: user.username, counts };
+    });
+  const snapshot = writeSnapshotOnce(db, join(backups, preDowngradeBackupName(DOWNGRADE_V5_FROM, date)));
+  transaction(db, () => db.exec(DOWNGRADE_V5_SQL));
+  return { snapshot, dropped };
+}
+
 // ── v4 → v3 (docs/multi-user.md §2.4) ─────────────────────────────────────────────────────────────────────────────
 
 export const DOWNGRADE_V4_FROM = 4;

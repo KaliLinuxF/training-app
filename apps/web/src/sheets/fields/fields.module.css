@@ -37,3 +37,73 @@
 .invalid input {
   border-color: var(--accD);
 }
+
+/* «Кроки»: the input with its unit inside on the right (like the kit's number field). */
+.stepsWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.stepsInput {
+  width: 100%;
+  height: 54px;
+  padding: 0 72px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+  outline: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.stepsInput:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.stepsInput::placeholder {
+  color: var(--faint);
+}
+
+/*
+ * The sheet: a big 34px number (the day's one figure), centred between equal paddings that clear the unit; on a
+ * 320px phone it shrinks to 28px so «100 000» still fits.
+ */
+.stepsBig .stepsInput {
+  height: 72px;
+  padding: 0 72px;
+  font-family: var(--display);
+  font-size: clamp(28px, 9vw, 34px);
+}
+
+.invalid .stepsInput {
+  border-color: var(--accD);
+}
+
+.stepsUnit {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 15px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* −1000 · −500 · +500 · +1000: four equal 44px buttons. */
+.stepsButtons {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stepsButton {
+  min-height: 44px;
+  padding-inline: 4px;
+  font-variant-numeric: tabular-nums;
+}

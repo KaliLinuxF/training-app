@@ -1,0 +1,112 @@
+/* The body map (docs/workouts-steps-rebrand.md §2): tokens only, so the dark theme follows automatically. */
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.map {
+  display: block;
+  overflow: visible;
+}
+
+.thumb {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+
+.md {
+  height: 160px;
+  width: auto;
+  max-width: 100%;
+}
+
+.lg {
+  height: 240px;
+  width: auto;
+  max-width: 100%;
+}
+
+.silhouette {
+  fill: var(--line2);
+  stroke: var(--line3);
+  stroke-width: 1;
+  stroke-linejoin: round;
+}
+
+.region {
+  fill: var(--line);
+  stroke: var(--card);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  transition: fill 150ms ease;
+}
+
+.secondary {
+  fill: var(--accLine);
+}
+
+.primary {
+  fill: var(--acc);
+}
+
+/* The region she just tapped (1 s): a darker outline, so a wrong pick shows at once. */
+.outlined {
+  stroke: var(--accD);
+  stroke-width: 2;
+}
+
+.absLine {
+  fill: none;
+  stroke: var(--card);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.caption {
+  fill: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.interactive {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.legend {
+  padding-top: 0;
+}
+
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.swatchPrimary {
+  background: var(--acc);
+}
+
+.swatchSecondary {
+  background: var(--accLine);
+  box-shadow: inset 0 0 0 1px var(--acc);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .region {
+    transition: none;
+  }
+}

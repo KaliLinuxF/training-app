@@ -116,3 +116,71 @@ describe('an old outbox replayed by this build', () => {
     expect(parseOutbox([{ id: 'a', op: { kind: 'day.meta', date: D, value: {} } }])).toEqual([]);
   });
 });
+
+describe('workouts and steps keys (schema v5) survive the whitelist', () => {
+  const session = {
+    id: 'session00001',
+    date: '2026-10-12',
+    workoutId: null,
+    name: 'Вільне тренування',
+    createdAt: 5,
+    startedAt: null,
+    finishedAt: null,
+    durationSec: 1800,
+    status: 'done' as const,
+    exercises: [],
+    notes: '',
+    rev: 2,
+    deviceId: null,
+  };
+  const exercise = {
+    id: 'ownExercise01',
+    name: 'Степ',
+    kind: 'cardio' as const,
+    primary: ['quads' as const],
+    secondary: [],
+    equipment: 'other' as const,
+    met: 7,
+  };
+
+  it('a payload WITH the new keys keeps them: valid elements only, sessions and steps sorted', () => {
+    const data = normalizeAppData({
+      settings: { ...defaultSettings(), stepsGoal: 8000 },
+      exercises: [exercise, { ...exercise, id: 'lib.plank' }, { ...exercise }],
+      workouts: [{ id: 'workout00001', name: 'Ноги', days: [1], items: [] }, { id: 'bad' }] as never,
+      sessions: [
+        { ...session, id: 'session00002', date: '2026-10-13' },
+        session,
+        { ...session, id: 'session00003', durationSec: -1 },
+      ],
+      steps: [
+        { date: '2026-10-13', steps: 9000 },
+        { date: '2026-10-12', steps: 5000 },
+        { date: '2026-10-11', steps: 0 },
+      ],
+      deletedSessions: ['sessionGone01', 'sessionGone01', 42, 'x'] as never,
+    });
+    expect(data.exercises.map((e) => e.id)).toEqual(['ownExercise01']);
+    expect(data.workouts.map((w) => w.id)).toEqual(['workout00001']);
+    expect(data.sessions.map((s) => s.id)).toEqual(['session00001', 'session00002']);
+    expect(data.steps).toEqual([
+      { date: '2026-10-12', steps: 5000 },
+      { date: '2026-10-13', steps: 9000 },
+    ]);
+    expect(data.deletedSessions).toEqual(['sessionGone01']);
+    expect(data.settings.stepsGoal).toBe(8000);
+  });
+
+  it('a payload WITHOUT them (an old server, an old cache) gets [] and no steps goal', () => {
+    const data = parseCachedData({ days: {}, weights: [], measures: [], foods: [], settings: oldSettings() });
+    expect(data).toMatchObject({ exercises: [], workouts: [], sessions: [], steps: [], deletedSessions: [] });
+    expect(data?.settings.stepsGoal).toBeNull();
+    // Ops on the normalised copy work.
+    const after = applyOps(data!, [
+      { kind: 'steps.put', date: '2026-10-12', steps: 4000 },
+      { kind: 'session.put', value: session },
+    ]);
+    expect(after.steps).toHaveLength(1);
+    expect(after.sessions).toHaveLength(1);
+  });
+});

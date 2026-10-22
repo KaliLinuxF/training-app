@@ -1,0 +1,18 @@
+/* «Розклад: Пн, Ср — Ноги + прес · Пт — Верх тіла» under the period title. */
+.schedule {
+  margin: -6px 0 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* «За цей період тренувань не записано». */
+.empty {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--ink2);
+}

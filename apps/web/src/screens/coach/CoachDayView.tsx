@@ -5,6 +5,7 @@ import { DayNutritionCard } from '@/sheets/record/DayNutritionCard';
 import { ListGroup, ListRow, Pill } from '@/ui';
 import { COACH_COPY } from './copy';
 import { coachDayModel } from './dayViewModel';
+import { CoachSessionGroup } from './WorkoutsPanel';
 import s from './CoachDayView.module.css';
 
 export interface CoachDayViewProps {
@@ -17,8 +18,8 @@ export interface CoachDayViewProps {
 const DASH = '—';
 
 /**
- * One day of a client, read-only (docs/coach-cabinet.md §6.5): the date with its status, Тренування / Вага / Заміри /
- * Нотатки, the day's totals against the client's goals, and every meal with its own Б · Ж · В and photos (served
+ * One day of a client, read-only (docs/coach-cabinet.md §6.5): the date with its status, Тренування / Кроки / Вага /
+ * Заміри / Нотатки, each done session with its exercises (docs/workouts-steps-rebrand.md §3.18), the day's totals against the client's goals, and every meal with its own Б · Ж · В and photos (served
  * through the coach route by the page's `PhotoUrlsProvider`). Static rows only: no chevrons, no toggles, nothing that
  * adds or edits.
  */
@@ -51,6 +52,10 @@ export function CoachDayView({ data, date, today }: CoachDayViewProps) {
           })
         )}
       </ListGroup>
+
+      {day.sessions.map((session) => (
+        <CoachSessionGroup key={session.id} session={session} />
+      ))}
 
       {day.totals && <DayNutritionCard totals={day.totals} />}
 

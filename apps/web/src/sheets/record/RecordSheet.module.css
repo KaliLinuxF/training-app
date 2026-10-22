@@ -20,3 +20,8 @@
     transform: translateY(6px);
   }
 }
+
+/* «Ціль виконано ✓» under the steps input. */
+.reached {
+  color: var(--acc2D);
+}

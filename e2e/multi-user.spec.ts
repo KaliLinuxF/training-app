@@ -105,7 +105,8 @@ test.describe('API isolation between accounts', () => {
 
   let other: TestUser | null = null;
   test.beforeEach(async ({ server, admin, playwright }) => {
-    await server.importData(seedData('demo'));
+    // The demo with training: anna also has workouts, sessions, an own exercise and steps.
+    await server.importData(seedData('training'));
     other = await createUser(playwright, admin);
   });
   test.afterEach(async () => {
@@ -127,6 +128,10 @@ test.describe('API isolation between accounts', () => {
     expect(anna.measures.length).toBeGreaterThan(1);
     expect(anna.foods.length).toBeGreaterThan(0);
     expect(anna.settings.onboarded).toBe(true);
+    expect(anna.workouts.length).toBeGreaterThan(0);
+    expect(anna.sessions.length).toBeGreaterThan(1);
+    expect(anna.exercises.length).toBeGreaterThan(0);
+    expect(anna.steps.length).toBeGreaterThan(1);
 
     // B starts empty: nothing of anna's, default settings.
     expect(await b().api.getData()).toEqual(emptyData());
@@ -146,6 +151,12 @@ test.describe('API isolation between accounts', () => {
     const [dish] = anna.foods;
     if (!firstWeight || !lastWeight || !firstMeasure || !dish) throw new Error('demo records missing');
     const oldestDay = Object.keys(anna.days).sort()[0] ?? TODAY;
+    const [workout] = anna.workouts;
+    const [session, secondSession] = anna.sessions;
+    const [exercise] = anna.exercises;
+    const [firstSteps, secondSteps] = anna.steps;
+    if (!workout || !session || !secondSession || !exercise || !firstSteps || !secondSteps)
+      throw new Error('training records missing');
     const ops: Op[] = [
       { kind: 'day.meta', date: TODAY, value: { trained: true, notes: 'B' } },
       { kind: 'meal.put', date: mealDate, value: { ...plainMeal, text: 'Чужий сніданок', kcal: 111 } },
@@ -156,6 +167,13 @@ test.describe('API isolation between accounts', () => {
       { kind: 'measure.delete', date: firstMeasure.date },
       { kind: 'food.delete', name: dish.name },
       { kind: 'settings.put', value: { ...emptyData().settings, goal: 99, onboarded: true } },
+      // Workouts and steps: anna's ids and dates.
+      { kind: 'workout.delete', id: workout.id },
+      { kind: 'exercise.delete', id: exercise.id },
+      { kind: 'session.delete', id: session.id },
+      { kind: 'session.put', value: { ...secondSession, name: 'Чуже тренування', rev: secondSession.rev + 5 } },
+      { kind: 'steps.delete', date: firstSteps.date },
+      { kind: 'steps.put', date: secondSteps.date, steps: 123 },
     ];
     await expectStatus(await b().api.sendOps(ops), 200);
     expect(await server.getData(), 'anna’s data after B’s ops').toEqual(anna);
@@ -169,6 +187,11 @@ test.describe('API isolation between accounts', () => {
     expect(own.measures).toEqual([]);
     expect(own.foods).toEqual([]);
     expect(own.settings.goal).toBe(99);
+    expect(own.workouts).toEqual([]);
+    expect(own.exercises).toEqual([]);
+    expect(own.sessions.map((x) => [x.id, x.name])).toEqual([[secondSession.id, 'Чуже тренування']]);
+    expect(own.deletedSessions).toEqual([session.id]);
+    expect(own.steps).toEqual([{ date: secondSteps.date, steps: 123 }]);
 
     // B's backup file holds only B's data.
     const exported = await b().api.exportData();

@@ -13,7 +13,7 @@ import { NotificationsCard } from './NotificationsCard';
 import { ReminderCard } from './ReminderCard';
 import type { PushStatusState } from './usePushStatus';
 import { UsersPage } from './users/UsersPage';
-import { WorkoutTypesCard } from './WorkoutTypesCard';
+import { WorkoutsSection } from './WorkoutsSection';
 
 /** What every section body gets from SettingsScreen (the per-device state is lifted there, see D27). */
 export interface SectionBodyProps {
@@ -42,7 +42,10 @@ export const SECTION_BODIES: Readonly<Record<SettingsSectionId, (props: SectionB
       <MacroGoalsCard goals={settings.macroGoals} headingLevel={headingLevel} />
     </>
   ),
-  workouts: ({ settings }) => <WorkoutTypesCard customTypes={settings.customTypes} />,
+  // «Мої тренування», «Бібліотека вправ», then her types under «Мої типи».
+  workouts: ({ settings, headingLevel }) => (
+    <WorkoutsSection customTypes={settings.customTypes} headingLevel={headingLevel} />
+  ),
   meals: ({ settings }) => <MealTypesCard mealTypes={settings.mealTypes} />,
   // In the desktop pane (h3 titles) the pane's own region «Вигляд» names the card.
   appearance: ({ themePref, setThemePref, headingLevel }) => (

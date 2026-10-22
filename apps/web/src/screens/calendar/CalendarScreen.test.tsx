@@ -429,14 +429,14 @@ describe('CalendarScreen', () => {
     }
   });
 
-  it('an empty day offers «Додати» on Їжа, Вага and Заміри', () => {
+  it('an empty day offers «Додати» on Їжа, Кроки, Вага and Заміри', () => {
     renderAt('/calendar?date=2026-10-04');
     const card = dayCard();
     expect(within(card).getByText('Порожньо')).toBeTruthy();
-    for (const name of ['Їжа: додати', 'Вага: додати', 'Заміри: додати', 'Тренування: не відмічено']) {
+    for (const name of ['Їжа: додати', 'Кроки: додати', 'Вага: додати', 'Заміри: додати', 'Тренування: не відмічено']) {
       expect(within(card).getByRole('button', { name })).toBeTruthy();
     }
-    expect(within(card).getAllByText('Додати')).toHaveLength(3);
+    expect(within(card).getAllByText('Додати')).toHaveLength(4);
     expect(within(card).getByText('Ще не відмічено')).toBeTruthy();
     expect(within(card).queryByRole('button', { name: /^Нотатки/ })).toBeNull();
     expect(card.textContent).not.toContain('—');

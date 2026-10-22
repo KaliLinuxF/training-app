@@ -1,4 +1,20 @@
-import { DOW_LONG, dLong, dLongYear, f1, fN, num, ok, weekdayOf, type AppData, type ISODate } from '@legko/shared';
+import {
+  bodyWeightOn,
+  DOW_LONG,
+  dLong,
+  dLongYear,
+  f0,
+  f1,
+  fN,
+  LIMITS,
+  num,
+  ok,
+  stepsKcal,
+  weekdayOf,
+  type AppData,
+  type ISODate,
+} from '@legko/shared';
+import { stepsGoalView } from '@/lib/stats';
 import type { ConfirmOptions } from '@/store/ui';
 import { MEASURE_KEYS, type MeasureTexts } from './validation';
 
@@ -89,4 +105,33 @@ export function sheetDateLabels(date: ISODate, today: ISODate): { date: string; 
     date: dLongYear(date),
     weekday: `${DOW_LONG[weekdayOf(date)]}${date === today ? ' · сьогодні' : ''}`,
   };
+}
+
+/** Steps of the input text («8 400», «8400») as a stored count: null for empty or 0 (that deletes the day's steps). */
+export function stepsCount(text: string): number | null {
+  const digits = text.replace(/[^\d]/g, '');
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+/** The steps sheet's ±500 / ±1000: from empty they start at 0, the result stays within 0…100 000; '' at 0. */
+export function stepSteps(text: string, delta: number): string {
+  const next = Math.min(LIMITS.steps.max, Math.max(0, (stepsCount(text) ?? 0) + delta));
+  return next > 0 ? String(next) : '';
+}
+
+/** The line under the steps input: the goal («Ціль 10 000 — ще 1 600» / «Ціль виконано ✓») or «≈ 280 ккал». */
+export interface StepsHint {
+  text: string;
+  /** The goal is reached (mint). */
+  reached: boolean;
+}
+
+export function stepsHint(data: AppData, date: ISODate, text: string): StepsHint | null {
+  const steps = stepsCount(text);
+  const goal = stepsGoalView(steps, data.settings.stepsGoal ?? null);
+  if (goal) return { text: goal.text, reached: goal.reached };
+  if (steps === null) return null;
+  return { text: `≈ ${f0(stepsKcal(steps, bodyWeightOn(data.weights, date)))} ккал`, reached: false };
 }

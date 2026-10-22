@@ -18,6 +18,9 @@ const TEST_SCRYPT = { N: 1024, r: 8, p: 1 };
 const NOW = Date.UTC(2026, 9, 21, 12, 0);
 const DATE = '2026-10-21';
 
+/** The «current» database of these tests is v4 (the v5 step has its own tests). */
+const migrateTo = (db: Database, version: number): number => migrate(db, MIGRATIONS.slice(0, version));
+
 const fresh = (): Database => new (sqlite().DatabaseSync)(':memory:', { enableForeignKeyConstraints: true });
 
 const ANNA_OPS: Op[] = [
@@ -70,7 +73,7 @@ async function v4WithAnnaAndAdmin(): Promise<{
   db.exec(
     `INSERT INTO sessions (token_hash, created_at, renewed_at, expires_at) VALUES ('${'0'.repeat(64)}', 1, 1, 9e15)`,
   );
-  migrate(db);
+  migrateTo(db, 4);
   const users = createUserRepo(db);
   const anna = LEGACY_OWNER_ID as UserId;
   createDataRepos(db, () => NOW)
@@ -158,7 +161,7 @@ describe('downgrade-schema v4 → v3', () => {
     expect(all(db, 'photos')).toHaveLength(1);
 
     // Re-upgrade (the next v4 deploy): the same identity, hash and sessions.
-    migrate(db);
+    migrateTo(db, 4);
     const users = createUserRepo(db).list();
     expect(users).toHaveLength(1);
     expect(users[0]).toMatchObject({
@@ -181,7 +184,7 @@ describe('downgrade-schema v4 → v3', () => {
   it('her v4 session token still works after the round trip (as a legacy session)', async () => {
     const { db, anna, token } = await v4WithAnnaAndAdmin();
     downgradeSchemaV4(db, dir, DATE, { keep: 'anna' });
-    migrate(db);
+    migrateTo(db, 4);
     const check = createSessionStore(db).check(token, NOW);
     expect(check?.user.id).toBe(anna);
     expect(check?.legacy).toBe(true);
@@ -189,7 +192,7 @@ describe('downgrade-schema v4 → v3', () => {
 
   it('uses the only account without --keep', async () => {
     const db = fresh();
-    migrate(db);
+    migrateTo(db, 4);
     const solo = createUserRepo(db).create({
       username: 'olya',
       role: 'user',
@@ -303,7 +306,7 @@ describe('downgrade-schema v4 → v3', () => {
     const firstBytes = readFileSync(first.snapshot);
 
     // Redeployed and rolled back again the same day: a new copy next to the first, which is unchanged.
-    migrate(db);
+    migrateTo(db, 4);
     const second = downgradeSchemaV4(db, dir, DATE, { keep: 'anna', dropOthers: true });
     expect(second.snapshot).toBe(join(dir, 'legko-pre-down-v4-2026-10-21-2.db'));
     expect(readFileSync(first.snapshot).equals(firstBytes)).toBe(true);
@@ -329,7 +332,7 @@ describe('downgrade-schema v4 → v3', () => {
 
   it('a fresh v4 database without accounts goes down empty', () => {
     const db = fresh();
-    migrate(db);
+    migrateTo(db, 4);
     const report = downgradeSchemaV4(db, dir, DATE);
     expect(report).toMatchObject({ kept: null, dropped: [] });
     expect(schemaVersion(db)).toBe(3);

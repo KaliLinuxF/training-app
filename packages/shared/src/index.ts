@@ -8,3 +8,6 @@ export * from './ops';
 export * from './api';
 export * from './users';
 export * from './coach';
+export * from './exercises';
+export * from './exerciseLibrary';
+export * from './workouts';

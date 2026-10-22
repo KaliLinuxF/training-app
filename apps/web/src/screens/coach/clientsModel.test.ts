@@ -1,5 +1,6 @@
+import type { CoachClientItem } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { client, empty, item, meals, NOW, quiet, steady, stubClients } from './coach.fixtures';
+import { client, empty, item, meals, NOW, quiet, steady, stubClients, training } from './coach.fixtures';
 import {
   buildClientRows,
   DEFAULT_LIST_PARAMS,
@@ -129,9 +130,51 @@ describe('buildClientRows', () => {
     expect(olya.cells.change.long).toMatch(/^за 30 днів /);
     expect(olya.phone.sub).toMatch(/ за 30 днів · /);
   });
+
+  it('shows the steps average of the full days with the goal muted, a faint «—» without steps', () => {
+    const rows = rows7();
+    // sofia (training): 10-07 … 10-13 → 7 200, 9 100, 10 500, 6 400, 8 300 → 8 300; goal 8 000.
+    expect(row(rows, 'sofia').cells.steps).toEqual({
+      text: `8${NB}300`,
+      goal: ` / 8${NB}000`,
+      tone: 'ink',
+      long: `кроків у середньому 8${NB}300 на день за 7 днів, ціль 8${NB}000`,
+    });
+    expect(row(rows, 'sofia').sortValues.steps).toBe(8300);
+    expect(row(rows, 'olya').cells.steps).toEqual({
+      text: '—',
+      goal: '',
+      tone: 'faint',
+      long: 'кроки: за 7 днів не записано',
+    });
+    expect(row(rows, 'olya').sortValues.steps).toBeNull();
+    // The phone sub is unchanged by steps.
+    expect(row(rows, 'sofia').phone.sub).not.toMatch(/крок/i);
+  });
+
+  it('reads an item of an older server (no steps, sessions, schedule or stepsGoal) as no steps', () => {
+    const modern = item(client(4, 'sofia'), training());
+    const { steps: _steps, sessions: _sessions, schedule: _schedule, ...rest } = modern;
+    const { stepsGoal: _goal, ...settings } = modern.settings;
+    const old = { ...rest, settings } as unknown as CoachClientItem;
+    const [r] = buildClientRows([old], NOW, 7);
+    expect(r?.cells.steps).toEqual({ text: '—', goal: '', tone: 'faint', long: 'кроки: за 7 днів не записано' });
+    expect(r?.sortValues.steps).toBeNull();
+    expect(r?.cells.workouts.text).toBe(row(rows7(), 'sofia').cells.workouts.text);
+  });
 });
 
 describe('sorting', () => {
+  it('sorts «Кроки» fewest first, rows without steps last in both directions', () => {
+    const more = training();
+    more.steps = more.steps.map((s) => ({ ...s, steps: s.steps + 2000 }));
+    const rows = buildClientRows([...stubClients(), item(client(7, 'yana'), more)], NOW, 7);
+    expect(names(sortRows(rows, 'steps', 'asc')).slice(0, 2)).toEqual(['sofia', 'yana']);
+    expect(names(sortRows(rows, 'steps', 'desc')).slice(0, 2)).toEqual(['yana', 'sofia']);
+    expect(sortRows(rows, 'steps', 'desc').at(-1)?.sortValues.steps).toBeNull();
+    expect(parseListParams('?sort=steps')).toMatchObject({ sort: 'steps', dir: 'asc' });
+  });
+
   it('starts every column in its most useful direction', () => {
     expect(SORT_FIRST_DIR).toEqual({
       name: 'asc',
@@ -140,6 +183,7 @@ describe('sorting', () => {
       goalPct: 'asc',
       kcal: 'desc',
       workouts: 'asc',
+      steps: 'asc',
       logged: 'asc',
       activity: 'asc',
     });

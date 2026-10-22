@@ -37,6 +37,11 @@ const PER_USER_TABLES = [
   'ai_usage',
   'sessions',
   'password_resets',
+  // schema v5: keys start with user_id (not in GLOBAL_KEY_TABLES)
+  'exercises',
+  'workouts',
+  'workout_sessions',
+  'steps',
 ] as const;
 
 /** Per-user tables whose key does not start with user_id: an upsert / REPLACE on that key can reach another user's row. */

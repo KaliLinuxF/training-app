@@ -1,0 +1,140 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 10px 12px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r20);
+  background: var(--card);
+  transition: box-shadow 150ms ease;
+}
+
+.dragging {
+  z-index: 3;
+  box-shadow: var(--shadow-bar);
+  transition: none;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Only the handle swallows touch scrolling, so the page still scrolls everywhere else. */
+.grip {
+  flex: none;
+  width: 28px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: grab;
+  touch-action: none;
+}
+
+.dragging .grip {
+  cursor: grabbing;
+}
+
+.noThumb {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r12);
+  background: var(--line2);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.summary {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink2);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 36px;
+}
+
+.tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.change {
+  align-self: center;
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 4px 2px 10px;
+}
+
+.fold {
+  align-self: flex-start;
+}
+
+.sets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.set {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--r16);
+  background: var(--paper);
+}
+
+.setHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.setTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
+}

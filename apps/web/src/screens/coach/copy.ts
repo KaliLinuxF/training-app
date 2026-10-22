@@ -8,6 +8,7 @@ import {
   f0,
   f1,
   parse,
+  WEEK_ORDER,
   type AttentionFlag,
   type CoachClient,
   type CoachClientStatus,
@@ -86,17 +87,25 @@ export const COACH_COPY = {
   /** Neutral: an active account with nothing recorded yet and nothing to worry about (younger than 3 days). */
   newClient: 'Новий клієнт',
   noWeighIn: 'Без зважування',
+
+  // workouts (docs/workouts-steps-rebrand.md §3.18)
+  noSchedule: 'Розкладу немає',
+  noSessions: 'За цей період тренувань не записано',
+  skipped: 'Пропущено',
+  noSetsDone: 'Підходи не виконано',
+  record: 'рекорд',
   statusDisabled: 'Вимкнено',
   statusPending: 'Пароль не задано',
 } as const;
 
-export type CoachTab = 'overview' | 'progress' | 'calendar' | 'nutrition';
+export type CoachTab = 'overview' | 'progress' | 'calendar' | 'nutrition' | 'workouts';
 
 export const TAB_LABELS: Readonly<Record<CoachTab, string>> = {
   overview: 'Огляд',
   progress: 'Прогрес',
   calendar: 'Календар',
   nutrition: 'Харчування',
+  workouts: 'Тренування',
 };
 
 /** «7 днів» · «30 днів» (the period switch). */
@@ -142,15 +151,26 @@ export function sortOptionLabel(key: 'attention' | SortKeyCopy): string {
       return 'Тренування';
     case 'logged':
       return 'Записи';
+    case 'steps':
+      return 'Кроки';
     case 'activity':
       return 'Активність';
   }
 }
 
 /** Mirrors `SortKey` of the clients model (kept here so the copy has no model import). */
-type SortKeyCopy = 'name' | 'weight' | 'change' | 'goalPct' | 'kcal' | 'workouts' | 'logged' | 'activity';
+type SortKeyCopy =
+  | 'name'
+  | 'weight'
+  | 'change'
+  | 'goalPct'
+  | 'kcal'
+  | 'workouts'
+  | 'steps'
+  | 'logged'
+  | 'activity';
 
-/** Column headers of the desktop table (8 columns); `sub` is a second header line. */
+/** Column headers of the desktop table (9 columns); `sub` is a second header line. */
 export function columnLabels(p: CoachPeriod): Readonly<Record<SortKeyCopy, { label: string; sub?: string; title?: string }>> {
   return {
     name: { label: 'Клієнт' },
@@ -159,6 +179,7 @@ export function columnLabels(p: CoachPeriod): Readonly<Record<SortKeyCopy, { lab
     goalPct: { label: 'До цілі' },
     kcal: { label: `Ккал · ${p} дн.`, sub: 'Б · Ж · В, г' },
     workouts: { label: 'Тренування', title: rangeWords(p) },
+    steps: { label: 'Кроки', title: 'середнє за день' },
     logged: { label: `Записи · ${p} дн.` },
     activity: { label: 'Активність' },
   };
@@ -169,7 +190,7 @@ export const tableCaption = (p: CoachPeriod): string => `Клієнти · за 
 
 /** The note under the table. */
 export const tableNote = (p: CoachPeriod): string =>
-  `Калорії, Б · Ж · В і записи — за повні дні до сьогодні; тренування — ${
+  `Калорії, Б · Ж · В, кроки і записи — за повні дні до сьогодні; тренування — ${
     p === 7 ? 'з понеділка' : 'за 30 днів'
   }; сигнали — за останні 7 днів.`;
 
@@ -304,9 +325,35 @@ export const KPI = {
   kcal: (goal: number): string => `Ккал · ціль ${f0(goal)}`,
   macros: 'Б · Ж · В',
   workouts: 'Тренування',
+  steps: 'Кроки, сер.',
   logged: 'Записи',
 } as const;
 
+/** « / 10 000» (muted, after a steps average) when a goal is set, else ''. */
+export const stepsGoalSuffix = (goal: number | null): string => (goal === null ? '' : ` / ${f0(goal)}`);
+
+/**
+ * The screen-reader form of a steps average: «кроків у середньому 7 850 на день за 7 днів, ціль 10 000» (the window
+ * is the period's full days, as for kcal), or «кроки: за 7 днів не записано».
+ */
+export function stepsLong(avg: number | null, goal: number | null, p: CoachPeriod): string {
+  if (avg === null) return `кроки: за ${p} днів не записано`;
+  return `кроків у середньому ${f0(avg)} на день за ${p} днів${goal === null ? '' : `, ціль ${f0(goal)}`}`;
+}
+
+/**
+ * «Розклад: Пн, Ср — Ноги + прес · Пт — Верх тіла» (the workouts with days, by their first day Mon…Sun), or
+ * «Розкладу немає».
+ */
+export function scheduleLine(workouts: readonly { name: string; days: readonly number[] }[]): string {
+  const pos = (d: number): number => WEEK_ORDER.indexOf(d as (typeof WEEK_ORDER)[number]);
+  const planned = workouts
+    .filter((w) => w.days.length > 0)
+    .map((w) => ({ name: w.name, days: [...w.days].sort((a, b) => pos(a) - pos(b)) }))
+    .sort((a, b) => pos(a.days[0] ?? 0) - pos(b.days[0] ?? 0));
+  if (planned.length === 0) return COACH_COPY.noSchedule;
+  return `Розклад: ${planned.map((w) => `${w.days.map((d) => DOW_SHORT[d] ?? '').join(', ')} — ${w.name}`).join(' · ')}`;
+}
 /** «Сер. за 7 повних днів». */
 export const avgFullDays = (n: number): string => `Сер. за ${n} повних днів`;
 /** «ціль 90» (a macro column header). */

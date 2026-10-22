@@ -46,3 +46,8 @@
 .desktop .main {
   padding: 32px 36px 48px;
 }
+
+/* Phone pages without the tab bar (session, past-day log, builder): their sticky footer sits at the very bottom. */
+.bare {
+  padding-bottom: 0;
+}

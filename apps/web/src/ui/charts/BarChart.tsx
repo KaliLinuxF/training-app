@@ -1,8 +1,11 @@
 import { cx } from '../internal/cx';
 import s from './BarChart.module.css';
 
-/** `empty` — no data (`--line`), `ok` — within the goal (`--acc2`), `over` — above the goal (`--acc`). */
-export type BarTone = 'empty' | 'ok' | 'over';
+/**
+ * `empty` — no data (`--line`), `ok` — within the goal (`--acc2`), `over` — above the goal (`--acc`), `idle` — a
+ * neutral value without a goal judgement (`--faint`: workouts, volume).
+ */
+export type BarTone = 'empty' | 'ok' | 'over' | 'idle';
 
 /** One bar (lib/stats `KcalBar` is assignable to this). */
 export interface ChartBar {
@@ -15,8 +18,8 @@ export interface ChartBar {
 
 export interface BarChartProps {
   bars: readonly ChartBar[];
-  /** Dashed goal line position, % from the bottom. */
-  goalPct: number;
+  /** Dashed goal line position, % from the bottom; absent / null → no goal line at all. */
+  goalPct?: number | null;
   /** CSS gap between bars: '8px' (week) or '3px' (denser periods). */
   gap?: string;
   /** Show the labels row under the bars (week view). */
@@ -26,7 +29,7 @@ export interface BarChartProps {
   className?: string;
 }
 
-/** Kcal bars with a dashed goal line (height 130). */
+/** Bars with an optional dashed goal line (height 130). */
 export function BarChart({
   bars,
   goalPct,
@@ -38,7 +41,7 @@ export function BarChart({
   return (
     <div className={cx(s.chart, className)} role={ariaLabel ? 'img' : undefined} aria-label={ariaLabel}>
       <div className={s.plot} style={{ gap }} aria-hidden="true">
-        <div className={s.goal} style={{ bottom: `${goalPct}%` }} />
+        {goalPct != null && <div className={s.goal} style={{ bottom: `${goalPct}%` }} />}
         {bars.map((bar, i) => (
           <div key={i} className={cx(s.bar, s[bar.tone])} style={{ height: `${bar.heightPct}%` }} />
         ))}

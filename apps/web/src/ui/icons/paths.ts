@@ -41,7 +41,22 @@ export type IconName =
   | 'link'
   | 'key'
   | 'chevronRight'
-  | 'chevronLeft';
+  | 'chevronLeft'
+  // workouts and steps (own drawings, same grid and stroke)
+  | 'steps'
+  | 'play'
+  | 'timer'
+  | 'search'
+  | 'plus'
+  | 'grip'
+  | 'arrowUp'
+  | 'arrowDown'
+  | 'more'
+  | 'copy'
+  | 'trash'
+  | 'check'
+  | 'trophy'
+  | 'flame';
 
 export const ICON_PATHS: Readonly<Record<IconName, readonly string[]>> = {
   // Tab bar / sidebar
@@ -135,4 +150,52 @@ export const ICON_PATHS: Readonly<Record<IconName, readonly string[]>> = {
   // Navigation
   chevronRight: ['M9.5 6l6 6-6 6'],
   chevronLeft: ['M14.5 6l-6 6 6 6'],
+
+  // Workouts and steps
+  /** Two footprints (sole + heel each), one step ahead of the other. */
+  steps: [
+    'M8.5 4a2.6 4.4 0 0 1 2.6 4.4 2.6 4.4 0 0 1-2.6 4.4 2.6 4.4 0 0 1-2.6-4.4A2.6 4.4 0 0 1 8.5 4Z',
+    'M7 15.2a1.5 1.5 0 0 0 3 0',
+    'M15.5 6.8a2.6 4.4 0 0 1 2.6 4.4 2.6 4.4 0 0 1-2.6 4.4 2.6 4.4 0 0 1-2.6-4.4A2.6 4.4 0 0 1 15.5 6.8Z',
+    'M14 18a1.5 1.5 0 0 0 3 0',
+  ],
+  /** Start: a rounded triangle pointing right. */
+  play: ['M8 5.5v13l10.5-6.5Z'],
+  /** Stopwatch: dial, crown and one hand. */
+  timer: ['M19 13.5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z', 'M10 3.5h4', 'M12 3.5v3', 'M12 13.5V10'],
+  /** Magnifier. */
+  search: ['M16.5 10.5a6 6 0 1 1-12 0 6 6 0 0 1 12 0Z', 'M15 15l5 5'],
+  plus: ['M12 5v14', 'M5 12h14'],
+  /** Drag handle: two columns of three dots. */
+  grip: ['M9 6h.01', 'M15 6h.01', 'M9 12h.01', 'M15 12h.01', 'M9 18h.01', 'M15 18h.01'],
+  arrowUp: ['M12 19V5', 'M6 11l6-6 6 6'],
+  arrowDown: ['M12 5v14', 'M6 13l6 6 6-6'],
+  /** Three dots in a row (a menu). */
+  more: ['M6 12h.01', 'M12 12h.01', 'M18 12h.01'],
+  /** Two overlapping rounded squares. */
+  copy: [
+    'M10.5 9h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 9 18.5v-8A1.5 1.5 0 0 1 10.5 9Z',
+    'M15 9V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15H9',
+  ],
+  /** Bin with a lid, its handle and two ribs. */
+  trash: [
+    'M4.5 7h15',
+    'M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2',
+    'M6.5 7l.9 11.6a1.5 1.5 0 0 0 1.5 1.4h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7',
+    'M10 11v5',
+    'M14 11v5',
+  ],
+  check: ['M5 12.5l4.5 4.5L19 7.5'],
+  /** Cup with two handles on a stem and a base. */
+  trophy: [
+    'M7.5 4.5h9v5a4.5 4.5 0 0 1-9 0Z',
+    'M7.5 6H4.5v1.5a3 3 0 0 0 3 3',
+    'M16.5 6h3v1.5a3 3 0 0 1-3 3',
+    'M12 14v5',
+    'M8.5 19.5h7',
+  ],
+  /** A flame with an inner lick (burned kcal). */
+  flame: [
+    'M12 3.5c.5 3-3.5 4.8-3.5 8.8A5.5 5.5 0 0 0 12 20.5a5.5 5.5 0 0 0 5.5-5.6c0-2.6-1.6-4.2-2.6-5.4-.3 1.5-1 2.4-2 2.9.5-2.8-.2-5.9-.9-8.9Z',
+  ],
 };

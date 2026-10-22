@@ -1,15 +1,16 @@
 /**
  * «Клієнти» — the admin as a coach, read-only (docs/coach-cabinet.md §6, §8.2): the navigation entry (admins only),
  * the list with its cells, pills, filter, period and sort, a client page with its tabs, the read-only day with its
- * photos served through the coach route, the back stamp that brings the list back with its query, and the phone
- * layout without side scroll.
+ * photos served through the coach route, the back stamp that brings the list back with its query, the phone
+ * layout without side scroll, and (docs/workouts-steps-rebrand.md §3.18) the «Кроки» column, the «Тренування» tab
+ * and the day's steps and sessions — all read-only.
  *
  * Rules: anna and admin are never changed; clients are throwaway accounts (`seedClient`) named with a unique tag
  * and disposed in `finally`. The server clock is real while the browser's is fixed, so `createdAt` / `lastSeenAt`
  * wording and the `inactive` flag are never asserted (unit-tested instead). Photos are stubbed with `FOOD_JPEG`.
  */
 import type { Page, Request } from '@playwright/test';
-import { coachEmpty, coachMeals, coachOverKcal, coachQuiet } from './fixtures/coach';
+import { coachEmpty, coachMeals, coachOverKcal, coachQuiet, coachTraining } from './fixtures/coach';
 import { seedClient, stubCoachPhotos } from './support/coachApi';
 import {
   backToClients,
@@ -20,6 +21,7 @@ import {
   clientTabs,
   columnHeader,
   dayView,
+  sessionGroup,
   expectNoSideScroll,
   filterChip,
   navHasClients,
@@ -84,6 +86,15 @@ function watchWrites(page: Page): { coachWrites: string[]; ops: string[]; ownPho
 }
 
 const historyLength = (page: Page): Promise<number> => page.evaluate(() => window.history.length);
+
+/** Nothing in the page content can change her records: no inputs, no write words, no links into her pages. */
+async function expectNothingEditable(page: Page, what: string): Promise<void> {
+  const main = page.getByRole('main');
+  for (const role of ['checkbox', 'switch', 'textbox', 'spinbutton'] as const)
+    await expect(main.getByRole(role), `${what}: ${role}`).toHaveCount(0);
+  await expect(main.getByRole('button', { name: /Додати|Записати|Почати|Продовжити|Зберегти|Видалити|Змінити/ })).toHaveCount(0);
+  await expect(main.locator('a[href^="/workouts"]')).toHaveCount(0);
+}
 const isPhone = (page: Page): boolean => (page.viewportSize()?.width ?? 1280) < 900;
 
 test.describe('who sees «Клієнти»', () => {
@@ -228,7 +239,13 @@ test.describe('the admin as a coach', () => {
       // Header.
       await expect(page.getByText('Лише перегляд')).toBeVisible();
       await expect(page.getByText(/^Ціль 62,0 кг · 1\s700 ккал на день · Б 90 г · Ж 60 г · 3 тренування на тиждень$/)).toBeVisible();
-      await expect(clientTabs(page).getByRole('link')).toHaveText(['Огляд', 'Прогрес', 'Календар', 'Харчування']);
+      await expect(clientTabs(page).getByRole('link')).toHaveText([
+        'Огляд',
+        'Прогрес',
+        'Календар',
+        'Харчування',
+        'Тренування',
+      ]);
       await expect(clientTabs(page).getByRole('link', { name: 'Огляд' })).toHaveAttribute('aria-current', 'page');
       await expect(page.getByRole('region', { name: 'Що варто перевірити' })).toContainText('Тривожних сигналів немає');
       await expect(page.getByRole('region', { name: 'Вага' })).toBeVisible();
@@ -310,6 +327,96 @@ test.describe('the admin as a coach', () => {
     }
   });
 
+  test('workouts and steps: the «Кроки» column, «Тренування» and the day — read-only, no side scroll', async ({
+    page,
+    playwright,
+    admin,
+  }) => {
+    const tag = newTag();
+    const all: TestUser[] = [];
+    try {
+      // coachTraining: steps 7 200 · 9 100 · 10 500 · 6 400 · 8 300 on 8–13 Oct (avg 8 300, goal 8 000), sessions
+      // «Ноги + прес» 12 and 7 Oct, «Верх тіла» 9 Oct. The second client walks 2 000 more every day (avg 10 300).
+      const base = await seedClient(playwright, admin, coachTraining(), `${tag}t`);
+      all.push(base);
+      const moreData = coachTraining();
+      moreData.steps = moreData.steps.map((s) => ({ ...s, steps: s.steps + 2000 }));
+      const more = await seedClient(playwright, admin, moreData, `${tag}s`);
+      all.push(more);
+      const writes = watchWrites(page);
+
+      // The list: «Кроки» sorts fewest first, then the most first.
+      await openClients(page, `?q=${tag}`);
+      await expect(clientsRegion(page).getByRole('link')).toHaveCount(2);
+      await expectNoSideScroll(page, 'clients list with steps');
+      if (isPhone(page)) {
+        await sortBy(page, 'Кроки');
+        await expect(page).toHaveURL(/sort=steps&dir=asc/);
+        await expect(clientsRegion(page).getByRole('link').first()).toHaveAccessibleName(
+          new RegExp(`^${base.creds.username}`),
+        );
+      } else {
+        const steps = columnHeader(page, 'Кроки');
+        await expect(steps).toHaveAttribute('title', 'середнє за день');
+        await expect(clientRow(page, base.creds.username)).toContainText('8 300 / 8 000');
+        await expect(clientRow(page, more.creds.username)).toContainText('10 300 / 8 000');
+        await sortBy(page, 'Кроки');
+        await expect(steps).toHaveAttribute('aria-sort', 'ascending');
+        await expect(page).toHaveURL(/sort=steps&dir=asc/);
+        await expect(clientsRegion(page).getByRole('link').first()).toHaveText(base.creds.username);
+        await sortBy(page, 'Кроки');
+        await expect(steps).toHaveAttribute('aria-sort', 'descending');
+        await expect(clientsRegion(page).getByRole('link').first()).toHaveText(more.creds.username);
+      }
+
+      // «Тренування»: the schedule, the strip, the sessions with their sets and kcal; 30 days shows all three.
+      await openClient(page, base.creds.username);
+      await clientTab(page, 'Тренування');
+      await expect(page).toHaveURL(/tab=workouts/);
+      const week = page.getByRole('region', { name: 'За тиждень', exact: true });
+      await expect(week).toContainText('Розклад: Пн, Ср — Ноги + прес · Пт — Верх тіла');
+      await expect(week).toContainText(/Кроки, сер\.\s*8\s300\s*\/\s8\s000/);
+      const latest = sessionGroup(page, '12 жовтня · Ноги + прес');
+      await expect(latest).toContainText(/48\sхв · ≈\s\d+\sккал/);
+      await expect(latest).toContainText('Присідання зі штангою');
+      await expect(latest).toContainText('3 × 12 · 40 кг');
+      await expect(latest).toContainText('3 × 20 повт.');
+      await expect(sessionGroup(page, '9 жовтня · Верх тіла')).toHaveCount(0);
+      await setDays(page, 30);
+      await expect(page).toHaveURL(/tab=workouts&days=30/);
+      await expect(sessionGroup(page, '9 жовтня · Верх тіла')).toContainText('3 × 45 с');
+      await expect(sessionGroup(page, '9 жовтня · Верх тіла')).toContainText(/40\sхв · ≈\s\d+\sккал/);
+      await expect(sessionGroup(page, '7 жовтня · Ноги + прес')).toBeVisible();
+      await expectNothingEditable(page, 'Тренування');
+      await expectNoSideScroll(page, 'Тренування');
+
+      // «Календар» on 12 Oct: the steps row and the session's exercises under the day.
+      await clientTab(page, 'Календар');
+      await page.getByRole('button', { name: /^12 жовтня/ }).click();
+      const day = dayView(page);
+      await expect(day).toHaveAccessibleName('12 жовтня 2026');
+      await expect(day).toContainText('Кроки');
+      await expect(day).toContainText('6 400');
+      const session = sessionGroup(page, 'Ноги + прес');
+      await expect(session).toContainText('Присідання зі штангою');
+      await expect(session).toContainText('3 × 12 · 40 кг');
+      await expect(session.getByRole('button')).toHaveCount(0);
+      await expect(session.getByRole('link')).toHaveCount(0);
+      await expect(page.getByRole('main').getByText(/додати/i)).toHaveCount(0);
+      await expectNoSideScroll(page, 'day with a session');
+
+      // «Прогрес»: her cards, never a link into her exercise pages.
+      await clientTab(page, 'Прогрес');
+      await expect(page.locator('main a[href^="/workouts"]')).toHaveCount(0);
+      await expectNoSideScroll(page, 'Прогрес with workouts');
+
+      expect(writes.coachWrites).toEqual([]);
+      expect(writes.ops).toEqual([]);
+    } finally {
+      await disposeAll(all);
+    }
+  });
+
   test('the admin’s own id is not a client', async ({ page, admin }) => {
     await page.goto(`/coach/${admin.id}`);
     await expect(page.getByRole('heading', { level: 1, name: 'Клієнта не знайдено' })).toBeVisible();
@@ -357,7 +464,7 @@ test.describe('the admin as a coach', () => {
         await expectNoSideScroll(page, `list at ${width}`);
         await openClient(page, c.meals.creds.username);
         await expectNoSideScroll(page, `overview at ${width}`);
-        for (const tab of ['Прогрес', 'Календар', 'Харчування'] as const) {
+        for (const tab of ['Прогрес', 'Календар', 'Харчування', 'Тренування'] as const) {
           await clientTab(page, tab);
           await expectNoSideScroll(page, `${tab} at ${width}`);
         }

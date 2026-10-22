@@ -65,7 +65,7 @@ describe('sections & routes', () => {
     expect(SECTION_TITLES).toEqual({
       reminders: 'Нагадування',
       goals: 'Цілі',
-      workouts: 'Типи тренувань',
+      workouts: 'Тренування',
       meals: 'Прийоми їжі',
       appearance: 'Вигляд',
       data: 'Дані і копія',

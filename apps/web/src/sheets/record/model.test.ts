@@ -76,6 +76,7 @@ const blank = (patch: Partial<RecordDraft> = {}): RecordDraft => ({
   chest: '',
   waist: '',
   hips: '',
+  steps: '',
   ...patch,
 });
 
@@ -427,7 +428,15 @@ describe('recordOps (per changed field; the day goes as a partial day.meta)', ()
   });
 
   it('sections per mode', () => {
-    const none = { workout: false, food: false, meal: false, notes: false, weight: false, measure: false };
+    const none = {
+      workout: false,
+      food: false,
+      meal: false,
+      notes: false,
+      weight: false,
+      measure: false,
+      steps: false,
+    };
     expect(recordSections('day')).toEqual({
       ...none,
       workout: true,
@@ -435,12 +444,14 @@ describe('recordOps (per changed field; the day goes as a partial day.meta)', ()
       notes: true,
       weight: true,
       measure: true,
+      steps: true,
     });
     expect(recordSections('food')).toEqual({ ...none, food: true });
     expect(recordSections('meal')).toEqual({ ...none, meal: true });
     expect(recordSections('workout')).toEqual({ ...none, workout: true, notes: true });
     expect(recordSections('weight')).toEqual({ ...none, weight: true });
     expect(recordSections('measure')).toEqual({ ...none, measure: true });
+    expect(recordSections('steps')).toEqual({ ...none, steps: true });
   });
 
   it('returns a copy of the sections table', () => {
@@ -452,7 +463,7 @@ describe('recordOps (per changed field; the day goes as a partial day.meta)', ()
 
 describe('modes', () => {
   it('knows the record and capture modes', () => {
-    const record: SheetMode[] = ['day', 'food', 'meal', 'workout', 'weight', 'measure'];
+    const record: SheetMode[] = ['day', 'food', 'meal', 'workout', 'weight', 'measure', 'steps'];
     for (const mode of record) {
       expect(isRecordMode(mode)).toBe(true);
       expect(isCaptureMode(mode)).toBe(true);
@@ -474,6 +485,7 @@ describe('modes', () => {
       workout: 'Тренування',
       weight: 'Контрольне зважування',
       measure: 'Заміри тіла',
+      steps: 'Кроки',
     });
   });
 });

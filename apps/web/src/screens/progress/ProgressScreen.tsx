@@ -2,6 +2,7 @@ import type { AppData, ISODate } from '@legko/shared';
 import { useLocation } from 'wouter';
 import type { Period } from '@/lib/stats';
 import { useToday } from '@/lib/useToday';
+import { exercisePath } from '@/lib/workoutRoutes';
 import { useAppData } from '@/store/data';
 import { ui } from '@/store/ui';
 import { ContentGrid, cx, ScreenHeader } from '@/ui';
@@ -11,6 +12,7 @@ import { NutritionCard } from './NutritionCard';
 import { PeriodBar } from './PeriodBar';
 import { usePeriod } from './period';
 import s from './ProgressScreen.module.css';
+import { StepsCard } from './StepsCard';
 import { SummaryCard } from './SummaryCard';
 import { useProgressModel } from './useProgressModel';
 import { WeightCard } from './WeightCard';
@@ -33,7 +35,7 @@ export interface ProgressViewProps {
 /**
  * The screen for given data and date (separate from the store hooks for tests), with her session-remembered period
  * (`usePeriod`: `?period=` links, sessionStorage). Phone: one column. Desktop: header, period bar and summary
- * across, then Вага | Заміри тіла and Тренування | Харчування.
+ * across, then Вага | Заміри тіла, Тренування | Кроки (once she logged steps) and Харчування.
  */
 export function ProgressView(props: ProgressViewProps) {
   const [period, setPeriod] = usePeriod();
@@ -52,6 +54,11 @@ export interface ProgressBodyProps extends ProgressViewProps {
   dayHref?: (date: ISODate) => string;
   /** Called with that href on a row click. Default `navigate(href)` (push, exactly her screen's behaviour). */
   onOpenDay?: (href: string) => void;
+  /**
+   * Where a «Найчастіші вправи» row leads. Default `exercisePath` (her exercise detail); null = no links. The coach
+   * audience never links, whatever is passed.
+   */
+  exerciseHref?: ((id: string) => string) | null;
   /** Merged into the root ContentGrid's class. */
   className?: string;
 }
@@ -67,12 +74,15 @@ export function ProgressBody({
   audience = 'self',
   dayHref,
   onOpenDay,
+  exerciseHref = exercisePath,
   className,
 }: ProgressBodyProps) {
   const { model, setMeasure, showMoreHistory } = useProgressModel(data, today, period, { audience, dayHref });
   const [, navigate] = useLocation();
   // The coach only reads: no way to record anything for the client, whatever the caller passes.
   const record = audience === 'coach' ? undefined : onRecord;
+  // Nor into her exercise pages (they are her own screens, not the coach's).
+  const exerciseLink = audience === 'coach' ? null : exerciseHref;
   return (
     <ContentGrid className={cx(s.screen, className)}>
       {title !== null && <ScreenHeader title={title} className={s.header} />}
@@ -90,7 +100,12 @@ export function ProgressBody({
         stats={model.workouts.stats}
         typesHeading={model.workouts.typesHeading}
         types={model.workouts.types}
+        charts={model.workouts.charts}
+        burned={model.workouts.burned}
+        exercises={model.workouts.exercises}
+        exerciseHref={exerciseLink}
       />
+      {model.steps && <StepsCard {...model.steps} />}
       <NutritionCard
         {...model.nutrition}
         onShowMore={showMoreHistory}

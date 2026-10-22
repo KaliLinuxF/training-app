@@ -1,6 +1,6 @@
 /**
  * The record sheet — the full «Запис дня», the day's meal list «Їжа», the new-meal editor «Прийом їжі» and the short
- * «Тренування» / «Контрольне зважування» / «Заміри тіла» sheets: draft initialisation, validation and the
+ * «Тренування» / «Контрольне зважування» / «Заміри тіла» / «Кроки» sheets: draft initialisation, validation and the
  * draft → ops mapping. Ports the prototype's `openSheet()` and `save()` (Tracker.dc.html), except that a save only
  * writes what she changed in the blocks the sheet shows (two devices, or two short sheets, must not erase each
  * other's records). The food is never part of this draft: every meal saves on its own in the meal editor
@@ -21,21 +21,22 @@ import {
   type Op,
 } from '@legko/shared';
 import type { SheetMode, SheetPatch } from '@/store/ui';
-import { weightBefore } from '../helpers';
+import { stepsCount, weightBefore } from '../helpers';
 import {
   FIELD_ERRORS,
   kgError,
   MEASURE_KEYS,
   measureError,
+  stepsError,
   textError,
   type MeasureError,
   type MeasureTexts,
 } from '../validation';
 
 /** The sheets with content of their own: the full day, the day's meal list, the new meal and the short sheets. */
-export type RecordMode = Extract<SheetMode, 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure'>;
+export type RecordMode = Extract<SheetMode, 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'steps'>;
 
-const RECORD_MODES: readonly RecordMode[] = ['day', 'food', 'meal', 'workout', 'weight', 'measure'];
+const RECORD_MODES: readonly RecordMode[] = ['day', 'food', 'meal', 'workout', 'weight', 'measure', 'steps'];
 
 export const isRecordMode = (mode: SheetMode): mode is RecordMode => RECORD_MODES.some((m) => m === mode);
 
@@ -54,7 +55,14 @@ export const RECORD_HEADINGS: Readonly<Record<RecordMode, string>> = {
   workout: 'Тренування',
   weight: 'Контрольне зважування',
   measure: 'Заміри тіла',
+  steps: 'Кроки',
 };
+
+/** The stored steps of `date` as the input's text («8400»), '' without any. */
+function stepsTextOf(data: AppData, date: ISODate): string {
+  const entry = (data.steps ?? []).find((x) => x.date === date);
+  return entry ? String(entry.steps) : '';
+}
 
 /** The blocks a sheet shows; it validates and writes only these. */
 export interface RecordSections {
@@ -67,6 +75,8 @@ export interface RecordSections {
   notes: boolean;
   weight: boolean;
   measure: boolean;
+  /** The day's steps (one number, typed by hand). */
+  steps: boolean;
 }
 
 const NONE: Readonly<RecordSections> = {
@@ -76,15 +86,17 @@ const NONE: Readonly<RecordSections> = {
   notes: false,
   weight: false,
   measure: false,
+  steps: false,
 };
 
 const SECTIONS: Readonly<Record<RecordMode, Readonly<RecordSections>>> = {
-  day: { ...NONE, workout: true, food: true, notes: true, weight: true, measure: true },
+  day: { ...NONE, workout: true, food: true, notes: true, weight: true, measure: true, steps: true },
   food: { ...NONE, food: true },
   meal: { ...NONE, meal: true },
   workout: { ...NONE, workout: true, notes: true },
   weight: { ...NONE, weight: true },
   measure: { ...NONE, measure: true },
+  steps: { ...NONE, steps: true },
 };
 
 /** Which blocks a mode shows (prototype `showDay` / `showWeight` / `showMeasure`, plus the short sheets). */
@@ -99,6 +111,8 @@ export interface RecordDraft extends MeasureTexts {
   notes: string;
   /** «65,4» */
   weight: string;
+  /** Digits only («8400»); '' = none. */
+  steps: string;
 }
 
 /**
@@ -123,6 +137,7 @@ export function initRecordDraft(
     chest: str(m?.chest),
     waist: str(m?.waist),
     hips: str(m?.hips),
+    steps: stepsTextOf(data, date),
   };
   if (patch?.trained !== undefined && SECTIONS[mode].workout) draft.trained = patch.trained;
   return draft;
@@ -141,7 +156,7 @@ const DAY_FIELD_SECTION: Readonly<Record<DayField, 'workout' | 'notes'>> = {
   notes: 'notes',
 };
 
-function fieldChanged(a: RecordDraft, b: RecordDraft, key: DayField | 'weight' | MeasureKey): boolean {
+function fieldChanged(a: RecordDraft, b: RecordDraft, key: DayField | 'weight' | 'steps' | MeasureKey): boolean {
   const x = a[key];
   const y = b[key];
   return Array.isArray(x) && Array.isArray(y) ? !sameList(x, y) : x !== y;
@@ -152,6 +167,7 @@ export function isRecordDirty(baseline: RecordDraft, draft: RecordDraft): boolea
   return (
     DAY_FIELDS.some((k) => fieldChanged(baseline, draft, k)) ||
     fieldChanged(baseline, draft, 'weight') ||
+    fieldChanged(baseline, draft, 'steps') ||
     MEASURE_KEYS.some((k) => fieldChanged(baseline, draft, k))
   );
 }
@@ -161,6 +177,7 @@ export interface RecordErrors {
   measure: MeasureError;
   notes?: string;
   types?: string;
+  steps?: string;
 }
 
 /** Validates only the blocks the mode shows, against the limits the server enforces. */
@@ -170,6 +187,7 @@ export function validateRecord(draft: RecordDraft, mode: RecordMode): RecordErro
     weight: show.weight ? kgError(draft.weight) : undefined,
     measure: show.measure ? measureError(draft) : { message: undefined, invalid: [] },
     notes: show.notes ? textError(draft.notes) : undefined,
+    steps: show.steps ? stepsError(draft.steps) : undefined,
     // Types are dropped unless trained, so only then do they count.
     types:
       show.workout && draft.trained === true && draft.types.length > LIMITS.types
@@ -179,7 +197,11 @@ export function validateRecord(draft: RecordDraft, mode: RecordMode): RecordErro
 }
 
 export const hasRecordErrors = (e: RecordErrors): boolean =>
-  e.weight !== undefined || e.measure.message !== undefined || e.notes !== undefined || e.types !== undefined;
+  e.weight !== undefined ||
+  e.measure.message !== undefined ||
+  e.notes !== undefined ||
+  e.types !== undefined ||
+  e.steps !== undefined;
 
 const sameMeasure = (a: MeasureValues, b: MeasureValues): boolean => MEASURE_KEYS.every((k) => a[k] === b[k]);
 
@@ -228,7 +250,7 @@ export function recordOps(save: RecordSave): Op[] {
   const { baseline, draft, data, date, mode } = save;
   const show = recordSections(mode);
   const stored = initRecordDraft(data, date, 'day');
-  const changed = (k: 'weight' | MeasureKey): boolean => fieldChanged(baseline, draft, k);
+  const changed = (k: 'weight' | 'steps' | MeasureKey): boolean => fieldChanged(baseline, draft, k);
   const ops: Op[] = [];
 
   if (show.workout || show.notes) {
@@ -256,6 +278,14 @@ export function recordOps(save: RecordSave): Op[] {
         isEmptyMeasure(value) ? { kind: 'measure.delete', date } : { kind: 'measure.put', date, value },
       );
     }
+  }
+
+  // Steps: only when she changed them (two devices must not erase each other's count); empty or 0 deletes.
+  if (show.steps && changed('steps')) {
+    const before = stepsCount(stored.steps);
+    const steps = stepsCount(draft.steps);
+    if (steps !== before)
+      ops.push(steps === null ? { kind: 'steps.delete', date } : { kind: 'steps.put', date, steps });
   }
   return ops;
 }

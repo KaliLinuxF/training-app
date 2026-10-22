@@ -119,6 +119,49 @@ describe('AppShell on the phone', () => {
   });
 });
 
+describe('AppShell on the full-screen workouts pages (W15)', () => {
+  beforeEach(() => installMatchMedia(() => false));
+
+  it('has no tab bar (nor its bottom padding) on the session, the past-day log and the builder', () => {
+    for (const path of ['/workouts/session/abc', '/workouts/log', '/workouts/new', '/workouts/edit/abc']) {
+      renderShell(path);
+      expect(screen.queryByRole('navigation', { name: 'Основна навігація' }), path).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Записати день' }), path).toBeNull();
+      expect(screen.getByRole('main').className, path).toMatch(/bare/);
+      cleanup();
+    }
+  });
+
+  it('keeps the tab bar everywhere else, also on the other /workouts pages', () => {
+    for (const path of [
+      '/',
+      '/calendar',
+      '/progress',
+      '/settings',
+      '/workouts',
+      '/workouts/library',
+      '/workouts/history',
+    ]) {
+      renderShell(path);
+      expect(screen.getByRole('navigation', { name: 'Основна навігація' }), path).toBeTruthy();
+      expect(screen.getByRole('main').className, path).not.toMatch(/bare/);
+      cleanup();
+    }
+  });
+
+  it('keeps the desktop sidebar there, with «Тренування» marked', () => {
+    installMatchMedia((query) => query === DESKTOP_QUERY);
+    renderShell('/workouts/session/abc');
+    expect(screen.getByRole('link', { name: 'Тренування' }).getAttribute('aria-current')).toBe('true');
+    expect(screen.getByRole('main').className).not.toMatch(/bare/);
+  });
+
+  it('declares the bare main without bottom padding', () => {
+    const css = readCss('shell/AppShell.module.css');
+    expect(cssValue(css, '.bare', 'padding-bottom')).toBe('0');
+  });
+});
+
 describe('AppShell on the desktop', () => {
   beforeEach(() => installMatchMedia((query) => query === DESKTOP_QUERY));
 
@@ -159,11 +202,11 @@ describe('AppShell navigation by role', () => {
 
   afterEach(() => useAuthStore.setState({ status: 'checking', offline: false, user: null }));
 
-  it('keeps a user’s sidebar and tab bar exactly as before', () => {
+  it('keeps a user’s sidebar and tab bar as before; the sidebar adds «Тренування»', () => {
     useAuthStore.setState({ status: 'authed', offline: false, user: account('user') });
     installMatchMedia((query) => query === DESKTOP_QUERY);
     const { memory, rerender } = renderShell();
-    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Налаштування']);
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Тренування', 'Налаштування']);
 
     installMatchMedia(() => false);
     rerender(shellTree(memory));
@@ -171,11 +214,11 @@ describe('AppShell navigation by role', () => {
     expect(screen.queryByRole('link', { name: 'Клієнти' })).toBeNull();
   });
 
-  it('gives an admin five sidebar links and «Клієнти» in place of «Прогрес» on the tab bar', () => {
+  it('gives an admin six sidebar links and «Клієнти» in place of «Прогрес» on the tab bar', () => {
     useAuthStore.setState({ status: 'authed', offline: false, user: account('admin') });
     installMatchMedia((query) => query === DESKTOP_QUERY);
     const { memory, rerender } = renderShell();
-    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Клієнти', 'Налаштування']);
+    expect(navLabels()).toEqual(['Головна', 'Календар', 'Прогрес', 'Тренування', 'Клієнти', 'Налаштування']);
 
     installMatchMedia(() => false);
     rerender(shellTree(memory));
@@ -241,7 +284,9 @@ describe('AppShell navigation by role', () => {
       installMatchMedia(desktop ? (query) => query === DESKTOP_QUERY : () => false);
       for (const path of ['/', '/calendar', '/progress', '/settings']) {
         renderShell(path);
-        expect(screen.getByRole('button', { name: desktop ? '+ Записати день' : 'Записати день' })).toBeTruthy();
+        expect(
+          screen.getByRole('button', { name: desktop ? '+ Записати день' : 'Записати день' }),
+        ).toBeTruthy();
         cleanup();
       }
     }

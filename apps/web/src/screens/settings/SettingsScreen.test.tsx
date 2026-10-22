@@ -147,7 +147,7 @@ describe('SettingsScreen — the list (phone)', () => {
     expect(links.map((a) => plain(a.textContent))).toEqual([
       'Нагадування 3 увімк.',
       'Цілі 60 кг · 1 700 ккал',
-      'Типи тренувань 7 типів',
+      'Тренування 7 типів',
       'Прийоми їжі 4 типи',
       'Вигляд Авто',
       'Дані і копія Синхронізовано',
@@ -264,7 +264,7 @@ describe('SettingsScreen — the list (phone)', () => {
     expect(plain(row('Нагадування').textContent)).toBe('Нагадування 2 увімк.');
     // Macro goals stay out of the «Цілі» summary.
     expect(plain(row('Цілі').textContent)).toBe('Цілі 58,5 кг · 1 650 ккал');
-    expect(plain(row('Типи тренувань').textContent)).toBe('Типи тренувань 8 типів');
+    expect(plain(row('Тренування').textContent)).toBe('Тренування 8 типів');
     expect(plain(row('Прийоми їжі').textContent)).toBe('Прийоми їжі 5 типів');
     expect(plain(row('Вигляд').textContent)).toBe('Вигляд Темна');
 
@@ -329,9 +329,9 @@ describe('SettingsScreen — the list (phone)', () => {
     it('lands on that row after the system back too (the focused title is gone with the sub-page)', async () => {
       window.history.replaceState({ legkoFrom: '/settings' }, '');
       const { memory } = await renderReady('/settings/workouts');
-      expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Типи тренувань' }));
+      expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1, name: 'Тренування' }));
       act(() => memory.navigate('/settings', { replace: true }));
-      expect(document.activeElement).toBe(row('Типи тренувань'));
+      expect(document.activeElement).toBe(row('Тренування'));
     });
 
     it('leaves the focus alone when it did not go away (a keyboard user on the tab bar keeps it)', async () => {
@@ -699,11 +699,20 @@ describe('Прийоми їжі (/settings/meals)', () => {
   });
 });
 
-describe('Типи тренувань (/settings/workouts)', () => {
+describe('Тренування (/settings/workouts)', () => {
+  it('links to «Мої тренування» and «Бібліотека вправ», then her types under «Мої типи»', async () => {
+    await renderReady('/settings/workouts');
+    const mine = screen.getByRole('link', { name: /^Мої тренування/ });
+    expect(mine.getAttribute('href')).toBe('/workouts');
+    expect(screen.getByRole('link', { name: /^Бібліотека вправ/ }).getAttribute('href')).toBe('/workouts/library');
+    expect(screen.getByRole('heading', { level: 2, name: 'Мої типи' })).toBeTruthy();
+    // No workouts yet: no count beside «Мої тренування».
+    expect(plain(mine.textContent)).toBe('Мої тренування');
+  });
+
   it('adds and removes custom workout types', async () => {
     await renderReady('/settings/workouts');
-    const types = region('Мої тренування');
-    expect(types.queryByRole('heading')).toBeNull();
+    const types = region('Мої типи');
     const intro = types.getByText('Типи, які можна вибрати в записі дня');
     const list = types.getByRole('list', { name: 'Типи, які можна вибрати в записі дня' });
     // The intro comes first, the add form last.

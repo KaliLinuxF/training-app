@@ -7,9 +7,9 @@
  */
 import type { Locator, Page } from '@playwright/test';
 import type { AppData } from '../packages/shared/src/index';
-import { demo, meals, MEALS_GOALS, MEALS_TODAY } from './fixtures/data';
+import { demo, e2eSession, meals, MEALS_GOALS, MEALS_TODAY, training } from './fixtures/data';
 import type { App, HomeRow } from './support/app';
-import { TODAY } from './support/env';
+import { FIXED_NOW, TODAY } from './support/env';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
 
@@ -487,6 +487,65 @@ test.describe('home fits one iPhone screen', () => {
     await expect(app.homeRow('Заміри')).toContainText('✓ Сьогодні — Груди 92,5 · Талія 74,5 · Стегна 100,5');
     await expect(app.homeRow('Тренування')).toContainText('Верх тіла, Низ тіла');
     await expectWeekAboveTabBar(app, 'worst case @390×763');
+  });
+
+  test('training seed at 390×763: «Сьогодні: Ноги + прес» with «Почати» beside it', async ({
+    app,
+    page,
+    server,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone layout only');
+    await server.importData(training());
+    await page.setViewportSize(INSTALLED);
+    await app.goto('/');
+    await page.getByRole('button', { name: 'Сховати' }).click();
+    await expect(page.getByText(INSTALL_TITLE)).toHaveCount(0);
+    await expect(app.homeRow('Тренування')).toContainText('Сьогодні: Ноги + прес');
+    await expect(
+      app.region('Сьогодні').getByRole('button', { name: 'Почати тренування «Ноги + прес»' }),
+    ).toBeVisible();
+    await expectWeekAboveTabBar(app, 'training @390×763');
+  });
+
+  test('worst case with workouts at 390×763: a done session with a 40-character name, steps and kcal', async ({
+    app,
+    page,
+    server,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone layout only');
+    const name = 'Ноги, сідниці, прес і трохи кардіо разом';
+    expect(name).toHaveLength(40);
+    await seedWith(server, training, (data) => {
+      data.sessions.push(
+        e2eSession({
+          id: 'e2eDoneToday',
+          name,
+          status: 'done',
+          finishedAt: FIXED_NOW.getTime(),
+          durationSec: 48 * 60,
+          exercises: (e2eSession().exercises ?? []).map((ex) => ({
+            ...ex,
+            sets: ex.sets.map((s) => ({ ...s, done: true })),
+          })),
+        }),
+      );
+      data.steps.push({ date: TODAY, steps: 12345 });
+      Object.assign(todayEntry(data), { trained: true, types: ['Низ тіла'] });
+    });
+    await page.setViewportSize(INSTALLED);
+    await app.goto('/');
+    await page.getByRole('button', { name: 'Сховати' }).click();
+    await expect(page.getByText(INSTALL_TITLE)).toHaveCount(0);
+    const row = app.homeRow('Тренування');
+    await expect(row).toHaveAccessibleName(
+      new RegExp(`^Тренування: ${name}\\. 12 345 кроків\\. Спалено \\d+ ккал$`),
+    );
+    await expect(app.region('Сьогодні').getByText('Тренування записано')).toHaveCount(1);
+    await expect(app.trainingToggle('Було')).toHaveCount(0);
+    // The sub clamps at two lines: the row grows by one line at most.
+    const box = await boxOf(row, 'Тренування row');
+    expect(box.height).toBeLessThanOrEqual(84);
+    await expectWeekAboveTabBar(app, 'workouts worst case @390×763');
   });
 
   test('demo data at 390×844 with the install hint visible', async ({ app, page }, info) => {

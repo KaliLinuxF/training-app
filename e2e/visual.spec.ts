@@ -39,9 +39,11 @@ import {
   showFilter,
 } from './support/coachUi';
 import { BASE_URL, FIXED_NOW, TODAY } from './support/env';
+import { exerciseList, isDesktopLayout, openLibrary, openNewExercise } from './support/exercises';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE, PHOTO_ID } from './support/food';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
+import { confirm, footerConfirm, pageTitle, restBar } from './support/workouts';
 
 const OUT = fileURLToPath(new URL('./__screenshots__/', import.meta.url));
 
@@ -331,6 +333,43 @@ const tokenColor = (page: Page, token: string): Promise<string> =>
     probe.remove();
     return color;
   }, token);
+
+/**
+ * The layout rules the shots must keep (SPEC §2): no sideways scroll, every input ≥ 16px (no zoom on focus) and, on
+ * the phone, each of `targets` reaches 44×44 where a finger lands (probed with `elementFromPoint` from its centre, so
+ * `::after` extensions count and neighbours on top do not).
+ */
+async function expectLayout(page: Page, what: string, targets: readonly Locator[] = []): Promise<void> {
+  await expectNoSideScroll(page, what);
+  const small = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('input, textarea, select')]
+      .filter((el) => el.getBoundingClientRect().width > 1 && (el as HTMLInputElement).type !== 'file')
+      .filter((el) => parseFloat(getComputedStyle(el).fontSize) < 16)
+      .map((el) => el.getAttribute('aria-label') ?? el.getAttribute('name') ?? el.outerHTML.slice(0, 60)),
+  );
+  expect(small, `${what}: inputs below 16px`).toEqual([]);
+  if ((page.viewportSize()?.width ?? 1280) >= 900) return;
+  for (const target of targets) {
+    await target.scrollIntoViewIfNeeded();
+    const [w, h] = await target.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const hits = (x: number, y: number) => {
+        const t = document.elementFromPoint(x, y);
+        return !!t && (t === el || el.contains(t));
+      };
+      const reach = (dx: number, dy: number) => {
+        let n = 0;
+        while (n < 30 && hits(cx + dx * (n + 1), cy + dy * (n + 1))) n++;
+        return n;
+      };
+      return [reach(-1, 0) + reach(1, 0) + 1, reach(0, -1) + reach(0, 1) + 1];
+    });
+    const name = (await target.getAttribute('aria-label')) ?? (await target.textContent())?.trim() ?? '';
+    expect(Math.min(w, h), `${what}: «${name}» hit area ${w}×${h}`).toBeGreaterThanOrEqual(44);
+  }
+}
 
 /**
  * «Клієнти» with the stub roster of e2e/fixtures/coach.ts (olya, marta, ivan, sofia, taras, petro; relative to
@@ -813,6 +852,168 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await settleAtTop(page);
         await tallShot(page, info, '76-coach-empty');
       });
+
+      test('a client’s «Тренування» (30 days) and the «Кроки» column', async ({ page, admin }, info) => {
+        await stubCoach(page, admin);
+        if (info.project.name === 'desktop') {
+          await openClients(page);
+          await expect(clientRow(page, 'sofia')).toContainText(/8\s300\s*\/\s*8\s000/);
+        }
+        await page.goto(`/coach/${COACH_STUB_IDS.sofia}?tab=workouts&days=30`);
+        await expect(page.getByRole('heading', { level: 1, name: 'sofia', exact: true })).toBeVisible();
+        await expect(
+          page.getByRole('region', { name: '12 жовтня · Ноги + прес', exact: true }),
+        ).toContainText('Присідання зі штангою');
+        await expectLayout(page, 'coach «Тренування»');
+        await settleAtTop(page);
+        await tallShot(page, info, '79-coach-workouts');
+      });
+    });
+
+    test.describe('workouts and steps', () => {
+      test.use({ seed: 'training' });
+
+      test('library, exercise, editor, «Мої тренування», builder, session, summary', async ({
+        app,
+        page,
+      }, info) => {
+        const phone = info.project.name === 'iphone';
+        const noTabBar = async () => {
+          if (phone) await expect(app.nav).toHaveCount(0);
+        };
+
+        // «Вправи»: the list (phone) / the list with the squat in a pane next to it (desktop, two columns).
+        await openLibrary(page);
+        await expect(exerciseList(page).getByRole('link').first()).toBeVisible();
+        await expectLayout(page, '«Вправи»', [page.getByRole('searchbox', { name: 'Пошук вправи' })]);
+        await shot(page, info, '100-workouts-library', true);
+        await openLibrary(page, '/workouts/library/lib.back-squat');
+        await expect(page.getByRole('img', { name: /^Основні мʼязи: квадрицепс, сідниці/ })).toBeVisible();
+        if (isDesktopLayout(page)) {
+          const list = await exerciseList(page).boundingBox();
+          const pane = await page
+            .getByRole('region', { name: 'Присідання зі штангою', exact: true })
+            .boundingBox();
+          if (!list || !pane) throw new Error('the library and its pane are rendered');
+          expect(pane.x, 'the pane is right of the list').toBeGreaterThanOrEqual(list.x + list.width - 1);
+        }
+        await expectLayout(page, 'exercise');
+        await settleAtTop(page);
+        await tallShot(page, info, '101-exercise-detail');
+
+        await openLibrary(page);
+        const editor = await openNewExercise(page, page);
+        await editor
+          .getByRole('group', { name: 'Мʼязи' })
+          .getByRole('button', { name: 'Литки', exact: true })
+          .click();
+        await expectLayout(page, '«Нова вправа»', [
+          editor.getByRole('button', { name: 'Литки · основний', exact: true }),
+          editor.getByRole('radio', { name: 'Кардіо', exact: true }),
+        ]);
+        await shot(page, info, '102-sheet-exercise-editor');
+        await editor.getByRole('button', { name: 'Закрити' }).click();
+        await app.expectSheetClosed();
+
+        // «Мої тренування» and the builder with the squat's card open (no tab bar on the builder).
+        await page.goto('/workouts');
+        await expect(pageTitle(page, 'Мої тренування')).toBeVisible();
+        await expectLayout(page, '«Мої тренування»', [
+          page.getByRole('button', { name: 'Почати тренування «Ноги + прес»', exact: true }),
+        ]);
+        await shot(page, info, '103-workouts', true);
+        await page.goto('/workouts/edit/demoWorkoutLegs');
+        await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+        await noTabBar();
+        await page.getByRole('button', { name: 'Змінити: Присідання зі штангою', exact: true }).click();
+        await expectLayout(page, 'builder', [
+          page.getByRole('button', { name: 'Вниз: Присідання зі штангою', exact: true }),
+          page.getByRole('button', { name: 'Вага: більше', exact: true }),
+          page.getByRole('button', { name: 'Дії: Скручування', exact: true }),
+        ]);
+        await settleAtTop(page);
+        await tallShot(page, info, '104-builder');
+
+        // The live session from Home: one set done, the rest bar above the footer (no tab bar).
+        await app.goto('/');
+        await app
+          .region('Сьогодні')
+          .getByRole('button', { name: 'Почати тренування «Ноги + прес»', exact: true })
+          .click();
+        await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+        await noTabBar();
+        await footerConfirm(page).click();
+        await expect(restBar(page)).toBeVisible();
+        await expectLayout(page, 'session', [
+          footerConfirm(page),
+          page.getByRole('button', { name: 'Підхід 1 виконано', exact: true }),
+          restBar(page).getByRole('button', { name: 'Пропустити', exact: true }),
+        ]);
+        await settleAtTop(page);
+        await shot(page, info, '105-session');
+
+        // Finish (the rest is not done: it asks) → the summary.
+        await page.getByRole('button', { name: 'Завершити', exact: true }).click();
+        await confirm(page, 'Завершити тренування?', 'Завершити');
+        await expect(page.getByRole('status').filter({ hasText: '✓ Тренування збережено' })).toBeVisible();
+        await expectLayout(page, 'summary', [page.getByRole('button', { name: 'Готово', exact: true })]);
+        await settleAtTop(page);
+        await tallShot(page, info, '106-session-summary');
+      });
+
+      test('steps sheet, Home with a session and steps, the calendar day, the Progress cards', async ({
+        app,
+        page,
+      }, info) => {
+        // A session done today (finished right away from Home), then the steps sheet.
+        await app.goto('/');
+        await app
+          .region('Сьогодні')
+          .getByRole('button', { name: 'Почати тренування «Ноги + прес»', exact: true })
+          .click();
+        await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+        for (let i = 0; i < 3; i++) await footerConfirm(page).click();
+        await page.clock.fastForward('40:00');
+        await page.getByRole('button', { name: 'Завершити', exact: true }).click();
+        await confirm(page, 'Завершити тренування?', 'Завершити');
+        await expect(page.getByRole('status').filter({ hasText: '✓ Тренування збережено' })).toBeVisible();
+
+        await app.goto('/');
+        const steps = await app.record('Кроки');
+        await steps.getByRole('textbox', { name: 'Кроки за день' }).fill('8400');
+        await expect(steps.getByText('Ціль виконано ✓')).toBeVisible();
+        await expectLayout(page, 'steps sheet', [
+          steps.getByRole('button', { name: 'Плюс 500 кроків', exact: true }),
+          steps.getByRole('button', { name: 'Мінус 1000 кроків', exact: true }),
+        ]);
+        await shot(page, info, '107-sheet-steps');
+        await app.save(steps);
+        await expect(app.homeRow('Тренування')).toContainText('8 400 кроків');
+        await expect(app.homeRow('Тренування')).toContainText(/спалено\s\d+\sккал/);
+        await expectLayout(page, 'Home with a session and steps', [app.homeRow('Тренування')]);
+        // The «Збережено» pill would cover the greeting.
+        await expect(app.toast('Збережено')).toBeHidden({ timeout: 10_000 });
+        await shot(page, info, '108-home-session-steps', true);
+
+        await app.go('Календар');
+        const day = app.region('14 жовтня 2026');
+        await expect(day).toContainText(/Разом спалено ≈\s\d+\sккал/);
+        await expect(day.getByRole('button', { name: /^Кроки: 8\s400/ })).toBeVisible();
+        await scrollToTop(page, day);
+        await expectLayout(page, 'calendar day', [day.getByRole('button', { name: /^Кроки/ })]);
+        await shot(page, info, '109-calendar-day-workout');
+
+        await app.go('Прогрес');
+        const workouts = page.getByRole('region', { name: 'Тренування', exact: true });
+        await expect(workouts).toContainText('Найчастіші вправи');
+        await scrollToTop(page, workouts, 120);
+        await expectLayout(page, 'Progress «Тренування»');
+        await shot(page, info, '110-progress-workouts');
+        const stepsCard = page.getByRole('region', { name: 'Кроки', exact: true });
+        await expect(stepsCard.getByRole('img', { name: /^Кроки/ })).toBeVisible();
+        await scrollToTop(page, stepsCard, 120);
+        await shot(page, info, '111-progress-steps');
+      });
     });
 
     test('screens', async ({ app, page }, info) => {
@@ -849,7 +1050,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, info, '42-settings-reminders', true);
       await app.gotoSettings('Цілі');
       await shot(page, info, '43-settings-goals', true);
-      await app.gotoSettings('Типи тренувань');
+      await app.gotoSettings('Тренування');
       await shot(page, info, '44-settings-workouts', true);
       await app.gotoSettings('Вигляд');
       await shot(page, info, '45-settings-appearance', true);

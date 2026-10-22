@@ -14,18 +14,33 @@
  * Implementation: `state.ts` (zustand), `cache.ts` (IndexedDB), `sync.ts` (outbox + server).
  */
 import {
+  activeSession,
+  isLiveSession,
+  LIMITS,
+  MAX_SESSION_SEC,
+  mergeTypes,
+  newSessionFromWorkout,
   normalizeMeal,
+  normalizeSession,
   opSchema,
+  OWN_ID_RE,
   reduceDay,
+  sessionPutBlocked,
+  sessionWorkoutTypes,
+  WEEK_ORDER,
   type AppData,
   type DayEntry,
   type DayMeta,
+  type Exercise,
   type FoodUse,
   type ISODate,
   type Meal,
   type MeasureValues,
   type Op,
   type Settings,
+  type Weekday,
+  type Workout,
+  type WorkoutSession,
 } from '@legko/shared';
 import { useDataStore, type SyncState } from './state';
 import { commitOps, importAll } from './sync';
@@ -74,6 +89,59 @@ export function newMealId(): string {
     crypto.getRandomValues(bytes);
   else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
   return Array.from(bytes, (b) => MEAL_ID_ALPHABET[b & 63] ?? 'A').join('');
+}
+
+/** A new id for her exercises, workouts, sessions and item keys: same alphabet and length as `newMealId`. */
+export const newId = (): string => newMealId();
+
+const DEVICE_ID_KEY = 'legko.deviceId';
+let memoryDeviceId: string | null = null;
+
+/**
+ * This device's id (W4: the one device that writes a live session). Kept in `localStorage['legko.deviceId']`; where
+ * storage is unavailable (private mode, blocked site data) a per-tab id in memory.
+ */
+export function deviceId(): string {
+  try {
+    const stored = localStorage.getItem(DEVICE_ID_KEY);
+    if (stored && OWN_ID_RE.test(stored)) return stored;
+    const id = newId();
+    localStorage.setItem(DEVICE_ID_KEY, id);
+    return id;
+  } catch {
+    memoryDeviceId ??= newId();
+    return memoryDeviceId;
+  }
+}
+
+/** Plan days (`rem.workout.days`) plus `days`, Monday-first; null when nothing is added. */
+function planWith(settings: Settings, days: readonly Weekday[]): Weekday[] | null {
+  const plan = settings.rem.workout.days;
+  if (days.every((d) => plan.includes(d))) return null;
+  return WEEK_ORDER.filter((d) => plan.includes(d) || days.includes(d)) as Weekday[];
+}
+
+/** Whether the reducer would store this put (false: a no-op by W13 or the 10-per-day cap). An invalid value → true: commit() refuses it and says so. */
+function wouldStore(value: WorkoutSession): boolean {
+  const parsed = opSchema.safeParse({ kind: 'session.put', value });
+  if (!parsed.success || parsed.data.kind !== 'session.put') return true;
+  const data = getAppData();
+  const v = normalizeSession(parsed.data.value);
+  const stored = data.sessions.find((s) => s.id === v.id);
+  const onDate = data.sessions.filter((s) => s.date === v.date).length;
+  return sessionPutBlocked(v, stored, data.deletedSessions.includes(v.id), onDate) === null;
+}
+
+const findSession = (id: string): WorkoutSession | undefined => getAppData().sessions.find((s) => s.id === id);
+
+/** `day.meta` marking `date` trained with the session's derived types merged into hers. */
+function trainedMeta(session: WorkoutSession): Op {
+  const day = getAppData().days[session.date];
+  return {
+    kind: 'day.meta',
+    date: session.date,
+    value: { trained: true, types: mergeTypes(day, sessionWorkoutTypes(session)) },
+  };
 }
 
 /** Only the keys that are set: `day.meta` applies exactly what it carries. */
@@ -141,6 +209,120 @@ export const dataActions = {
   },
   updateSettings(update: (s: Settings) => Settings): boolean {
     return commit({ kind: 'settings.put', value: update(getAppData().settings) });
+  },
+
+  // ---- workouts and steps (docs/workouts-steps-rebrand.md §1.3.1) -------------------------------
+
+  /** Her own exercise (upsert). `false` when invalid, or a new one beyond 300. */
+  saveExercise(exercise: Exercise): boolean {
+    const own = getAppData().exercises;
+    if (!own.some((e) => e.id === exercise.id) && own.length >= LIMITS.customExercises) return false;
+    return commit({ kind: 'exercise.put', value: exercise });
+  },
+  /** Removes her exercise and, in the same commit, from every workout that used it. */
+  deleteExercise(id: string): boolean {
+    const affected = getAppData()
+      .workouts.filter((w) => w.items.some((i) => i.exerciseId === id))
+      .map((w): Op => ({ kind: 'workout.put', value: { ...w, items: w.items.filter((i) => i.exerciseId !== id) } }));
+    return commit({ kind: 'exercise.delete', id }, ...affected);
+  },
+  /**
+   * Saves a workout (upsert, keeps its place). Days not in the plan yet are added to it (`settings.put` with
+   * `rem.workout.days` = the union, W6); removing days never removes plan days. `false` when invalid or a new 51st.
+   */
+  saveWorkout(workout: Workout): boolean {
+    const data = getAppData();
+    if (!data.workouts.some((w) => w.id === workout.id) && data.workouts.length >= LIMITS.workouts) return false;
+    const ops: Op[] = [{ kind: 'workout.put', value: workout }];
+    const plan = planWith(data.settings, workout.days);
+    if (plan) {
+      const s = data.settings;
+      ops.push({ kind: 'settings.put', value: { ...s, rem: { ...s.rem, workout: { ...s.rem.workout, days: plan } } } });
+    }
+    return commit(...ops);
+  },
+  /** Deletes a workout (plan days and past sessions stay). */
+  deleteWorkout(id: string): boolean {
+    return commit({ kind: 'workout.delete', id });
+  },
+  /**
+   * Starts a live session of `workoutId` (null = «Вільне тренування») on `date`, prefilled from last time. When a
+   * live session already exists (any date, W14) returns ITS id and commits nothing (the UI asks, §3.5). Null when
+   * refused (unknown workout, invalid, the day already has 10 sessions).
+   */
+  startSession(date: ISODate, workoutId: string | null, now: number = Date.now()): string | null {
+    const data = getAppData();
+    const live = activeSession(data, now);
+    if (live) return live.id;
+    const workout = workoutId === null ? null : data.workouts.find((w) => w.id === workoutId);
+    if (workout === undefined) return null;
+    const session: WorkoutSession = {
+      ...newSessionFromWorkout({ data, workout, date, id: newId(), now, newKey: newId, status: 'active' }),
+      rev: 0,
+      deviceId: deviceId(),
+    };
+    if (!wouldStore(session)) return null;
+    return commit({ kind: 'session.put', value: session }) ? session.id : null;
+  },
+  /** A past-day log, NOT committed: status done, every prefilled set done, no start or finish time. */
+  draftSession(date: ISODate, workoutId: string | null, now: number = Date.now()): WorkoutSession {
+    const data = getAppData();
+    const workout = workoutId === null ? null : (data.workouts.find((w) => w.id === workoutId) ?? null);
+    return newSessionFromWorkout({ data, workout, date, id: newId(), now, newKey: newId, status: 'done' });
+  },
+  /** A live edit (a confirmed set, an added exercise…): `session.put` with the stored rev + 1. */
+  saveSession(session: WorkoutSession): boolean {
+    const value = { ...session, rev: (findSession(session.id)?.rev ?? session.rev) + 1 };
+    if (!wouldStore(value)) return false;
+    return commit({ kind: 'session.put', value });
+  },
+  /** «Продовжити тут» (W4): this device becomes the live session's writer. */
+  takeOverSession(id: string): boolean {
+    const stored = findSession(id);
+    if (!stored || stored.status !== 'active') return false;
+    return commit({ kind: 'session.put', value: { ...stored, deviceId: deviceId(), rev: stored.rev + 1 } });
+  },
+  /**
+   * Finishes a session: done, finished now, no writer, `durationSec` = elapsed (clamped to 0…6 h) while live, null
+   * when stale (editable later); in the same commit the day is marked trained with the derived types merged in.
+   */
+  finishSession(id: string, now: number = Date.now()): boolean {
+    const stored = findSession(id);
+    if (!stored || stored.status !== 'active') return false;
+    const durationSec =
+      isLiveSession(stored, now) && stored.startedAt !== null
+        ? Math.min(MAX_SESSION_SEC, Math.max(0, Math.round((now - stored.startedAt) / 1000)))
+        : null;
+    const done: WorkoutSession = {
+      ...stored,
+      status: 'done',
+      finishedAt: Math.max(0, Math.round(now)),
+      durationSec,
+      deviceId: null,
+      rev: stored.rev + 1,
+    };
+    return commit({ kind: 'session.put', value: done }, trainedMeta(done));
+  },
+  /** A past-day log or an edit of a done session: `session.put` (rev + 1) + the day marked trained. */
+  saveDoneSession(session: WorkoutSession): boolean {
+    const value: WorkoutSession = {
+      ...session,
+      status: 'done',
+      deviceId: null,
+      rev: (findSession(session.id)?.rev ?? session.rev) + 1,
+    };
+    if (!wouldStore(value)) return false;
+    return commit({ kind: 'session.put', value }, trainedMeta(value));
+  },
+  /** Deletes a session (a tombstone keeps it deleted); the day's ✓ stays. */
+  deleteSession(id: string): boolean {
+    return commit({ kind: 'session.delete', id });
+  },
+  /** Steps of `date`; null or 0 removes them. */
+  setSteps(date: ISODate, steps: number | null): boolean {
+    return commit(
+      steps === null || steps === 0 ? { kind: 'steps.delete', date } : { kind: 'steps.put', date, steps },
+    );
   },
   /**
    * Replaces everything (backup restore): flushes pending changes, uploads the backup,

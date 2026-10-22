@@ -33,7 +33,7 @@ export function periodMeta(period: Period): PeriodMeta {
 }
 
 /**
- * The earliest date anything was recorded (day entry, weigh-in or measurement),
+ * The earliest date anything was recorded (day entry, weigh-in, measurement or steps),
  * never later than `today` — the start of the «Весь час» period.
  */
 export function earliestDate(data: AppData, today: ISODate): ISODate {
@@ -41,6 +41,7 @@ export function earliestDate(data: AppData, today: ISODate): ISODate {
     sortedDayKeys(data)[0],
     byDateAsc(data.weights)[0]?.date,
     byDateAsc(data.measures)[0]?.date,
+    byDateAsc(data.steps ?? [])[0]?.date,
     today,
   ];
   return candidates.reduce<ISODate>((min, d) => (d !== undefined && d < min ? d : min), today);

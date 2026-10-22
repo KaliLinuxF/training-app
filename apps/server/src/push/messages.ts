@@ -29,6 +29,19 @@ export const REMINDER_MESSAGES: Readonly<Record<ReminderKind, PushMessage>> = {
   },
 };
 
+/**
+ * The workout reminder naming today's scheduled workout(s) (docs/workouts-steps-rebrand.md §1.8): none → the
+ * usual text; one → «Сьогодні: Ноги + прес»; two → «Сьогодні: Ноги + прес, Кардіо»; more → the first two + « і ще N».
+ * The url stays DEEP_LINKS.workout (old service workers open it as before).
+ */
+export function workoutReminder(names: readonly string[]): PushMessage {
+  const base = REMINDER_MESSAGES.workout;
+  if (names.length === 0) return { ...base };
+  const shown = names.slice(0, 2).join(', ');
+  const rest = names.length - 2;
+  return { ...base, body: `Сьогодні: ${shown}${rest > 0 ? ` і ще ${rest}` : ''}` };
+}
+
 /** Opens «Налаштування → Нагадування», where the «Тест» button is. */
 export const TEST_MESSAGE: Readonly<PushMessage> = {
   title: 'Home Fit',

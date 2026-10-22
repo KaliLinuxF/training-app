@@ -93,9 +93,12 @@ describe('SortSelect (phone)', () => {
       'До цілі',
       'Калорії',
       'Тренування',
+      'Кроки',
       'Записи',
       'Активність',
     ]);
+    fireEvent.change(select, { target: { value: 'steps' } });
+    expect(onSortChange).toHaveBeenLastCalledWith({ sort: 'steps', dir: 'asc' });
     fireEvent.change(select, { target: { value: 'weight' } });
     expect(onSortChange).toHaveBeenLastCalledWith({ sort: 'weight', dir: 'desc' });
     fireEvent.change(select, { target: { value: 'goalPct' } });

@@ -1,7 +1,7 @@
 import type { IconName } from '@/ui';
 
 export interface NavItem {
-  href: '/' | '/calendar' | '/progress' | '/coach' | '/settings';
+  href: '/' | '/calendar' | '/progress' | '/workouts' | '/coach' | '/settings';
   label: string;
   /** Tab-bar glyph (kit `Icon`). */
   icon: IconName;
@@ -18,12 +18,24 @@ export const NAV_ITEMS: readonly NavItem[] = [
 /** The coach's read-only cabinet (admins only, docs/coach-cabinet.md §5.2). */
 export const COACH_NAV_ITEM: NavItem = { href: '/coach', label: 'Клієнти', icon: 'users' };
 
-/** Admin sidebar: the four sections with «Клієнти» before «Налаштування». */
-const ADMIN_SIDEBAR: readonly NavItem[] = [
+/**
+ * «Мої тренування» (`/workouts`): a desktop sidebar link only (W11) — the phone tab bar keeps its four tabs + «+», and
+ * reaches the workouts from Home, the «Тренування» sheet and Settings.
+ */
+export const WORKOUTS_NAV_ITEM: NavItem = { href: '/workouts', label: 'Тренування', icon: 'workout' };
+
+/** The sections before «Налаштування», then `extra`, then «Налаштування». */
+const withBeforeSettings = (...extra: NavItem[]): readonly NavItem[] => [
   ...NAV_ITEMS.filter((item) => item.href !== '/settings'),
-  COACH_NAV_ITEM,
+  ...extra,
   ...NAV_ITEMS.filter((item) => item.href === '/settings'),
 ];
+
+/** Sidebar: the four sections with «Тренування» after «Прогрес». */
+const USER_SIDEBAR: readonly NavItem[] = withBeforeSettings(WORKOUTS_NAV_ITEM);
+
+/** Admin sidebar: «Тренування» after «Прогрес», then «Клієнти», before «Налаштування». */
+const ADMIN_SIDEBAR: readonly NavItem[] = withBeforeSettings(WORKOUTS_NAV_ITEM, COACH_NAV_ITEM);
 
 /** Admin tab bar: «Клієнти» in place of «Прогрес» (her own Progress stays one tap away from Home's week row). */
 const ADMIN_TABBAR: readonly NavItem[] = NAV_ITEMS.map((item) =>
@@ -31,12 +43,12 @@ const ADMIN_TABBAR: readonly NavItem[] = NAV_ITEMS.map((item) =>
 );
 
 /**
- * The sections a person sees: everyone else gets `NAV_ITEMS` unchanged; an admin gets «Клієнти» too — as a fifth
- * sidebar link (before «Налаштування») or, on the phone, in place of «Прогрес» (the tab bar keeps four tabs + «+»).
+ * The sections a person sees. The tab bar: `NAV_ITEMS` unchanged, or for an admin «Клієнти» in place of «Прогрес» (four
+ * tabs + «+»). The desktop sidebar adds «Тренування» after «Прогрес», and for an admin «Клієнти» before «Налаштування».
  */
 export function navItems(isAdmin: boolean, place: 'sidebar' | 'tabbar'): readonly NavItem[] {
-  if (!isAdmin) return NAV_ITEMS;
-  return place === 'sidebar' ? ADMIN_SIDEBAR : ADMIN_TABBAR;
+  if (place === 'tabbar') return isAdmin ? ADMIN_TABBAR : NAV_ITEMS;
+  return isAdmin ? ADMIN_SIDEBAR : USER_SIDEBAR;
 }
 
 /** How many sections sit left of the tab bar's «+» (Головна, Календар | + | Прогрес, Налаштування). */
@@ -57,3 +69,16 @@ export function isNavRoot(href: NavItem['href'], location: string): boolean {
 /** The wide desktop shell (up to 1440px) for the coach's table and client pages. */
 export const isWidePage = (location: string): boolean =>
   location === '/coach' || location.startsWith('/coach/');
+
+/**
+ * Full-screen workouts pages without the phone tab bar (W15): the session (live, summary, edit), the past-day log and
+ * the builder have their own back link and sticky footer, and «+» must not open sheets mid-workout.
+ */
+export function hidesTabBar(location: string): boolean {
+  return (
+    location.startsWith('/workouts/session/') ||
+    location === '/workouts/log' ||
+    location === '/workouts/new' ||
+    location.startsWith('/workouts/edit/')
+  );
+}

@@ -1,11 +1,11 @@
 /** Form blocks shared by the record and setup sheets (prototype lines 457–492). */
 import { fN, num, type MeasureKey } from '@legko/shared';
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import { KcalGoalLine, kcalGoalView } from '@/features/goal';
 import { MEASURE_LABELS } from '@/lib/stats';
-import { Button, Field, MeasureInputTile, NumberStepperField } from '@/ui';
-import { stepKcal, stepWeight, type StepRange } from '../helpers';
-import { digitsOnly, MEASURE_KEYS, type MeasureError, type MeasureTexts } from '../validation';
+import { Button, cx, Field, MeasureInputTile, NumberStepperField, useFieldA11y } from '@/ui';
+import { stepKcal, stepSteps, stepWeight, type StepRange } from '../helpers';
+import { digitsOnly, groupedSteps, MEASURE_KEYS, type MeasureError, type MeasureTexts } from '../validation';
 import s from './fields.module.css';
 
 /** Inline validation message under a control: 13px, `--accD`, announced when it appears. */
@@ -177,5 +177,91 @@ export function MeasureField({ label, values, placeholders, onChange, error }: M
       </div>
       <FieldError id={errId} message={error.message} />
     </Field>
+  );
+}
+
+/** The four steppers of the steps sheet: −1000, −500, +500, +1000. */
+export const STEPS_DELTAS: readonly number[] = [-1000, -500, 500, 1000];
+
+const deltaText = (d: number): string => `${d < 0 ? '−' : '+'}${Math.abs(d)}`;
+const deltaLabel = (d: number): string => `${d < 0 ? 'Мінус' : 'Плюс'} ${Math.abs(d)} кроків`;
+
+export interface StepsFieldProps {
+  /** Digits only («8400»), '' = none. */
+  value: string;
+  onChange: (digits: string) => void;
+  /** Under the steppers: the goal line or «≈ 280 ккал». */
+  hint?: ReactNode;
+  error: string | undefined;
+  /** The big input with ±500 / ±1000 (the «Кроки» sheet), or one plain input (the full day). */
+  variant: 'sheet' | 'day';
+}
+
+/**
+ * «Кроки за день»: one whole number typed by hand (no device integration). The sheet shows a big 34px input and four
+ * 44px steppers (clamped to 0…100 000); the full day a single input. The digits are shown grouped («8 400»).
+ */
+export function StepsField({ value, onChange, hint, error, variant }: StepsFieldProps) {
+  const errId = useId();
+  const label = variant === 'sheet' ? 'Кроки за день' : 'Кроки (за бажанням)';
+  return (
+    <Field label={label} hint={hint}>
+      <StepsInput value={value} onChange={onChange} big={variant === 'sheet'} error={error} errId={errId} />
+      {variant === 'sheet' && (
+        <div className={s.stepsButtons}>
+          {STEPS_DELTAS.map((d) => (
+            <Button
+              key={d}
+              variant="outline"
+              size="sm"
+              className={s.stepsButton}
+              aria-label={deltaLabel(d)}
+              onClick={() => onChange(stepSteps(value, d))}
+            >
+              {deltaText(d)}
+            </Button>
+          ))}
+        </div>
+      )}
+      <FieldError id={errId} message={error} />
+    </Field>
+  );
+}
+
+interface StepsInputProps {
+  value: string;
+  onChange: (digits: string) => void;
+  big: boolean;
+  error: string | undefined;
+  errId: string;
+}
+
+/** The input itself (inside the Field, so it is labelled by it and described by its hint). */
+function StepsInput({ value, onChange, big, error, errId }: StepsInputProps) {
+  const unitId = useId();
+  const a11y = useFieldA11y({});
+  const describedBy = [unitId, a11y['aria-describedby']].filter(Boolean).join(' ');
+  return (
+    <div className={cx(s.stepsWrap, big && s.stepsBig, error && s.invalid)}>
+      <input
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        enterKeyHint="done"
+        name="steps"
+        placeholder="0"
+        maxLength={7}
+        className={s.stepsInput}
+        value={groupedSteps(value)}
+        onChange={(e) => onChange(digitsOnly(e.target.value).slice(0, 6))}
+        aria-labelledby={a11y['aria-labelledby']}
+        aria-describedby={describedBy}
+        aria-invalid={error ? true : undefined}
+        aria-errormessage={error ? errId : undefined}
+      />
+      <span id={unitId} className={s.stepsUnit}>
+        кроків
+      </span>
+    </div>
   );
 }

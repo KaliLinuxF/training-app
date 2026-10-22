@@ -3,6 +3,7 @@
  * computed by `@/lib/stats` and formatted here, so the components only lay strings out.
  */
 import {
+  diffDays,
   dLong,
   DOW_SHORT,
   f0,
@@ -17,6 +18,14 @@ import {
 import { macroParts, NBSP, PART_SEPARATOR } from '@/lib/nutrition';
 import {
   chartGeometry,
+  doneSessionsIn,
+  hasAnySteps,
+  sessionsKcalIn,
+  stepsChart,
+  stepsSummary,
+  topExercises,
+  workoutBuckets,
+  workoutChartBars,
   kcalAverages,
   kcalBars,
   kcalHistory,
@@ -36,8 +45,9 @@ import {
   type KcalBar,
   type Period,
   type PeriodMeta,
+  type WorkoutChartMetric,
 } from '@/lib/stats';
-import { deltaTone, type PillTone, type StatItem, type Tone } from '@/ui';
+import { deltaTone, type ChartBar, type PillTone, type StatItem, type Tone } from '@/ui';
 
 /** Rows of «Історія калорій» before the first «Показати ще». */
 export const HISTORY_FIRST = 3;
@@ -45,6 +55,8 @@ export const HISTORY_FIRST = 3;
 export const HISTORY_PAGE = 7;
 /** Workout types listed under «Найчастіше». */
 export const TYPES_SHOWN = 5;
+/** Exercises listed under «Найчастіші вправи». */
+export const EXERCISES_SHOWN = 5;
 
 /** Accessible name of the «Б · Ж · В» strip. */
 export const MACROS_LABEL = 'Білки, жири, вуглеводи — середнє за день';
@@ -137,9 +149,39 @@ export interface TypeBarModel {
   pct: number;
 }
 
+/** One bar chart of the progress cards (no goal judgement unless `goalPct`). */
+export interface BarChartModel {
+  bars: ChartBar[];
+  /** Dashed goal line; null = none. */
+  goalPct: number | null;
+  gap: string;
+  labeled: boolean;
+  /** Text alternative. */
+  label: string;
+  /** Some bar has a value. */
+  hasData: boolean;
+}
+
+/** «Найчастіші вправи»: one rank row per exercise, linked to its detail when the screen allows it. */
+export interface ExerciseRankModel {
+  exerciseId: string;
+  label: string;
+  /** «6» (sessions of the period). */
+  value: string;
+  pct: number;
+  /** «Присідання зі штангою: 6 тренувань». */
+  ariaLabel: string;
+}
+
 export interface WorkoutsModel {
   /** Всього · Цього тижня · Цього місяця · В сер. / тиж. */
   stats: StatItem[];
+  /** «Тренування | Обʼєм» per bucket of the period (week → days, month / 3 months → weeks, all → months). */
+  charts: Record<WorkoutChartMetric, BarChartModel>;
+  /** «Спалено на тренуваннях ≈ 1 240 ккал · в сер. 177 ккал/день»; null without a done session in the period. */
+  burned: string | null;
+  /** Top exercises of the done sessions of the period (empty without sessions). */
+  exercises: ExerciseRankModel[];
   /** «Найчастіше · цього тижня» */
   typesHeading: string;
   /** The `TYPES_SHOWN` most frequent types of the period. */
@@ -194,12 +236,22 @@ export interface NutritionModel {
   hasMore: boolean;
 }
 
+/** «Кроки»: null when she never logged steps (the card is hidden). */
+export interface StepsModel {
+  /** «7 850 В сер. за день» · «10 000 Ціль» · «3 з 7 Днів з ціллю» (without a goal: «Днів записано»). */
+  stats: StatItem[];
+  chart: BarChartModel;
+  /** «Спалено ≈ 275 ккал на день»; null without steps in the period. */
+  burned: string | null;
+}
+
 export interface ProgressModel {
   period: PeriodMeta;
   summary: SummaryModel;
   weight: WeightModel;
   measures: { rows: MeasureRowModel[]; chart: LineChartModel; chartLabel: string };
   workouts: WorkoutsModel;
+  steps: StepsModel | null;
   nutrition: NutritionModel;
 }
 
@@ -245,6 +297,7 @@ export function buildProgressModel(data: AppData, today: ISODate, opts: Progress
     weight: weightModel(data, from, hints.weightNone),
     measures: measuresModel(data, from, opts.measure, hints.measureNone),
     workouts: workoutsModel(data, from, today, period),
+    steps: stepsModel(data, today, period),
     nutrition: nutritionModel(data, from, today, opts, period),
   };
 }
@@ -385,8 +438,39 @@ function measuresModel(
   };
 }
 
+/** «2 тренування», «5 тренувань» after a number. */
+function trainingsWord(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  return mod10 >= 1 && mod10 <= 4 && !(mod100 >= 11 && mod100 <= 14) ? 'тренування' : 'тренувань';
+}
+
+function workoutCharts(data: AppData, today: ISODate, period: PeriodMeta): Record<WorkoutChartMetric, BarChartModel> {
+  const buckets = workoutBuckets(data, period.id, today);
+  const per = period.id === 'week' ? 'по днях' : period.id === 'all' ? 'по місяцях' : 'по тижнях';
+  const chart = (metric: WorkoutChartMetric): BarChartModel => {
+    const bars = workoutChartBars(buckets, metric);
+    const total = bars.reduce((sum, b) => sum + b.value, 0);
+    const label =
+      metric === 'trainings'
+        ? `Тренування ${period.short} ${per}: усього ${f0(total)}`
+        : `Обʼєм ${period.short} ${per}: усього ${f0(total)} кг`;
+    return {
+      bars,
+      goalPct: null,
+      gap: period.id === 'week' ? '8px' : '6px',
+      labeled: period.id === 'week',
+      label,
+      hasData: bars.some((b) => b.value > 0),
+    };
+  };
+  return { trainings: chart('trainings'), volume: chart('volume') };
+}
+
 function workoutsModel(data: AppData, from: ISODate, today: ISODate, period: PeriodMeta): WorkoutsModel {
   const w = workoutStats(data, today);
+  const kcal = doneSessionsIn(data, from, today).length > 0 ? sessionsKcalIn(data, from, today) : null;
+  const days = diffDays(from, today) + 1;
   return {
     stats: [
       { label: 'Всього', value: f0(w.total) },
@@ -394,10 +478,57 @@ function workoutsModel(data: AppData, from: ISODate, today: ISODate, period: Per
       { label: 'Цього місяця', value: f0(w.thisMonth) },
       { label: 'В сер. / тиж.', value: fN(w.avgPerWeek) },
     ],
+    charts: workoutCharts(data, today, period),
+    burned:
+      kcal === null
+        ? null
+        : `Спалено на тренуваннях ≈${NBSP}${f0(kcal)}${NBSP}ккал · в сер. ${f0(kcal / days)}${NBSP}ккал/день`,
+    exercises: topExercises(data, from, today, EXERCISES_SHOWN).map((e) => ({
+      exerciseId: e.exerciseId,
+      label: e.name,
+      value: String(e.n),
+      pct: e.pct,
+      ariaLabel: `${e.name}: ${e.n} ${trainingsWord(e.n)}`,
+    })),
     typesHeading: `Найчастіше · ${period.short}`,
     types: typeRanking(data, from, today)
       .slice(0, TYPES_SHOWN)
       .map((t) => ({ label: t.label, value: String(t.n), pct: t.pct })),
+  };
+}
+
+function stepsModel(data: AppData, today: ISODate, period: PeriodMeta): StepsModel | null {
+  if (!hasAnySteps(data)) return null;
+  const sum = stepsSummary(data, period.id, today);
+  const chart = stepsChart(data, period.id, today);
+  const avg: StatItem =
+    sum.avg === null
+      ? { label: 'В сер. за день', value: DASH, tone: 'faint' }
+      : { label: 'В сер. за день', value: f0(sum.avg) };
+  const stats: StatItem[] =
+    sum.goal !== null
+      ? [
+          avg,
+          { label: 'Ціль', value: f0(sum.goal) },
+          {
+            label: 'Днів з ціллю',
+            value: sum.days ? `${sum.goalDays} з ${sum.days}` : DASH,
+            tone: sum.goalDays > 0 ? 'acc2' : undefined,
+          },
+        ]
+      : [avg, { label: 'Днів записано', value: f0(sum.days) }];
+  const goalText = sum.goal !== null ? `, ціль ${f0(sum.goal)}` : '';
+  return {
+    stats,
+    chart: {
+      bars: chart.bars,
+      goalPct: chart.goalPct,
+      gap: chart.gap,
+      labeled: chart.labeled,
+      label: `Кроки ${period.short}${chart.weekly ? ', середнє за тиждень' : ''}${goalText}`,
+      hasData: chart.bars.some((b) => b.value !== null),
+    },
+    burned: sum.kcalPerDay === null ? null : `Спалено ≈${NBSP}${f0(sum.kcalPerDay)}${NBSP}ккал на день`,
   };
 }
 

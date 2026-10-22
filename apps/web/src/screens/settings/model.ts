@@ -23,6 +23,7 @@ import {
   type Reminders,
   type Settings,
   type Weekday,
+  type Workout,
 } from '@legko/shared';
 import { ApiError } from '@/lib/api';
 import { NBSP, PART_SEPARATOR } from '@/lib/nutrition';
@@ -474,4 +475,83 @@ export function parseBackup(text: string): AppData | null {
   }
   const parsed = appDataSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+// ---- steps goal (docs/workouts-steps-rebrand.md §3.17) ---------------------------------------------
+
+/** «+» from «Без цілі» starts here. */
+export const STEPS_GOAL_START = 8000;
+export const STEPS_GOAL_STEP = 500;
+export const NO_STEPS_GOAL = 'Без цілі';
+
+export interface StepsGoalRowModel {
+  label: string;
+  /** «8 000 кроків» or «Без цілі». */
+  value: string;
+  decrementLabel: string;
+  incrementLabel: string;
+  canDecrement: boolean;
+  canIncrement: boolean;
+}
+
+export function stepsGoalRow(settings: Pick<Settings, 'stepsGoal'>): StepsGoalRowModel {
+  const goal = settings.stepsGoal ?? null;
+  return {
+    label: 'Кроки за день',
+    value: goal === null ? NO_STEPS_GOAL : `${f0(goal)}${NBSP}кроків`,
+    decrementLabel: goal === LIMITS.stepsGoal.min ? 'Прибрати ціль кроків' : 'Зменшити ціль кроків',
+    incrementLabel: goal === null ? 'Поставити ціль кроків' : 'Збільшити ціль кроків',
+    canDecrement: goal !== null,
+    canIncrement: goal === null || goal < LIMITS.stepsGoal.max,
+  };
+}
+
+/** ±500 within 1 000…50 000; «+» from none → 8 000; «−» at 1 000 → none (immutable). */
+export function stepStepsGoal(settings: Settings, dir: 1 | -1): Settings {
+  const goal = settings.stepsGoal ?? null;
+  const { min, max } = LIMITS.stepsGoal;
+  let next: number | null;
+  if (goal === null) next = dir === 1 ? STEPS_GOAL_START : null;
+  else if (dir === -1) next = goal <= min ? null : Math.max(min, goal - STEPS_GOAL_STEP);
+  else next = Math.min(max, goal + STEPS_GOAL_STEP);
+  return { ...settings, stepsGoal: next };
+}
+
+// ---- workout schedule ↔ reminder (docs/workouts-steps-rebrand.md §3.7) ------------------------------
+
+/** The one sentence that explains the plan, in the builder and here. */
+export const SCHEDULE_SENTENCE =
+  'Дні тренувань — це твій план. Коли ставиш тренуванню дні, вони додаються до плану; нагадування приходить у дні плану.';
+export const NOT_IN_PLAN = 'не в плані';
+
+export interface ScheduleDay {
+  /** «Пн». */
+  label: string;
+  /** The day is one of the reminder's plan days; otherwise it is struck with «не в плані». */
+  inPlan: boolean;
+}
+
+export interface ScheduleItem {
+  workoutId: string;
+  name: string;
+  /** Monday first. */
+  days: ScheduleDay[];
+  /** «Пн, Ср — Ноги + прес» (with «Ср (не в плані)» for a day outside the plan), for its accessible text. */
+  text: string;
+}
+
+/** Her workouts that have weekdays, in her order, each with its days against the plan (`rem.workout.days`). */
+export function workoutSchedule(
+  workouts: readonly Pick<Workout, 'id' | 'name' | 'days'>[],
+  planDays: readonly Weekday[],
+): ScheduleItem[] {
+  return workouts
+    .filter((w) => w.days.length > 0)
+    .map((w) => {
+      const days = WEEK_ORDER.filter((d) => w.days.includes(d)).map(
+        (d): ScheduleDay => ({ label: DOW_SHORT[d], inPlan: planDays.includes(d) }),
+      );
+      const daysText = days.map((d) => (d.inPlan ? d.label : `${d.label} (${NOT_IN_PLAN})`)).join(', ');
+      return { workoutId: w.id, name: w.name, days, text: `${daysText} — ${w.name}` };
+    });
 }

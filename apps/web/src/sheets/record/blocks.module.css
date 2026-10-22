@@ -2,3 +2,8 @@
 .addNote {
   align-self: flex-start;
 }
+
+/* The static «✓ Було» of a day with a done session: left-aligned, never stretched. */
+.recorded {
+  align-self: flex-start;
+}

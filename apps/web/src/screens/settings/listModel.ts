@@ -34,7 +34,7 @@ export function settingsPath(id: SettingsSectionId): string {
 export const SECTION_TITLES: Readonly<Record<SettingsSectionId, string>> = {
   reminders: 'Нагадування',
   goals: 'Цілі',
-  workouts: 'Типи тренувань',
+  workouts: 'Тренування',
   meals: 'Прийоми їжі',
   appearance: 'Вигляд',
   data: 'Дані і копія',
@@ -117,6 +117,11 @@ export function goalsSummary(settings: Pick<Settings, 'goal' | 'kcalGoal'>): str
 export function typesSummary(customTypes: readonly string[]): string {
   const n = normalizeTypeNames([...WORKOUT_TYPES, ...customTypes]).length;
   return `${n} ${plural(n, 'тип', 'типи', 'типів')}`;
+}
+
+/** The «Тренування» row of the list: «2 тренування» once she has workouts, else the count of types as before. */
+export function workoutsRowSummary(workoutCount: number, typesText: string): string {
+  return workoutCount > 0 ? `${workoutCount} ${plural(workoutCount, 'тренування', 'тренування', 'тренувань')}` : typesText;
 }
 
 /** Her meal types: «4 типи», «1 тип», «12 типів»; an empty list → «Немає типів». */

@@ -23,13 +23,14 @@ const statusOf = (rows: CaptureMenuRow[], mode: CaptureMenuRow['mode']) =>
   rows.find((r) => r.mode === mode)?.status;
 
 describe('captureMenuRows', () => {
-  it('lists Їжа, Тренування, Вага, Заміри with their copy, icons and tints', () => {
+  it('lists Їжа, Тренування, Кроки, Вага, Заміри with their copy, icons and tints', () => {
     const rows = captureMenuRows(onboarded(), WEDNESDAY, WEDNESDAY);
     expect(
       rows.map(({ mode, title, sub, icon, iconTone }) => ({ mode, title, sub, icon, iconTone })),
     ).toEqual([
       { mode: 'meal', title: 'Їжа', sub: 'Новий прийом їжі', icon: 'food', iconTone: 'acc2' },
       { mode: 'workout', title: 'Тренування', sub: 'Було чи ні, тип', icon: 'workout', iconTone: 'acc' },
+      { mode: 'steps', title: 'Кроки', sub: 'За день, вручну', icon: 'steps', iconTone: 'neutral' },
       { mode: 'weight', title: 'Вага', sub: 'Контрольне зважування', icon: 'weight', iconTone: 'neutral' },
       { mode: 'measure', title: 'Заміри', sub: 'Груди, талія, стегна', icon: 'measure', iconTone: 'neutral' },
     ]);
@@ -42,6 +43,7 @@ describe('captureMenuRows', () => {
     const data = onboarded();
     data.settings.rem.workout.on = false;
     expect(captureMenuRows(data, WEDNESDAY, WEDNESDAY).map((r) => r.status)).toEqual([
+      null,
       null,
       null,
       null,
@@ -176,7 +178,7 @@ describe('captureMenuRows', () => {
     // Default reminders (workout Mon/Wed/Fri, weigh-in and measurements on Monday), not onboarded.
     const data = emptyData();
     expect(data.settings.onboarded).toBe(false);
-    expect(captureMenuRows(data, MONDAY, MONDAY).map((r) => r.status)).toEqual([null, null, null, null]);
+    expect(captureMenuRows(data, MONDAY, MONDAY).map((r) => r.status)).toEqual([null, null, null, null, null]);
     expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'workout')).toBeNull();
 
     data.days[WEDNESDAY] = { food: '', kcal: null, trained: true, types: [], notes: '' };
@@ -190,6 +192,7 @@ describe('captureMenuRows', () => {
     expect(captureMenuRows(data, MONDAY, MONDAY).map((r) => r.status?.kind)).toEqual([
       undefined,
       'due',
+      undefined,
       'due',
       'due',
     ]);
@@ -203,14 +206,17 @@ describe('captureMenuRows', () => {
       null,
       null,
       null,
+      null,
     ]);
 
     data.days['2026-10-05'] = { food: 'Борщ', kcal: 900, trained: true, types: [], notes: '' };
     data.weights = [{ date: '2026-10-05', kg: 65.7 }];
     data.measures = [{ date: '2026-10-05', chest: 90, waist: 70, hips: 98 }];
+    data.steps = [{ date: '2026-10-05', steps: 8400 }];
     expect(captureMenuRows(data, '2026-10-05', WEDNESDAY).map((r) => r.status)).toEqual([
       { kind: 'value', text: '900 ккал' },
       { kind: 'done', text: '✓ Було' },
+      { kind: 'value', text: f0(8400) },
       { kind: 'value', text: '65,7 кг' },
       { kind: 'done', text: '✓ записано' },
     ]);
@@ -221,8 +227,18 @@ describe('captureMenuRows', () => {
     data.weights = [{ date: '2026-10-05', kg: 65.7 }];
     data.measures = [{ date: '2026-10-05', chest: 90, waist: 70, hips: 98 }];
     data.days['2026-10-05'] = { food: 'Борщ', kcal: 900, trained: true, types: [], notes: '' };
+    data.steps = [{ date: '2026-10-05', steps: 8400 }];
     const rows = captureMenuRows(data, MONDAY, MONDAY);
-    expect(rows.map((r) => r.status?.kind)).toEqual([undefined, 'due', 'due', 'due']);
+    expect(rows.map((r) => r.status?.kind)).toEqual([undefined, 'due', undefined, 'due', 'due']);
+  });
+
+  it('Кроки: the day’s count, soft («8 400»); nothing without steps (never a due pill)', () => {
+    const data = onboarded();
+    expect(statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'steps')).toBeNull();
+    data.steps = [{ date: WEDNESDAY, steps: 8400 }];
+    const status = statusOf(captureMenuRows(data, WEDNESDAY, WEDNESDAY), 'steps');
+    expect(status?.kind).toBe('value');
+    expect(status?.text.replace(/\s/g, ' ')).toBe('8 400');
   });
 });
 

@@ -10,6 +10,8 @@
 import {
   coachWindow,
   iso,
+  withDataDefaults,
+  type AppData,
   type CoachClientResponse,
   type CoachClientsResponse,
 } from '@legko/shared';
@@ -136,9 +138,18 @@ export function useCoachClients(): Loader<CoachClientsResponse> {
   return useLoad(fetcher, 'clients', date);
 }
 
+/**
+ * The detail answer with the newer data keys filled in (shared `withDataDefaults`): the response is not zod-parsed,
+ * and a server from before schema v5 sends no exercises / workouts / sessions / steps and no `settings.stepsGoal`.
+ */
+export const withClientDefaults = (response: CoachClientResponse): CoachClientResponse => ({
+  ...response,
+  data: withDataDefaults(response.data as Partial<AppData>),
+});
+
 /** `GET /api/coach/clients/:id`. */
 export function useCoachClient(id: string): Loader<CoachClientResponse> {
   const date = iso(useNow());
-  const fetcher = useCallback(() => api.coach.client(id), [id]);
+  const fetcher = useCallback(() => api.coach.client(id).then(withClientDefaults), [id]);
   return useLoad(fetcher, id, date);
 }

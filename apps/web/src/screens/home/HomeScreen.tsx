@@ -1,10 +1,13 @@
 import { flushSync } from 'react-dom';
+import { useLocation } from 'wouter';
 import { useToday } from '@/lib/useToday';
+import { sessionPath } from '@/lib/workoutRoutes';
+import { startWorkout } from '@/sheets/startWorkout';
 import { setTrainedMark } from '@/store/dayMarks';
 import { ui } from '@/store/ui';
 import { Avatar, Banner, ContentGrid, FullRow, ListGroup, ListRow, ScreenHeader } from '@/ui';
 import { HeroCard } from './HeroCard';
-import { HOME_ROW_ACTIONS, OFFLINE_NOTE, type HomeRowId } from './homeModel';
+import { HOME_ROW_ACTIONS, OFFLINE_NOTE, type HomeRowId, type HomeTrainingAction } from './homeModel';
 import { TodayCard } from './TodayCard';
 import { useHomeModel } from './useHomeModel';
 import s from './HomeScreen.module.css';
@@ -32,6 +35,16 @@ export function HomeScreen() {
   // Saves at once (no sheet) and toasts «Відмічено: …»; pressing the already pressed option does nothing.
   const setTrained = (trained: boolean) => {
     setTrainedMark(today, trained);
+  };
+  // «Почати» / «Продовжити»: the session screen (workouts package); 2+ scheduled workouts → pick one in the sheet.
+  const [, navigate] = useLocation();
+  const workoutAction = (action: HomeTrainingAction) => {
+    if (action.kind === 'continue') navigate(sessionPath(action.sessionId));
+    else if (action.kind === 'choose') ui.openSheet(today, 'workout');
+    else if (action.kind === 'start')
+      void startWorkout(today, action.workoutId).then((id) => {
+        if (id !== null) navigate(sessionPath(id));
+      });
   };
 
   return (
@@ -65,6 +78,7 @@ export function HomeScreen() {
         onOpen={open}
         onOpenDay={openDay}
         onTrained={setTrained}
+        onWorkoutAction={workoutAction}
         className={s.today}
       />
 

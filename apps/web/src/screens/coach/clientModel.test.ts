@@ -1,6 +1,6 @@
 import { coachSummary } from '@legko/shared';
 import { describe, expect, it } from 'vitest';
-import { client, empty, item, meals, NOW, overKcal, quiet, steady } from './coach.fixtures';
+import { client, empty, item, meals, NOW, overKcal, quiet, steady, training } from './coach.fixtures';
 import {
   calendarHref,
   checkRows,
@@ -23,6 +23,8 @@ describe('URL parameters of /coach/<id>', () => {
       date: '2026-10-13',
     });
     expect(parseDetailParams('tab=settings&days=5&period=year')).toEqual(DEFAULT_DETAIL_PARAMS);
+    expect(parseDetailParams('?tab=workouts&days=30')).toEqual({ ...DEFAULT_DETAIL_PARAMS, tab: 'workouts', days: 30 });
+    expect(detailHref(ID, { ...DEFAULT_DETAIL_PARAMS, tab: 'workouts' })).toBe(`/coach/${ID}?tab=workouts`);
   });
 
   it('writes only non-default parameters', () => {
@@ -54,6 +56,7 @@ describe('«Огляд» numbers', () => {
       { label: `Ккал · ціль 1${NB}700`, value: `1${NB}950`, tone: 'acc' },
       { label: 'Б · Ж · В', value: '—', unit: undefined },
       { label: 'Тренування', value: `1${NB}/${NB}3`, tone: undefined },
+      { label: 'Кроки, сер.', value: '—', unit: undefined },
       { label: 'Записи', value: `7${NB}/${NB}7` },
     ]);
   });
@@ -63,7 +66,20 @@ describe('«Огляд» numbers', () => {
     const items = kpiItems(s);
     expect(items[1]?.label).toBe('За 30 днів');
     expect(items[5]).toEqual({ label: 'Б · Ж · В', value: '85 · 51 · 178', unit: 'г' });
-    expect(items[7]?.value).toBe(`30${NB}/${NB}30`);
+    expect(items[8]?.value).toBe(`30${NB}/${NB}30`);
+  });
+
+  it('shows the steps average of the full days next to the workouts, with the goal when one is set', () => {
+    // 10-07 … 10-13: 7 200, 9 100, 10 500, 6 400, 8 300 → 8 300.
+    const s = coachSummary(item(client(4, 'sofia'), training()), NOW, 7);
+    expect(kpiItems(s)[7]).toEqual({ label: 'Кроки, сер.', value: `8${NB}300`, unit: `/ 8${NB}000` });
+    const noGoal = training();
+    noGoal.settings = { ...noGoal.settings, stepsGoal: null };
+    expect(kpiItems(coachSummary(item(client(4, 'sofia'), noGoal), NOW, 7))[7]).toEqual({
+      label: 'Кроки, сер.',
+      value: `8${NB}300`,
+      unit: undefined,
+    });
   });
 
   it('tones workouts behind the plan lavender', () => {

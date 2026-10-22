@@ -53,6 +53,25 @@ one-time setup link (`docs/DEPLOY.md`). The requirements below («she records �
     day with meals and photos) and «Харчування». Strictly **read-only**: the coach cannot change, note or comment on
     anything of a client (every coach endpoint is GET only, enforced on the server). Every user is told, calmly, in
     «Акаунт» and on the invite page: «Адміністратор бачить твої записи та прогрес.»
+12. **Workouts** (owner decision, requested by Anna; plan `docs/workouts-steps-rebrand.md`). An **exercise library**
+    (71 seed exercises, gym + home, Ukrainian names, kind with weight / bodyweight / time / cardio, primary and
+    secondary muscles shown on an in-house front + back body map, equipment, MET) browsable by muscle group with
+    search, plus **her own exercises** (name, kind, muscles from the map or chips, equipment, intensity). A **builder**
+    for her own workouts («Ноги + прес»): ordered exercises with planned sets (reps × kg, seconds, minutes / km), rest,
+    reorder (buttons + drag), duplicate, delete, and the **weekdays** it is scheduled on (they join the one plan of
+    training days that the workout reminder uses). **Logging**: Home shows «Сьогодні: Ноги + прес» + «Почати» on a
+    scheduled day (the quick ✓ / ✕ stays for days without details); a full-screen session goes exercise by exercise,
+    sets prefilled from the last time, confirm each set from the sticky footer, steppers ≥ 44 px, add / remove sets,
+    skip, add an exercise, a rest timer, elapsed time; finishing shows duration, volume, sets, estimated kcal burned
+    and personal records, and marks the day trained with derived types. Past days can be logged; sessions can be
+    edited and deleted. **Burned kcal** (MET × body weight × active time) is shown on the summary, the calendar day,
+    Home and Progress — display only, the kcal goal maths never changes. **Progress → Тренування**: sessions per week,
+    volume, top exercises; an exercise page with the best set over time, records, last sessions and a gentle
+    progression hint. The coach sees all of it read-only.
+13. **Steps** (manual, no device integration): one number per day typed by hand — «+» → «Кроки» (big input,
+    ±500 / ±1000, date nav) and a field in «Запис дня»; an optional goal in «Цілі»; shown on Home (in the Тренування
+    row's sub), the calendar day («Кроки» row), Progress (daily bars + average vs goal) and in «Клієнти» (column and
+    client page). Steps add «Спалено» kcal (≈ steps × 0,0005 × kg, §3.6).
 
 Additions we make on top of the design (keep them in the same visual language):
 **accounts** — the login screen (username + password, «Маю посилання»), one-time invite links (`/invite`) and
@@ -160,7 +179,8 @@ e2e/              Playwright (system Chrome: iPhone 390×844 with the iPhone UA 
 deploy/           compose.yaml, Caddyfile, deploy.sh (build on the VPS)
 Dockerfile        multi-stage: build web + server → node:24-alpine runtime serving API + static files on :3000
 docs/             SPEC.md (this), DEPLOY.md, redesign-a.md (UX plan «Чек-лист дня»), meals-macros.md (meals + Б · Ж · В plan),
-                  multi-user.md (accounts, invites, admin, per-user data — schema v4)
+                  multi-user.md (accounts, invites, admin, per-user data — schema v4), coach-cabinet.md («Клієнти»),
+                  workouts-steps-rebrand.md (workouts, exercise library, steps — schema v5, wire v3)
 design/handoff/   Claude Design bundle (read-only reference)
 ```
 
@@ -185,7 +205,7 @@ helpers) live in `packages/shared/src/users.ts`.
   кава»; an untyped meal gives its text), `kcal` = sum of the known meal kcal (null when none), `photos` = the union,
   first 12 — so every reader of the old fields (kcal goal line, calendar fills, day status, stats, old clients)
   keeps working. `Meal = { id, type (her label as saved, '' = untyped, ≤ 30), time (HH:MM | null), text (≤ 5 000),
-  kcal (0–20 000 | null), protein / fat / carbs (grams, multiples of 0.5, ≤ 3 000 | null), photos?, items? }`;
+kcal (0–20 000 | null), protein / fat / carbs (grams, multiples of 0.5, ≤ 3 000 | null), photos?, items? }`;
   `items` (≤ 30 positions `{ name, portion, kcal, protein, fat, carbs }`, macros ≤ 1 000 g each) are the AI / dish /
   hand-made positions, and with positions the meal's kcal and macros are their sums. Meals sort by time (no time
   last, stable). Day macros = sum of the meals' macros. Renaming or deleting a type never touches past meals.
@@ -224,6 +244,57 @@ input, and absence never deletes anything. A day's shape (`meals` present or not
 migration and no version flag. Old outbox ops, old device caches and old JSON backups parse with the new schemas.
 An old cached PWA (until `pwa/update.ts` reloads it) reads the derived fields, and its writes go through Rule L /
 the settings merge / the `food.use` rule above.
+
+#### 3.1.1 Workouts and steps (schema v5, wire v3)
+
+Plan, every rule and the reasons: **`docs/workouts-steps-rebrand.md`** (§0 decisions W1–W15, §1 data model). Types in
+`packages/shared/src/types.ts`, library and muscles in `exercises.ts` / `exerciseLibrary.ts`, maths in `workouts.ts`.
+
+- **Own tables and own AppData keys, never inside `days`** (W1): an old client's `day.put` / `day.delete` rebuilds a
+  day from scratch and could not erase what is not there. `AppData` gains (each `.default([])`, so old caches and
+  backups parse): `exercises` (her **own** exercises only — the 71 seed exercises `lib.<slug>` are static code,
+  `EXERCISE_LIBRARY`), `workouts`, `sessions` (sorted by `compareSessions`: date, `createdAt`, id), `steps` (one
+  `{ date, steps }` per date, sorted by date) and `deletedSessions` (the ids of deleted sessions — tombstones, sorted,
+  ≤ 10 000). `Settings.stepsGoal: number | null` (1 000–50 000; `null` = no goal; `.default(null)` in
+  `settingsSchema` but only `.optional()` in `settingsPutSchema`, because zod 4 fires a default nested in an optional:
+  `mergeSettingsPut` keeps the stored goal when an old client's `settings.put` has no `stepsGoal`).
+- **Shapes**: `Exercise { id, name ≤ 60, kind 'weight'|'bodyweight'|'time'|'cardio', primary, secondary (15
+MuscleIds, disjoint), equipment, met 1–25 }`; `Workout { id, name ≤ 40, days (WEEK_ORDER), items ≤ 30 }` with
+  `WorkoutItem { key, exerciseId, sets 1–20 × SetValues, restSec 0–900 }`; `SetValues { reps, kg (× 0,25), sec,
+min (× 0,5), km (× 0,01) }`, each nullable and only the kind's fields kept; `WorkoutSession { id, date, workoutId |
+null, name, createdAt, startedAt | null, finishedAt | null, durationSec | null (0–86 400), status 'active'|'done',
+exercises ≤ 30, notes ≤ 1 000, rev 0–1e9, deviceId | null }`. A session **snapshots** each exercise (name, kind, MET,
+  muscles, equipment, rest, `skipped`, sets with `done`, ≤ 30) — editing or deleting an exercise never changes
+  history (W3). Own ids `/^[A-Za-z0-9_-]{12,40}$/`, library ids `/^lib\.[a-z0-9-]{2,40}$/` (an `exercise.put` with a
+  `lib.*` id is invalid).
+- **Ops (wire v3 = v2 + these kinds; every v1 / v2 op unchanged)**, one pure shared reducer per entity used by
+  `applyOp` and mirrored row for row by the server repo (random-sequence parity test):
+
+  | Op                                                | Semantics                                                                                                                                                                                                                                                              |
+  | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `exercise.put {value}` / `exercise.delete {id}`   | upsert by id / remove; a **new** one beyond 300 is ignored. No cascade in the reducer — the client's `deleteExercise` also sends a `workout.put` for every workout that used it.                                                                                       |
+  | `workout.put {value}` / `workout.delete {id}`     | upsert keeping its position / remove; a new one beyond 50 is ignored. The client's `saveWorkout` also sends `settings.put` with the union of plan days when its days are not all in the plan (W6).                                                                     |
+  | `session.put {value}`                             | upsert by id (the date may change), then sort. **W13 — monotonic merges**: a no-op when the id is in `deletedSessions`, when `value.rev < stored.rev`, or when `value.status` is `'active'` over a stored `'done'`. A new one is ignored when its date already has 10. |
+  | `session.delete {id}`                             | removes it and adds the id to `deletedSessions` (a later put of that id stays a no-op).                                                                                                                                                                                |
+  | `steps.put {date, steps}` / `steps.delete {date}` | upsert (1–100 000) / remove. The client sends delete for an empty or 0 count.                                                                                                                                                                                          |
+
+  All idempotent (a replay gives the same state). Every client write of a session sends `stored.rev + 1`; a live
+  session is written by one device at a time (`deviceId`, W4). `finishSession` commits `session.put` (`done`,
+  `durationSec = clamp(round((now − startedAt)/1000), 0, 21 600)` while live, `null` when stale) **together with**
+  `day.meta { trained: true, types: mergeTypes(existing, derived) }`, so old clients, stats, calendar marks and the
+  coach keep reading `trained` / `types` (W5); deleting a session sends only `session.delete` (the day's ✓ stays).
+  `startSession` returns the id of an already live session and commits nothing.
+
+- **Live / stale** (W14, time-based, never date-based): `isLiveSession` = `active` and `now − startedAt ≤ 6 h`, whatever
+  the date (a workout over midnight keeps its timers); `activeSession(data, now)` = the latest live one; an active
+  session older than 6 h is stale («Це тренування не завершено» → «Завершити» with `durationSec: null` / «Видалити»).
+- **Compatibility**: the web `store/normalize.ts` is a **whitelist** that rebuilds AppData on every server load, cache
+  load and import (`GET /api/data` is not zod-parsed), so `normalizeAppData` keeps and validates the five new keys
+  (invalid elements dropped, sessions sorted, missing → `[]`); the pure defaults are shared as `withDataDefaults`
+  (also used by the coach UI). An **old client** drops the new keys in its own whitelist, never sends the new ops,
+  and its `settings.put` keeps the stored `stepsGoal`; an old outbox cannot touch sessions or steps. An **old bundle's
+  backup** has no workouts or steps, and restoring it clears them (that is what restoring means). A **new client on
+  an old server** (rollback window) gets 400 `invalid_op` for the new kinds; the sync engine drops such an op.
 
 ### 3.2 HTTP API
 
@@ -284,6 +355,14 @@ Contract: `packages/shared/src/api.ts` (paths, bodies, responses, error codes) a
   `GET` is ever 2xx. Never sent: password hashes, sessions, tokens, push subscriptions, invites, AI usage. One info
   log line per access (admin id, client id, never content). An admin asking for a client's photo on the ordinary
   `GET /api/photos/:id` still gets 404 (owner check unchanged).
+- **Workouts and steps add no endpoint** (§3.1.1): they travel in `GET /api/data`, `POST /api/ops` (the new op kinds),
+  `GET /api/export` and `POST /api/import` like everything else. The coach responses grow, read-only:
+  `CoachClientItem` gains `steps: StepsEntry[]` (the window), `sessions: CoachSessionDigest[]` (done sessions of the
+  window: `{ id, date, name, durationSec, setsDone, volumeKg, kcal }`, built by the shared `digestSession`) and
+  `schedule: { id, name, days }[]`; the detail's `AppData` carries `exercises`, `workouts`, `sessions`, `steps`
+  (`deletedSessions: []`, still `foods: []`). The web tolerates an older server without them (`?? []`,
+  `withDataDefaults`). `sessions` / `deletedSessions` are workout sessions, not sign-in sessions (the secret-key checks
+  allow those two keys).
 - **Error codes** (`ApiErrorCode`): `bad_credentials`, `account_disabled`, `forbidden`, `user_mismatch`,
   `link_invalid` (+ `reason`), `username_taken`, `invalid_username`, `weak_password`, `wrong_password`, `last_admin`,
   `self_action`, `limit_reached` (20 pending invites) next to the existing ones (`bad_password` «Неправильний
@@ -344,7 +423,13 @@ Contract: `packages/shared/src/api.ts` (paths, bodies, responses, error codes) a
   scheduled + 15 min and which was not sent yet today (`reminder_log(user_id, kind, date)` unique) → send to that
   account's subscriptions, then log it. Skip (but still log as handled) when the action is already done that day (that
   account's rows): weigh → a weight exists for today; measure → measurements exist for today; workout →
-  `days[today].trained !== null`.
+  `days[today].trained !== null` **or** a non-deleted `workout_sessions` row of that account exists on today's date,
+  active or done (no push in the middle of a workout or after logging one).
+- The workout reminder fires on the **plan days** (`settings.rem.workout.days`, unchanged) and names today's
+  scheduled workout(s) (`workoutReminder(names)`, the workouts whose `days` include today's weekday): none → the usual
+  body; one → «Сьогодні: Ноги + прес»; two → «Сьогодні: Ноги + прес, Кардіо»; more → the first two + « і ще N». The
+  url stays `DEEP_LINKS.workout` (old service workers). A workout's weekdays join the plan when saved; removing a plan
+  day that still has a workout is allowed (Settings → Нагадування strikes it «не в плані»).
 - Notification payload (JSON for the SW): `{ title, body, url, tag }`. Copy:
   - workout: «Час тренування 💪» / «Не забудь відмітити, як пройшло» → url `DEEP_LINKS.workout`
   - weigh: «Контрольне зважування ⚖️» / «Найточніше — зранку, натщесерце» → `DEEP_LINKS.weigh`
@@ -400,6 +485,20 @@ INTO`; outside the daily pattern, so never pruned). A build refuses a database n
   with only its rows, drops `ai_usage`, `invites`, `password_resets`, `user_settings`, `users`, sets `user_version`
   3), then `deploy/deploy.sh rollback` (DEPLOY.md «Rollback after the users release»). Each `downgrade-schema` run
   steps one version (v4 → v3, then v3 → v2).
+- **Schema v5** (workouts and steps, §3.1.1) is additive — four new tables, every one keyed by `user_id` with
+  `REFERENCES users (id) ON DELETE CASCADE`, nothing existing rewritten: `exercises (user_id, id, position, value JSON,
+updated_at)` and `workouts (…same…)` with `PRIMARY KEY (user_id, id)`; `workout_sessions (user_id, id, date, status
+CHECK IN ('active', 'done', 'deleted'), value JSON, updated_at)`, `PRIMARY KEY (user_id, id)`, index `(user_id,
+date)` — a `'deleted'` row is a **tombstone** (value `'{}'`, date kept) and feeds `deletedSessions`; `steps (user_id,
+date, steps INTEGER CHECK 1..100000, updated_at)`, `PRIMARY KEY (user_id, date)`. Every statement binds
+  `user_id = ?` first (`forUser()`, the scope lint lists the four tables); a stored row whose JSON fails its schema is
+  skipped with a content-free warning. The automatic snapshot before migrating is `backups/legko-pre-v5-<date>.db`.
+  **Rollback to the build before workouts**: stop the app, run the new image's `node dist/cli.js downgrade-schema`
+  on the v5 file (refuses `--keep` / `--drop-others` on v5; saves `backups/legko-pre-down-v5-<date>.db`; prints the
+  per-account counts it drops; in one transaction drops `workout_sessions`, `workouts`, `exercises`, `steps` and sets
+  `user_version` 4 — days keep `trained` / `types`, `settings.stepsGoal` may stay in the JSON and v4's zod strips it),
+  then `deploy/deploy.sh rollback` (DEPLOY.md). Workouts and steps written after the snapshot are lost on rollback
+  (the snapshot keeps them). Re-opening the result with the v5 build migrates it to v5 again cleanly.
 - Daily backup `VACUUM INTO ${DATA_DIR}/backups/legko-YYYY-MM-DD.db` at ~03:30 Kyiv time and at start-up if today's is
   missing; keep the newest 30.
 - Static: hashed assets `Cache-Control: public, max-age=31536000, immutable`; `index.html`, `sw.js`,
@@ -423,7 +522,7 @@ base-uri 'self'; form-action 'self'`).
   | `list-users`                                           | username · role · status · created · last activity · AI today (never hashes or tokens)                                                                                                                                              |
   | `list-links`                                           | pending invites / reset / setup links: id · kind · role · for · created by · expiry (never tokens)                                                                                                                                  |
   | `revoke-links --by <username> \| --all`                | revokes the pending links that account created, or every pending link                                                                                                                                                               |
-  | `downgrade-schema [--keep <username>] [--drop-others]` | v4 → v3 or v3 → v2 (above); opens the database without migrating                                                                                                                                                                    |
+  | `downgrade-schema [--keep <username>] [--drop-others]` | v5 → v4 (no options), v4 → v3 or v3 → v2 (above); opens the database without migrating                                                                                                                                              |
 
   Exit codes: 0 ok, 1 refused, 2 usage. `GET /api/health` is unauthenticated (used by the Docker healthcheck).
 
@@ -442,7 +541,7 @@ link <id> for user <id> created by …`, `links revoked: N …`). Start-up: `No 
   «Повернути стандартні»; «Цілі» also holds the optional Б · Ж · В goals; `account` = «Акаунт»; `users` =
   «Користувачі», admins only — anyone else is redirected to `/settings` before it renders),
   `/reminders` → redirect to `/settings/reminders` (old bookmarks and test notifications), `/coach` and `/coach/:id`
-  («Клієнти», admins only, §3.8), catch-all → `/`.
+  («Клієнти», admins only, §3.8), `/workouts/*` (workouts, below), catch-all → `/`.
   Screens export `HomeScreen`, `CalendarScreen`, `ProgressScreen`, `SettingsScreen` (`screens/settings`). These
   files and the exported names are the contract between tasks.
 - **Accounts UI** (`docs/multi-user.md` §8–§9). `AuthGate` routes `/invite` and `/reset` **before** the auth status
@@ -465,7 +564,7 @@ link <id> for user <id> created by …`, `links revoked: N …`). Start-up: `No 
   nothing renders while the account is unknown, a non-admin is redirected to `/` (a 403 from a coach call refreshes
   the role first, then redirects). `/coach` = `CoachClientsScreen` (URL state, replace navigation: `days=7|30`,
   `show=attention|all`, `sort=…` + `dir=asc|desc`, `q=`); `/coach/:id` = `CoachClientScreen` (`tab=overview|progress|
-  calendar|nutrition`, `days`, `period`, `date`). Every param change goes through `useReplaceParams` (replace that
+calendar|nutrition|workouts`, `days`, `period`, `date`). Every param change goes through `useReplaceParams` (replace that
   keeps `history.state`, so «‹ Клієнти» returns to the list with its filters). The data are fetched with
   `api.coach.clients(window)` / `api.coach.client(id)` into **component state only** — never IndexedDB, local /
   session storage, the zustand store or the outbox — and reloaded when the device date changes or the page returns
@@ -475,6 +574,41 @@ link <id> for user <id> created by …`, `links revoked: N …`). Start-up: `No 
   `PhotoUrlsProvider(coachPhotoUrls(id))` (photos load only from the coach photo route). Nothing under
   `screens/coach` imports `@/store/`, calls `dataActions` or opens a sheet. The user's own screens are unchanged
   (`ProgressView` = `usePeriod()` + `ProgressBody`; `useToday` untouched).
+- **Workouts UI** (`features/exercises`, `features/workouts`; `docs/workouts-steps-rebrand.md` §3). Routes, not sheets
+  (W9), registered flat and absolute (wouter **without `nest`**, so `ListRow` / back links resolve), URLs in
+  `lib/workoutRoutes.ts`: `/workouts` «Мої тренування» (a live session banner, «Почати» / «Продовжити» per workout,
+  «Незавершені», «+ Нове тренування», «Бібліотека вправ», «Історія тренувань», «Записати минуле тренування»),
+  `/workouts/new` and `/workouts/edit/:id` (builder), `/workouts/library` and `/workouts/library/:id` («Вправи»;
+  `ExerciseLibraryRoute`: on the desktop the list with the exercise in a pane next to it, on the phone the list or the
+  exercise page), `/workouts/session/:id` (live session, or the summary / edit of a done one), `/workouts/log?date=
+&workout=` (a past day, nothing stored until «Зберегти»), `/workouts/history`; anything else → `/workouts`. The
+  desktop sidebar gains «Тренування»; the phone tab bar is unchanged and is **hidden** on the session, the past-day
+  log, the new and the edit builder (`hidesTabBar`, W15), whose sticky footer holds the main action (in the session:
+  «✓ Підхід 2 · 10 × 35 кг», the confirm of the current set). Builder, past-day log and session edit autosave a draft
+  to `localStorage['legko.draft.…']` (restored with «Є незбережені зміни · Відновлено» + «Скинути»; only the
+  screen's own «‹» asks); the rest timer keeps its end in `legko.rest.<id>`, vibrates where supported, announces «Час!
+  Наступний підхід» once and stays mint, counting up, until the next set. A live session requests a screen wake lock.
+  A session open on another device is read-only («Тренування триває на іншому пристрої» + «Продовжити тут»).
+  **The «Тренування» sheet** (mode `workout`) lists today's scheduled workouts first («За планом», «N вправ · ≈ 45
+  хв»), «Вільне тренування», the sessions «Записано», a live one as «Тренування триває — Продовжити»; a past day says
+  «Записати тренування» and opens the log. **The «Кроки» sheet** (`SheetMode 'steps'`, deep link `/?sheet=steps`, «+»
+  menu row «Кроки» between Тренування and Вага): a big «Кроки за день» input (numeric, grouped digits), −1000 / −500 /
+  +500 / +1000, the goal hint («Ціль 10 000 — ще 1 600» / «Ціль виконано ✓») or «≈ N ккал»; empty or 0 deletes; «Запис
+  дня» has «Кроки (за бажанням)» (sent only when changed). **Home** keeps four rows (W10): the Тренування row shows
+  «Триває · 12 хв» + «Продовжити» for a live session (any date), «Сьогодні: Ноги + прес» + «Почати» on a scheduled
+  day with no mark and no done session (two or more open the sheet), a static **«Було»** mark (read «Тренування
+  записано») once a done session exists — then ✓ / ✕ cannot contradict it —, otherwise the usual ✓ / ✕; the sub adds
+  « · 8 400 кроків» and, with a done session today, « · спалено N ккал» (≤ 2 lines; fits 390×763, e2e-guarded).
+  **Calendar day**: one line per done session («Ноги + прес · 48 хв · 310 ккал»), the types line, «Разом спалено ≈ N
+  ккал» when the day also has steps, the static «Було» mark on such a day, and a new **«Кроки»** row («8 400», «з
+  10 000 · ≈ 280 ккал»; empty → «Додати») that opens the steps sheet; `dayStatus` ignores steps and sessions.
+  **Progress**: the Тренування card gains a «Тренування | Обʼєм» chart (shown once the period has training; «Обʼєм»
+  once a session has volume), «Спалено на тренуваннях ≈ …» and «Найчастіші вправи» (links to the exercise page; none
+  for the coach); a «Кроки» card (hidden until steps were ever logged): average, goal, days with the goal, daily bars
+  (weekly averages over 3 months / all) with a goal line only with a goal, «Спалено ≈ N ккал на день». **Settings**:
+  «Цілі» gains «Кроки за день» («Без цілі» … 1 000–50 000, ±500, «+» from none → 8 000); the row «Типи тренувань» is
+  now **«Тренування»** (slug `workouts`: «Мої тренування ›», «Бібліотека вправ ›», then «Мої типи»); «Нагадування» →
+  Тренування lists «За розкладом: Пн, Ср — Ноги + прес · …».
 - **Data**: `apps/web/src/store/data.ts` — `useAppData()`, `useSettings()`, `useSyncState()`, `dataActions.*`,
   `startSync()`. Screens never call the API for data directly.
   Implementation: zustand state; device cache in IndexedDB (`idb-keyval`, **per account**: `legko.user` = the full
@@ -504,9 +638,9 @@ legko.wipePending` tombstone until it is (no device copy is rendered while it ex
   `saveDay` / `deleteDay` are deprecated (no caller; the new client never sends `day.put` / `day.delete`).
 - **UI state**: `apps/web/src/store/ui.ts` — `ui.openSheet(date, mode, patch?)`, `ui.closeSheet()`, `ui.flash(text)`,
   `ui.moveSheet(date)` (changes the open sheet's date keeping its mode, key and patch — the new-meal ‹ › move her draft
-  to that day). `SheetMode = 'menu' | 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'setup' |
+  to that day). `SheetMode = 'menu' | 'day' | 'food' | 'meal' | 'workout' | 'steps' | 'weight' | 'measure' | 'setup' |
 'install'` («Що записати?», «Запис дня», «Їжа» — the day's list of meals, «Прийом їжі» — a new meal, «Тренування»,
-  «Контрольне зважування», «Заміри тіла», «Перші кроки», «Встановлення на iPhone»); `SheetPatch { trained? }`
+  «Кроки», «Контрольне зважування», «Заміри тіла», «Перші кроки», «Встановлення на iPhone»); `SheetPatch { trained? }`
   pre-fills the `workout` and `day` sheets. The menu and every record form share one sheet instance (the body swaps in
   place; the menu's «Їжа» row swaps to `'meal'`). An existing meal (or a new one from «+ Прийом їжі») opens in a
   **stacked** sheet «Прийом їжі» rendered inside «Їжа» / «Запис дня», and a position in «Позиція» / «Нова позиція»
@@ -524,7 +658,7 @@ legko.wipePending` tombstone until it is (no device copy is rendered while it ex
 - **Deep links** (client parsing; the server's `DEEP_LINKS` are unchanged): `/?sheet=day&trained=1` opens
   «Тренування» with ✓ pre-selected (legacy alias kept for delivered workout pushes), `/?sheet=day` the full day,
   `/?sheet=food` «Їжа» (the day's meals), `/?sheet=workout[&trained=1]` «Тренування», `/?sheet=weight`,
-  `/?sheet=measure`; each opens that sheet for today and cleans the URL (handled by `SheetHost`). `menu`, `meal` (a
+  `/?sheet=measure`, `/?sheet=steps`; each opens that sheet for today and cleans the URL (handled by `SheetHost`). `menu`, `meal` (a
   new meal opens only from a tap, with the keyboard), `setup`, `install` and unknown values are not linkable: ignored
   and removed. Notification clicks focus an open window and navigate it (asking first when a meal is being typed).
 - **PWA**: `vite-plugin-pwa` `injectManifest` with `src/sw.ts` (precache app shell, SPA navigation fallback
@@ -577,6 +711,45 @@ legko.wipePending` tombstone until it is (no device copy is rendered while it ex
   today; «Пропущено · 12 жовтня — 65,4 кг» when the last scheduled day in the past 6 days was missed after an earlier
   record (never for a brand-new account, never before the first-run setup); otherwise the latest record and the next
   date. Order of the rules: done → off → due → overdue → upcoming.
+
+**Workouts and steps** (`packages/shared/src/workouts.ts`, pure, no clock; `docs/workouts-steps-rebrand.md` §1.7).
+Only `status: 'done'` sessions count anywhere, and within them only the **done sets of exercises that are not
+skipped**; per-exercise maths pools the entries of one `exerciseId` within a session.
+
+- **Body weight on a date** (`bodyWeightOn`): the latest weigh-in on or before it, else the earliest one after it,
+  else **70 kg** (`FALLBACK_BODY_KG`).
+- **Active time of an exercise**: weight / bodyweight `n × setSec + (n − 1) × restSec`, where a set takes
+  `clamp(reps × 3, 15, 120)` s (40 s when reps are unknown); time `Σ sec + (n − 1) × restSec`; cardio `Σ min × 60`
+  (no rest). Rests count at the exercise's MET, because Compendium strength METs already include a normal session's
+  rests.
+- **Session kcal** (`sessionKcalParts(session, kg)` → `{ total, stepCounted }`, `sessionKcal = .total`): Σ `MET × kg ×
+activeSec / 3600`, rounded. **Cardio terms are typed minutes and are never scaled.** The estimated non-cardio terms
+  are scaled down to `max(0, durationSec − cardioSec)` only when the duration is known, shorter than the estimate,
+  and **plausible**: `durationSec ≥ max(300, 0.25 × estimated active time)` — ticking everything two minutes after the
+  gym does not shrink the estimate (the summary then says «Тривалість можна виправити в «Змінити»»).
+- **Steps kcal**: `stepsKcal = round(steps × 0.0005 × kg)` (`STEP_KCAL_PER_KG`; ≈ 35 kcal per 1 000 steps at 70 kg).
+- **Burned per day** (`dayBurned`): `total = sessions + steps − stepCounted` when the day has steps, where
+  `stepCounted` is the kcal of `STEP_COUNTED_EXERCISES` (`lib.walk`, `lib.incline-walk`, `lib.run`) — **ходьба й біг уже
+  враховані в кроках**, so a logged walk is not counted twice. Burned kcal is **display only** («спалено», «≈ N ккал»):
+  it is never subtracted from intake and never changes the kcal goal (W8).
+- **Steps over a range** (`stepsStats(steps, from, to, goal)` → `{ avg, days, goalDays }`): the average of the logged
+  days in the range (null without any), how many were logged, how many reached the goal. Progress and the coach use
+  the same function.
+- **Volume** = Σ `kg × reps` over the done sets of weight exercises (bodyweight / time / cardio add nothing).
+- **Best set** (`bestSetValue` → `{ metric, value }`): weight → max kg with ≥ 1 rep; bodyweight → max reps; time →
+  max seconds; cardio → max km when any km, else max minutes. **Records are metric-aware**: an exercise's best beats
+  every earlier done session's best **in the same metric**, and there is no record without an earlier value in that
+  metric (the first time is never a record; cardio [5 km, 30 min, 6 km] → only «6 км (було 5)»).
+- **Prefill** (`lastPerformance`): the latest earlier done session with a done set of that exercise; its done sets,
+  then the plan, then `DEFAULT_SET`. **Progression hint** only when that last time was not skipped and every set was
+  done (weight also needs kg on each): «Минулого разу всі підходи виконано — спробуй +2,5 кг» (+1 кг for dumbbell /
+  kettlebell), «+1 повторення», «+10 с»; never for cardio; never applied by itself.
+- **Derived types** (primary muscles of done, non-skipped exercises): cardio → «Кардіо» (walks → «Прогулянка»),
+  upper + lower → «Все тіло», else «Верх тіла» / «Низ тіла»; core → «Прес»; merged with the types she chose, never
+  removing one.
+- Workouts statistics: «Тренування» bars = trained days per bucket (so ✓-only days still count), «Обʼєм» = Σ session
+  volume; buckets week → 7 days, month and 3 months → weeks from Monday, all → months (≤ 12). «Найчастіші вправи» =
+  sessions per exercise in the period, top 5.
 
 ### 3.7 AI calorie estimate, food photos, frequent dishes
 
@@ -695,6 +868,23 @@ Full plan, formulas and UX: **`docs/coach-cabinet.md`**. Summary of the rules:
 - **Deploy note**: no schema change, no migration, no new env or dependency — an ordinary deploy
   (`docs/DEPLOY.md`). After it, every ordinary user sees the transparency line in «Акаунт» on their next visit, and
   admins get «Клієнти» in the sidebar / tab bar. Rollback = the previous image (nothing to undo in the database).
+- **Workouts and steps in «Клієнти»** (`docs/workouts-steps-rebrand.md` §3.18, read-only like everything else):
+  - `DataReader.read()` returns the four new arrays (never foods); new readers `stepsBetween`, `sessionsBetween`
+    (done only), `workouts()`; the list item gains `steps`, `sessions` (`CoachSessionDigest`) and `schedule` (§3.2).
+  - `CoachSummary` gains `steps { avg, days, goal, goalDays }` (shared `stepsStats` over the full days before today,
+    like kcal) and `sessions { count, kcal }` (the same range as workouts: Monday … today / the last 30 days).
+  - **Table**: a sortable «Кроки» column after «Тренування» («8 300» + a muted « / 8 000» with a goal, «—» without
+    steps; read as «кроків у середньому 8 300 на день за 7 днів, ціль 8 000»; fewest first, rows without steps last).
+    «Тренування» stays done vs planned, the plan being `settings.rem.workout.days` (W6). The phone list is unchanged
+    (its sort list gains «Кроки»).
+  - **Client page**: a fifth tab **«Тренування»** (`?tab=workouts`, 7 / 30): the schedule line («Розклад: Пн, Ср —
+    Ноги + прес · Пт — Верх тіла» / «Розкладу немає»), a strip Тренування · Спалено · Обʼєм · Кроки, сер., then every
+    done session of the range newest first («12 жовтня · Ноги + прес», «48 хв · ≈ 310 ккал») with one static row
+    per exercise and its sets, «Пропущено», and a neutral «рекорд» pill. «Огляд» gains «Кроки, сер.»; the calendar
+    day gains the «Кроки» row and each session's exercises; «Прогрес» shows her workouts and steps cards without
+    exercise links. Static rows only: no toggles, chevrons or links into her pages (sources test forbids `/workouts`
+    links, the route helpers and `startWorkout` under `screens/coach`).
+  - The detail's data goes through shared `withDataDefaults`, so a new bundle works against an older server.
 
 ## 4. Conventions
 

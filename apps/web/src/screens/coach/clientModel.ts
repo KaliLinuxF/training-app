@@ -5,11 +5,24 @@
 import { f0, f1, sgn, type CoachPeriod, type CoachSummary } from '@legko/shared';
 import { isPeriod, type Period } from '@/lib/stats';
 import { deltaTone, type StatItem, type Tone } from '@/ui';
-import { COACH_COPY, flagDetail, flagPill, KPI, rangeTitle, workoutsText, loggedText, type CoachTab } from './copy';
+import {
+  COACH_COPY,
+  flagDetail,
+  flagPill,
+  KPI,
+  loggedText,
+  rangeTitle,
+  stepsGoalSuffix,
+  workoutsText,
+  type CoachTab,
+} from './copy';
 import { parsePeriod } from './clientsModel';
 import { clientHref } from './nav';
 
-export const TABS: readonly CoachTab[] = ['overview', 'progress', 'calendar', 'nutrition'];
+export const TABS: readonly CoachTab[] = ['overview', 'progress', 'calendar', 'nutrition', 'workouts'];
+
+/** The tabs that show the 7 / 30 switch (`days`). */
+export const DAYS_TABS: readonly CoachTab[] = ['overview', 'nutrition', 'workouts'];
 
 export const isTab = (v: unknown): v is CoachTab => TABS.includes(v as CoachTab);
 
@@ -58,9 +71,12 @@ export const calendarHref = (id: string, params: DetailParams, date: string): st
 
 const DASH = '—';
 
-/** «Зараз» of «Огляд»: weight, its change and progress, then kcal, Б · Ж · В, workouts and records (§6.3). */
+/**
+ * «Зараз» of «Огляд»: weight, its change and progress, then kcal, Б · Ж · В, workouts, the steps average («8 300» +
+ * « / 8 000» with a goal) and records (§6.3).
+ */
 export function kpiItems(s: CoachSummary): StatItem[] {
-  const { weight, kcal, macros, workouts, logged } = s;
+  const { weight, kcal, macros, workouts, steps, logged } = s;
   const kcalTone: Tone | undefined = kcal.avg === null ? undefined : kcal.avg > kcal.goal ? 'acc' : 'acc2';
   const macroValue =
     macros.days > 0 ? [macros.avg.protein, macros.avg.fat, macros.avg.carbs].map((v) => f0(v)).join(' · ') : DASH;
@@ -85,6 +101,11 @@ export function kpiItems(s: CoachSummary): StatItem[] {
       label: KPI.workouts,
       value: workoutsText(workouts.done, workouts.planned),
       tone: workouts.done < workouts.plannedSoFar ? 'acc' : undefined,
+    },
+    {
+      label: KPI.steps,
+      value: f0(steps.avg),
+      unit: steps.avg === null || steps.goal === null ? undefined : stepsGoalSuffix(steps.goal).trim(),
     },
     { label: KPI.logged, value: loggedText(logged.days, logged.of) },
   ];

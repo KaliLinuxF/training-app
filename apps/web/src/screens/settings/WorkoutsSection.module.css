@@ -1,0 +1,15 @@
+/* «Мої типи» above the types card: the same group label as the kit's ListGroup caption. */
+.types {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.caption {
+  margin: 0;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}

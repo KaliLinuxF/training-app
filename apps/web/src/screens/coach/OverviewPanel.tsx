@@ -49,7 +49,7 @@ export function OverviewPanel({ data, today, summary, now }: OverviewPanelProps)
       <h2 className="visually-hidden">{TAB_LABELS.overview}</h2>
       <Card as="section" full aria-labelledby={nowId}>
         <CardHeader title={COACH_COPY.now} titleId={nowId} />
-        <StatStrip items={kpiItems(summary)} columns={2} desktopColumns={4} />
+        <StatStrip items={kpiItems(summary)} columns={2} desktopColumns={3} />
       </Card>
       <ListGroup title={COACH_COPY.checkTitle} full>
         {rows.map((row) => (

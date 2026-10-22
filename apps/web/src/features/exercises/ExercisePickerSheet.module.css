@@ -1,0 +1,15 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.empty {
+  margin: 0;
+  padding: 18px 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+  text-align: center;
+}

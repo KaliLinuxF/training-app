@@ -38,6 +38,10 @@
   background: var(--acc);
 }
 
+.idle {
+  background: var(--faint);
+}
+
 .labels {
   display: flex;
   gap: 8px;

@@ -259,3 +259,65 @@ test.describe('desktop sidebar', () => {
     await expect(recordButton(app)).toHaveAttribute('aria-expanded', 'true');
   });
 });
+
+test.describe('workouts in the shell', () => {
+  test.use({ seed: 'training' });
+
+  test('desktop: «Тренування» sits after «Прогрес» in the sidebar and stays marked on every /workouts page', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'desktop', 'desktop sidebar only');
+    await app.goto('/');
+    const links = app.nav.getByRole('link');
+    await expect(links).toHaveText(['Головна', 'Календар', 'Прогрес', 'Тренування', 'Налаштування']);
+    const workouts = app.nav.getByRole('link', { name: 'Тренування', exact: true });
+    await expect(workouts).not.toHaveAttribute('aria-current');
+
+    await workouts.click();
+    await expect(page).toHaveURL(/\/workouts$/);
+    await expect(page.getByRole('heading', { level: 1, name: 'Мої тренування' })).toBeVisible();
+    await expect(workouts).toHaveAttribute('aria-current', 'page');
+
+    for (const path of ['/workouts/library', '/workouts/history', '/workouts/new']) {
+      await page.goto(path);
+      await expect(workouts, path).toHaveAttribute('aria-current', 'true');
+      await expect(tab(app, 'Прогрес'), path).not.toHaveAttribute('aria-current');
+    }
+  });
+
+  test('phone: the tab bar keeps its four tabs on /workouts and is gone on the full-screen pages', async ({
+    app,
+    page,
+  }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone tab bar only');
+    await app.goto('/workouts');
+    await expect(page.getByRole('heading', { level: 1, name: 'Мої тренування' })).toBeVisible();
+    for (const name of TABS) await expect(tab(app, name)).toBeVisible();
+    await expect(app.nav.getByRole('link', { name: 'Тренування' })).toHaveCount(0);
+    await expect(recordButton(app)).toBeVisible();
+
+    await page.getByRole('button', { name: '+ Нове тренування', exact: true }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Нове тренування' })).toBeVisible();
+    await expect(app.nav).toHaveCount(0);
+    await expect(recordButton(app)).toHaveCount(0);
+
+    await page.goBack();
+    await expect(page.getByRole('heading', { level: 1, name: 'Мої тренування' })).toBeVisible();
+    await expect(app.nav).toBeVisible();
+    await app.goto('/workouts/library');
+    await expect(app.nav).toBeVisible();
+  });
+
+  test('phone: no tab bar on a session, back on Home after «Згорнути»', async ({ app, page }, info) => {
+    test.skip(info.project.name !== 'iphone', 'phone tab bar only');
+    await app.goto('/');
+    await app.region('Сьогодні').getByRole('button', { name: /^Почати тренування/ }).first().click();
+    await expect(page).toHaveURL(/\/workouts\/session\//);
+    await expect(app.nav).toHaveCount(0);
+    await page.getByRole('link', { name: 'Згорнути тренування', exact: true }).click();
+    await expect(app.heading('Головна')).toBeVisible();
+    await expect(app.nav).toBeVisible();
+    await expect(app.region('Сьогодні').getByRole('button', { name: /^Продовжити тренування/ })).toBeVisible();
+  });
+});

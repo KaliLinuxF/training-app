@@ -63,6 +63,8 @@ function rowsOf(s: TestServer, id: UserId): Record<string, unknown[]> {
 }
 
 const SECRET_KEY = /password|hash|token|session|endpoint|p256dh|^auth$|invite/i;
+/** Workout sessions (schema v5), not sign-in sessions: allowed keys that the pattern above would catch. */
+const WORKOUT_SESSION_KEYS: ReadonlySet<string> = new Set(['sessions', 'deletedSessions']);
 
 /** Paths of keys that look like a secret, at any depth. */
 function secretKeysIn(value: unknown, path = ''): string[] {
@@ -70,7 +72,8 @@ function secretKeysIn(value: unknown, path = ''): string[] {
   if (typeof value !== 'object' || value === null) return [];
   return Object.entries(value).flatMap(([key, child]) => {
     const here = path ? `${path}.${key}` : key;
-    return [...(SECRET_KEY.test(key) ? [here] : []), ...secretKeysIn(child, here)];
+    const secret = SECRET_KEY.test(key) && !WORKOUT_SESSION_KEYS.has(key);
+    return [...(secret ? [here] : []), ...secretKeysIn(child, here)];
   });
 }
 
@@ -354,7 +357,7 @@ describe('GET /api/coach/clients/:id', () => {
     const body = await json<CoachClientResponse>(res);
     const own = await json<AppData>(await s.call(API.data, { cookie: annaCookie }));
     expect(own.foods).toHaveLength(1);
-    expect(body.data).toEqual({ ...own, foods: [] });
+    expect(body.data).toEqual({ ...own, foods: [], deletedSessions: [] });
     expect(Object.keys(body.client).sort()).toEqual(['createdAt', 'id', 'lastSeenAt', 'status', 'username']);
     expect(body.client).toMatchObject({ id: s.anna.id, username: 'anna', status: 'active' });
     expect(secretKeysIn(body)).toEqual([]);

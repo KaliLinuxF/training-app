@@ -21,3 +21,9 @@
 .toneAcc2 {
   color: var(--acc2D);
 }
+
+/* «Почати» / «Продовжити» beside the Тренування row: never wraps, never squeezes the row's title. */
+.workoutCta {
+  white-space: nowrap;
+  flex: none;
+}

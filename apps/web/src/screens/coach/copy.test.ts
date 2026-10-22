@@ -16,9 +16,12 @@ import {
   nobodyFound,
   periodLabel,
   phoneSub,
+  scheduleLine,
   shownCount,
   sortOptionLabel,
   statusPill,
+  stepsGoalSuffix,
+  stepsLong,
   TAB_LABELS,
   tableCaption,
   tableNote,
@@ -75,13 +78,19 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
       neverSeen: 'Ще не входили',
       noRecordsEver: 'Жодного запису від реєстрації',
       newClient: 'Новий клієнт',
+      noSchedule: 'Розкладу немає',
+      noSessions: 'За цей період тренувань не записано',
+      skipped: 'Пропущено',
+      record: 'рекорд',
     });
     expect(TAB_LABELS).toEqual({
       overview: 'Огляд',
       progress: 'Прогрес',
       calendar: 'Календар',
       nutrition: 'Харчування',
+      workouts: 'Тренування',
     });
+    expect(KPI.steps).toBe('Кроки, сер.');
     expect([periodLabel(7), periodLabel(30)]).toEqual(['7 днів', '30 днів']);
     expect(nobodyFound('ол')).toBe('Нікого не знайдено за «ол»');
     expect(shownCount(2, 5)).toBe('Показано 2 з 5');
@@ -96,7 +105,7 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
     expect(countLine(11, 0)).toBe('11 клієнтів');
   });
 
-  it('names the 8 columns for both periods', () => {
+  it('names the 9 columns for both periods', () => {
     const week = columnLabels(7);
     expect(Object.values(week).map((c) => c.label)).toEqual([
       'Клієнт',
@@ -105,11 +114,13 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
       'До цілі',
       'Ккал · 7 дн.',
       'Тренування',
+      'Кроки',
       'Записи · 7 дн.',
       'Активність',
     ]);
     expect(week.kcal.sub).toBe('Б · Ж · В, г');
     expect(week.workouts.title).toBe('за тиждень');
+    expect(week.steps).toEqual({ label: 'Кроки', title: 'середнє за день' });
     const month = columnLabels(30);
     expect([month.change.label, month.kcal.label, month.logged.label, month.workouts.title]).toEqual([
       'За 30 днів',
@@ -122,15 +133,47 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
 
   it('notes the windows under the table (signals are always the last 7 days)', () => {
     expect(tableNote(7)).toBe(
-      'Калорії, Б · Ж · В і записи — за повні дні до сьогодні; тренування — з понеділка; сигнали — за останні 7 днів.',
+      'Калорії, Б · Ж · В, кроки і записи — за повні дні до сьогодні; тренування — з понеділка; сигнали — за останні 7 днів.',
     );
     expect(tableNote(30)).toBe(
-      'Калорії, Б · Ж · В і записи — за повні дні до сьогодні; тренування — за 30 днів; сигнали — за останні 7 днів.',
+      'Калорії, Б · Ж · В, кроки і записи — за повні дні до сьогодні; тренування — за 30 днів; сигнали — за останні 7 днів.',
     );
   });
 
+  it('writes the steps average, its goal and the long form for screen readers', () => {
+    expect(stepsGoalSuffix(10_000)).toBe(` / 10${NB}000`);
+    expect(stepsGoalSuffix(null)).toBe('');
+    expect(stepsLong(7850, 10_000, 7)).toBe(`кроків у середньому 7${NB}850 на день за 7 днів, ціль 10${NB}000`);
+    expect(stepsLong(7850, null, 30)).toBe(`кроків у середньому 7${NB}850 на день за 30 днів`);
+    expect(stepsLong(null, 10_000, 7)).toBe('кроки: за 7 днів не записано');
+  });
+
+  it('writes the schedule by the first weekday (Mon … Sun), leaving out workouts without days', () => {
+    expect(
+      scheduleLine([
+        { name: 'Верх тіла', days: [5] },
+        { name: 'Розтяжка', days: [] },
+        { name: 'Ноги + прес', days: [3, 1] },
+        { name: 'Прогулянка', days: [0, 6] },
+      ]),
+    ).toBe('Розклад: Пн, Ср — Ноги + прес · Пт — Верх тіла · Сб, Нд — Прогулянка');
+    expect(scheduleLine([{ name: 'Розтяжка', days: [] }])).toBe('Розкладу немає');
+    expect(scheduleLine([])).toBe('Розкладу немає');
+  });
+
   it('offers short phone sort options (they share a row with the 7 / 30 switch)', () => {
-    const keys = ['attention', 'name', 'weight', 'change', 'goalPct', 'kcal', 'workouts', 'logged', 'activity'] as const;
+    const keys = [
+      'attention',
+      'name',
+      'weight',
+      'change',
+      'goalPct',
+      'kcal',
+      'workouts',
+      'steps',
+      'logged',
+      'activity',
+    ] as const;
     const labels = keys.map((k) => sortOptionLabel(k));
     expect(labels).toEqual([
       'За увагою',
@@ -140,6 +183,7 @@ describe('coach copy (docs/coach-cabinet.md §7.2)', () => {
       'До цілі',
       'Калорії',
       'Тренування',
+      'Кроки',
       'Записи',
       'Активність',
     ]);

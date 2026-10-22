@@ -18,7 +18,7 @@ export interface ProgressPanelProps {
 /**
  * «Прогрес»: the client's own «Мій прогрес» (`ProgressBody`) — its own grid, never nested in another — without the
  * title and without any «+ Записати …», with the period in `?period=` and the «Історія калорій» rows opening this
- * client's «Календар» on that day. Every change replaces the entry and keeps its back stamp.
+ * client's «Календар» on that day; the «Найчастіші вправи» rows stay static (no links into her exercise pages). Every change replaces the entry and keeps its back stamp.
  */
 export function ProgressPanel({ clientId, data, today, params }: ProgressPanelProps) {
   const replace = useReplaceParams();
@@ -36,6 +36,7 @@ export function ProgressPanel({ clientId, data, today, params }: ProgressPanelPr
         audience="coach"
         dayHref={dayHref}
         onOpenDay={replace}
+        exerciseHref={null}
         className={s.panel}
       />
     </>

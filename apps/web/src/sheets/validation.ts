@@ -14,7 +14,19 @@ export const FIELD_ERRORS = {
   kcalGoalRequired: 'Вкажи калорії на день',
   text: `Задовгий текст — не більше ${grouped(LIMITS.text)} символів`,
   types: `Можна обрати до ${LIMITS.types} типів`,
+  steps: `Кроки — не більше ${grouped(LIMITS.steps.max)} за день`,
 } as const;
+
+/** Steps: empty (or 0) is fine — saving it deletes the day's steps —, otherwise a whole number up to 100 000. */
+export function stepsError(text: string): string | undefined {
+  const compact = text.replace(/\s/g, '');
+  if (!compact) return undefined;
+  if (!/^\d+$/.test(compact)) return FIELD_ERRORS.steps;
+  return Number(compact) <= LIMITS.steps.max ? undefined : FIELD_ERRORS.steps;
+}
+
+/** «8400» → «8 400» (plain spaces), the way the steps input shows its digits; '' stays ''. */
+export const groupedSteps = (digits: string): string => (digits ? grouped(Number(digits)) : '');
 
 /** Free text (food, notes): what is saved is trimmed, so that is what has to fit. */
 export const textError = (text: string): string | undefined =>

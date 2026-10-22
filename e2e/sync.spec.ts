@@ -1,7 +1,8 @@
-import { MEALS_TODAY } from './fixtures/data';
-import { TODAY } from './support/env';
+import { API, type AppData } from '../packages/shared/src/index';
+import { e2eSession, MEALS_TODAY } from './fixtures/data';
+import { FIXED_NOW, TODAY } from './support/env';
 import { App } from './support/app';
-import { loginContext } from './support/server';
+import { loginContext, sessionOf } from './support/server';
 import { expect, test } from './support/test';
 
 /** Two devices on the same account: changes travel through the server. */
@@ -268,5 +269,47 @@ test.describe('sync between devices', () => {
     await expect(app.region('Поточна вага')).toContainText('до цілі 7,4 кг');
     await app.go('Прогрес');
     await expect(app.region('Вага')).toContainText('Ціль 58,0');
+  });
+
+  test('a stale «active» session put from a phone’s outbox never reopens the session finished elsewhere', async ({
+    app,
+    page,
+    server,
+  }) => {
+    const live = e2eSession({ id: 'e2eSync00001' });
+    const finished = {
+      ...live,
+      status: 'done' as const,
+      rev: 2,
+      finishedAt: FIXED_NOW.getTime() + 40 * 60_000,
+      durationSec: 2400,
+      exercises: live.exercises.map((e) => ({ ...e, sets: e.sets.map((x) => ({ ...x, done: true })) })),
+    };
+    // The laptop started and finished it.
+    expect((await server.sendOps([{ kind: 'session.put', value: live }])).status()).toBe(200);
+    expect((await server.sendOps([{ kind: 'session.put', value: finished }])).status()).toBe(200);
+
+    // The phone still holds it live, with an unsent edit (rev 1) in its outbox.
+    const stale = { ...live, rev: 1, notes: 'з телефона' };
+    const copy = await server.getData();
+    const user = await server.me();
+    await page.goto(API.health);
+    await app.seedDeviceCopy(
+      user,
+      { ...copy, sessions: copy.sessions.map((s) => (s.id === live.id ? stale : s)) },
+      [{ id: 'e2e-stale-op-1', op: { kind: 'session.put', value: stale } }],
+    );
+    await app.goto('/');
+
+    await expect.poll(async () => (await app.deviceCache()).outbox, { timeout: 15_000 }).toEqual([]);
+    expect(sessionOf(await server.getData(), live.id)).toMatchObject({ status: 'done', rev: 2, notes: '' });
+    // Even a higher rev cannot reopen it (W13).
+    expect((await server.sendOps([{ kind: 'session.put', value: { ...stale, rev: 9 } }])).status()).toBe(200);
+    expect(sessionOf(await server.getData(), live.id)).toMatchObject({ status: 'done', rev: 2 });
+    // The phone's copy follows the server once it re-reads it.
+    await app.reload();
+    await expect
+      .poll(async () => sessionOf((await app.deviceCache()).data as AppData, live.id)?.status)
+      .toBe('done');
   });
 });

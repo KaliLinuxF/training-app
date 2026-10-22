@@ -83,6 +83,31 @@ describe('BarChart', () => {
     expect(container.textContent).toBe('');
   });
 
+  it('draws no goal element without a goal (absent or null)', () => {
+    for (const goalPct of [undefined, null]) {
+      const { unmount } = render(<BarChart bars={bars} goalPct={goalPct} aria-label="Тренування" />);
+      const plot = screen.getByRole('img', { name: 'Тренування' }).firstElementChild as HTMLElement;
+      const children = Array.from(plot.children) as HTMLElement[];
+      expect(children).toHaveLength(bars.length);
+      expect(children.map((b) => b.style.height)).toEqual(['64.2%', '3%', '88%']);
+      expect(children.some((b) => b.style.bottom !== '')).toBe(false);
+      unmount();
+    }
+  });
+
+  it('has a neutral idle tone with its own class', () => {
+    const idle: ChartBar[] = [
+      { heightPct: 40, tone: 'idle' },
+      { heightPct: 0, tone: 'empty' },
+    ];
+    render(<BarChart bars={idle} aria-label="Обʼєм" />);
+    const [a, b] = Array.from(
+      (screen.getByRole('img', { name: 'Обʼєм' }).firstElementChild as HTMLElement).children,
+    ) as HTMLElement[];
+    expect(a?.className).toMatch(/idle/);
+    expect(a?.className).not.toBe(b?.className);
+  });
+
   it('shows labels only when labeled', () => {
     const { rerender } = render(<BarChart bars={bars} goalPct={80} />);
     expect(screen.queryByText('Пн')).toBeNull();

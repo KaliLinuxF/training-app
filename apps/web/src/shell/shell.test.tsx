@@ -5,7 +5,17 @@ import { memoryLocation } from 'wouter/memory-location';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cssValue, px, readCss } from '@/ui/internal/cssSource';
 import { installMatchMedia, stubScrollTo } from '@/ui/internal/testing';
-import { COACH_NAV_ITEM, NAV_ITEMS, NAV_SPLIT, isNavActive, isNavRoot, isWidePage, navItems } from './nav';
+import {
+  COACH_NAV_ITEM,
+  NAV_ITEMS,
+  NAV_SPLIT,
+  WORKOUTS_NAV_ITEM,
+  hidesTabBar,
+  isNavActive,
+  isNavRoot,
+  isWidePage,
+  navItems,
+} from './nav';
 import { Sidebar } from './Sidebar';
 import { TabBar } from './TabBar';
 
@@ -33,17 +43,26 @@ describe('nav', () => {
     expect(NAV_SPLIT).toBe(2);
   });
 
-  it('gives everyone but an admin exactly the four sections, in both places', () => {
-    expect(navItems(false, 'sidebar')).toBe(NAV_ITEMS);
+  it('keeps the four tabs for everyone but an admin; the sidebar adds «Тренування» after «Прогрес»', () => {
     expect(navItems(false, 'tabbar')).toBe(NAV_ITEMS);
+    expect(WORKOUTS_NAV_ITEM).toEqual({ href: '/workouts', label: 'Тренування', icon: 'workout' });
+    expect(navItems(false, 'sidebar').map((i) => i.label)).toEqual([
+      'Головна',
+      'Календар',
+      'Прогрес',
+      'Тренування',
+      'Налаштування',
+    ]);
+    expect(navItems(false, 'sidebar')).toContain(WORKOUTS_NAV_ITEM);
   });
 
-  it('adds «Клієнти» for an admin: a fifth sidebar link before «Налаштування», in place of «Прогрес» on the tab bar', () => {
+  it('adds «Клієнти» for an admin: a sidebar link before «Налаштування» (after «Тренування»), in place of «Прогрес» on the tab bar', () => {
     expect(COACH_NAV_ITEM).toEqual({ href: '/coach', label: 'Клієнти', icon: 'users' });
     expect(navItems(true, 'sidebar').map((i) => i.label)).toEqual([
       'Головна',
       'Календар',
       'Прогрес',
+      'Тренування',
       'Клієнти',
       'Налаштування',
     ]);
@@ -55,6 +74,37 @@ describe('nav', () => {
     ]);
     // The four sections themselves are untouched.
     expect(NAV_ITEMS.map((i) => i.href)).toEqual(['/', '/calendar', '/progress', '/settings']);
+  });
+
+  it('«Тренування» stays active on every /workouts page; the tab bar hides on the full-screen ones only', () => {
+    for (const path of [
+      '/workouts',
+      '/workouts/library',
+      '/workouts/session/abc',
+      '/workouts/edit/x',
+      '/workouts/history',
+    ])
+      expect(isNavActive('/workouts', path), path).toBe(true);
+    expect(isNavRoot('/workouts', '/workouts')).toBe(true);
+    expect(isNavRoot('/workouts', '/workouts/history')).toBe(false);
+    expect(isNavActive('/workouts', '/workoutsx')).toBe(false);
+
+    for (const path of ['/workouts/session/abc', '/workouts/log', '/workouts/new', '/workouts/edit/abc'])
+      expect(hidesTabBar(path), path).toBe(true);
+    for (const path of [
+      '/',
+      '/calendar',
+      '/progress',
+      '/settings',
+      '/coach',
+      '/workouts',
+      '/workouts/library',
+      '/workouts/library/lib.plank',
+      '/workouts/history',
+      '/workouts/sessionx',
+      '/workouts/newx',
+    ])
+      expect(hidesTabBar(path), path).toBe(false);
   });
 
   it('«Клієнти» stays active on a client page; only the coach pages are wide', () => {
@@ -126,7 +176,10 @@ describe('TabBar', () => {
     expect(link('Налаштування').getAttribute('aria-current')).toBe('page');
     cleanup();
 
-    inRouter('/settings/goals', <TabBar location="/settings/goals" items={NAV_ITEMS} onRecord={() => undefined} />);
+    inRouter(
+      '/settings/goals',
+      <TabBar location="/settings/goals" items={NAV_ITEMS} onRecord={() => undefined} />,
+    );
     expect(link('Налаштування').getAttribute('aria-current')).toBe('true');
     for (const name of ['Головна', 'Календар', 'Прогрес'])
       expect(link(name).getAttribute('aria-current')).toBeNull();
@@ -161,7 +214,10 @@ describe('TabBar', () => {
 
   it('at /settings the active tab scrolls to the top without navigating', () => {
     const scrollTo = stubScrollTo();
-    const { memory } = inRouter('/settings', <TabBar location="/settings" items={NAV_ITEMS} onRecord={() => undefined} />);
+    const { memory } = inRouter(
+      '/settings',
+      <TabBar location="/settings" items={NAV_ITEMS} onRecord={() => undefined} />,
+    );
     fireEvent.click(link('Налаштування'));
     expect(memory.history).toEqual(['/settings']);
     expect(scrollTo).toHaveBeenCalledExactlyOnceWith({ top: 0, behavior: 'smooth' });
@@ -237,19 +293,29 @@ describe('Sidebar', () => {
     expect(memory.history).toEqual(['/settings']);
   });
 
+  it('marks «Тренування» on a /workouts sub-page and goes to /workouts', () => {
+    const { memory } = inRouter(
+      '/workouts/library',
+      <Sidebar location="/workouts/library" items={navItems(false, 'sidebar')} onRecord={() => undefined} />,
+    );
+    expect(link('Тренування').getAttribute('href')).toBe('/workouts');
+    expect(link('Тренування').getAttribute('aria-current')).toBe('true');
+    expect(link('Прогрес').getAttribute('aria-current')).toBeNull();
+    fireEvent.click(link('Тренування'));
+    expect(memory.history).toEqual(['/workouts']);
+  });
+
   it('renders the admin items: «Клієнти» before «Налаштування», marked on a client page', () => {
     const { memory } = inRouter(
       '/coach/abc',
       <Sidebar location="/coach/abc" items={navItems(true, 'sidebar')} onRecord={() => undefined} />,
     );
     const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
-    expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual([
-      'Головна',
-      'Календар',
-      'Прогрес',
-      'Клієнти',
-      'Налаштування',
-    ]);
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((a) => a.textContent),
+    ).toEqual(['Головна', 'Календар', 'Прогрес', 'Тренування', 'Клієнти', 'Налаштування']);
     expect(link('Клієнти').getAttribute('href')).toBe('/coach');
     expect(link('Клієнти').getAttribute('aria-current')).toBe('true');
     fireEvent.click(link('Клієнти'));
@@ -259,7 +325,10 @@ describe('Sidebar', () => {
 
 describe('TabBar for an admin', () => {
   it('shows Головна, Календар, «+», Клієнти, Налаштування (no Прогрес)', () => {
-    inRouter('/coach', <TabBar location="/coach" items={navItems(true, 'tabbar')} onRecord={() => undefined} />);
+    inRouter(
+      '/coach',
+      <TabBar location="/coach" items={navItems(true, 'tabbar')} onRecord={() => undefined} />,
+    );
     const nav = screen.getByRole('navigation', { name: 'Основна навігація' });
     const items = Array.from(nav.querySelectorAll('a, button')).map(
       (el) => el.getAttribute('aria-label') ?? el.textContent,

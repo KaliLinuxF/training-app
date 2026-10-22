@@ -1,5 +1,7 @@
 import {
   digestDay,
+  digestSession,
+  scheduleOf,
   type CoachClient,
   type CoachClientItem,
   type CoachClientResponse,
@@ -31,7 +33,7 @@ export interface CoachAccess {
    * naming every client read, by id.
    */
   list(actor: AuthedUser, window: CoachWindow): CoachClientItem[];
-  /** One client's profile + full copy (`foods: []`), or null when `rawId` is not a client. Logs one line. */
+  /** One client's profile + full copy (`foods: []`, no session tombstones), or null when `rawId` is not a client. Logs one line. */
   detail(actor: AuthedUser, rawId: string): CoachClientResponse | null;
   /**
    * A photo of that client: bytes, null when the photo is not theirs / missing, or 'no_client' when `rawId` is not
@@ -113,14 +115,18 @@ export function createCoachAccess({ users, data, photos, logger }: CoachAccessDe
         .map((row): CoachClientItem => {
           const reader = data.readerFor(asClient(row));
           const { first, last } = reader.recordSpan(window.to);
+          const weights = reader.weights();
           return {
             client: profile(row),
             settings: reader.settings(),
-            weights: reader.weights(),
+            weights,
             measures: reader.measures(),
             days: reader.daysBetween(window.from, window.to).map(({ date, entry }) => digestDay(date, entry)),
             firstRecord: first,
             lastRecord: last,
+            steps: reader.stepsBetween(window.from, window.to),
+            sessions: reader.sessionsBetween(window.from, window.to).map((s) => digestSession(s, weights)),
+            schedule: scheduleOf(reader.workouts()),
           };
         });
       // Which clients were read, by id only (never a name or content): the list is the widest read.
@@ -135,7 +141,7 @@ export function createCoachAccess({ users, data, photos, logger }: CoachAccessDe
       if (!client) return null;
       const copy = data.readerFor(client.id).read();
       log(actor, `read client ${client.id}`);
-      return { client: profile(client.row), data: { ...copy, foods: [] } };
+      return { client: profile(client.row), data: { ...copy, foods: [], deletedSessions: [] } };
     },
 
     async photo(actor, rawId, photoId, variant) {

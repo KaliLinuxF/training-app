@@ -14,6 +14,7 @@ describe('coachDayModel (read-only day)', () => {
     expect(day.totals?.kcal.value).toBe('1 590');
     expect(day.rows).toEqual([
       { key: 'training', title: 'Тренування', value: null, valueTone: 'ink', text: 'Кардіо' },
+      { key: 'steps', title: 'Кроки', value: null, valueTone: 'ink', text: null },
       { key: 'weight', title: 'Вага', value: null, valueTone: 'ink', text: null },
       { key: 'measures', title: 'Заміри', value: null, valueTone: 'ink', text: null },
       { key: 'notes', title: 'Нотатки', value: null, valueTone: 'ink', text: 'Гарний день, багато ходила' },

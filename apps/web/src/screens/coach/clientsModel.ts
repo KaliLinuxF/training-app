@@ -29,11 +29,22 @@ import {
   rangeWords,
   sinceStartLine,
   statusPill,
+  stepsGoalSuffix,
+  stepsLong,
   workoutsText,
 } from './copy';
 import { clientHref } from './nav';
 
-export type SortKey = 'name' | 'weight' | 'change' | 'goalPct' | 'kcal' | 'workouts' | 'logged' | 'activity';
+export type SortKey =
+  | 'name'
+  | 'weight'
+  | 'change'
+  | 'goalPct'
+  | 'kcal'
+  | 'workouts'
+  | 'steps'
+  | 'logged'
+  | 'activity';
 export type SortDir = 'asc' | 'desc';
 export type ShowFilter = 'attention' | 'all';
 
@@ -44,13 +55,14 @@ export const SORT_KEYS: readonly SortKey[] = [
   'goalPct',
   'kcal',
   'workouts',
+  'steps',
   'logged',
   'activity',
 ];
 
 /**
  * The direction of the first header click (and of the phone select): the most useful end first — gain first, least
- * progress first, most kcal first, fewest workouts / records first, longest ago first.
+ * progress first, most kcal first, fewest workouts / steps / records first, longest ago first.
  */
 export const SORT_FIRST_DIR: Readonly<Record<SortKey, SortDir>> = {
   name: 'asc',
@@ -59,6 +71,7 @@ export const SORT_FIRST_DIR: Readonly<Record<SortKey, SortDir>> = {
   goalPct: 'asc',
   kcal: 'desc',
   workouts: 'asc',
+  steps: 'asc',
   logged: 'asc',
   activity: 'asc',
 };
@@ -107,6 +120,8 @@ export interface ClientCells {
     long: string;
   };
   workouts: { text: string; tone: Tone; long: string };
+  /** «7 850» + « / 10 000» (muted) with a goal; a faint «—» without steps in the period. */
+  steps: { text: string; goal: string; tone: Tone; long: string };
   logged: { text: string; long: string };
   /** «—» (faint) when the row already carries the «Ще не входили» pill. */
   activity: { text: string; tone: Tone };
@@ -151,7 +166,8 @@ export const neverSeenFlagged = (s: CoachSummary): boolean =>
   s.flags.some((f) => f.kind === 'inactive' && f.never);
 
 function cellsOf(s: CoachSummary, now: Date): ClientCells {
-  const { weight, kcal, macros, workouts, logged } = s;
+  // An item from an older server has no steps: `coachSummary` already reads that as none (avg null).
+  const { weight, kcal, macros, workouts, steps, logged } = s;
   const range = rangeWords(s.period);
 
   const sub =
@@ -219,6 +235,12 @@ function cellsOf(s: CoachSummary, now: Date): ClientCells {
       tone: behind ? 'acc' : 'ink',
       long: `тренувань ${workouts.planned > 0 ? `${workouts.done} з ${workouts.planned}` : workouts.done} ${range}, за планом на сьогодні — ${workouts.plannedSoFar}`,
     },
+    steps: {
+      text: steps.avg === null ? DASH : f0(steps.avg),
+      goal: steps.avg === null ? '' : stepsGoalSuffix(steps.goal),
+      tone: steps.avg === null ? 'faint' : 'ink',
+      long: stepsLong(steps.avg, steps.goal, s.period),
+    },
     logged: {
       text: loggedText(logged.days, logged.of),
       long: `записи за ${logged.days} ${logged.days === 1 ? 'день' : 'днів'} з ${logged.of}`,
@@ -268,6 +290,7 @@ export function buildClientRows(
         goalPct: summary.weight.goalPct,
         kcal: summary.kcal.avg,
         workouts: summary.workouts.done,
+        steps: summary.steps.avg,
         logged: summary.logged.days,
         // Never signed in = the longest ago of all: first in «longest ago first», not «missing» (nulls go last).
         activity: summary.lastSeenAt ?? Number.NEGATIVE_INFINITY,

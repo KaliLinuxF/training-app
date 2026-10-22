@@ -1,5 +1,6 @@
 import type { ISODate } from '@legko/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useClock } from '@/sheets/useClock';
 import { useAppData, useSyncState } from '@/store/data';
 import { buildHomeModel, type HomeModel } from './homeModel';
 import { rememberInstallHintDismissed, shouldShowInstallHint } from './installHint';
@@ -56,9 +57,11 @@ export function useHomeModel(today: ISODate): HomeView {
   const now = useHourlyNow();
   const installHint = useInstallHint();
   const showInstallHint = installHint.visible;
+  // «Триває · 12 хв»: a minute clock only while some session is active.
+  const clock = useClock(data.sessions.some((x) => x.status === 'active'));
   const model = useMemo(
-    () => buildHomeModel(data, today, { now, online, showInstallHint }),
-    [data, today, now, online, showInstallHint],
+    () => buildHomeModel(data, today, { now, clock: Math.max(clock, now.getTime()), online, showInstallHint }),
+    [data, today, now, clock, online, showInstallHint],
   );
   return { model, dismissInstallHint: installHint.dismiss };
 }

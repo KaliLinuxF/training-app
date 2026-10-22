@@ -6,8 +6,11 @@ import { ADMIN_USERNAME, TODAY, USERNAME } from './support/env';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
 
-/** Every row of the list for an admin; a user has all but «Користувачі» (docs/multi-user.md D30). */
-const SECTIONS = Object.keys(SETTINGS_SLUGS) as SettingsSection[];
+/**
+ * Every row of the list for an admin; a user has all but «Користувачі» (docs/multi-user.md D30). 'Типи тренувань' is
+ * the support's temporary alias of «Тренування» (same slug), not a row of its own.
+ */
+const SECTIONS = (Object.keys(SETTINGS_SLUGS) as SettingsSection[]).filter((title) => title !== 'Типи тренувань');
 const USER_SECTIONS = SECTIONS.filter((title) => title !== 'Користувачі');
 
 const CAPTION = 'Home Fit · трекер схуднення';
@@ -122,7 +125,7 @@ test.describe('settings list', () => {
     await app.go('Налаштування');
     await expect(app.settingsRow('Нагадування')).toContainText('3 увімк.');
     await expect(app.settingsRow('Цілі')).toContainText('60 кг · 1 700 ккал');
-    await expect(app.settingsRow('Типи тренувань')).toContainText('7 типів');
+    await expect(app.settingsRow('Тренування')).toContainText('7 типів');
     await expect(app.settingsRow('Прийоми їжі')).toContainText('4 типи');
     await expect(app.settingsRow('Вигляд')).toContainText('Авто');
     await expect(app.settingsRow('Дані і копія')).toContainText('Синхронізовано');
@@ -196,11 +199,11 @@ test.describe('settings list', () => {
     await expect(title).toBeVisible();
 
     // A deep link has nothing to go back to: the back link replaces it with the list.
-    await app.gotoSettings('Типи тренувань');
+    await app.gotoSettings('Тренування');
     await app.settingsBack().click();
     await expect(app.heading('Налаштування')).toBeVisible();
     await expect(page).toHaveURL(/\/settings$/);
-    await expect(app.settingsRow('Типи тренувань')).toBeFocused();
+    await expect(app.settingsRow('Тренування')).toBeFocused();
   });
 
   test('the «Налаштування» tab and the system back return from a sub-page to the list', async ({
@@ -539,8 +542,8 @@ test.describe('reminders & settings', () => {
     page,
     server,
   }) => {
-    await app.gotoSettings('Типи тренувань');
-    const types = app.region('Мої тренування');
+    await app.gotoSettings('Тренування');
+    const types = app.region('Мої типи');
     await expect(types).toContainText('Типи, які можна вибрати в записі дня');
     const input = types.getByRole('textbox', { name: 'Свій тип тренування' });
     const add = types.getByRole('button', { name: 'Додати', exact: true });

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { hashPassword, verifyPassword } from '../auth/password';
 import { createSessionStore, hashToken } from '../auth/sessions';
 import { preMigrationBackupName } from '../backup';
-import { downgradeSchemaV4 } from './downgrade';
+import { downgradeSchemaV4, downgradeSchemaV5 } from './downgrade';
 import { migrate, MIGRATIONS, schemaVersion } from './migrations';
 import { openDatabase } from './open';
 import { sqlite, type Database, type Row } from './sqlite';
@@ -25,6 +25,9 @@ const MEALS_JSON =
   '[{"id":"breakfast001","type":"Сніданок","time":"08:30","text":"Тост","kcal":420,"protein":27,"fat":11.5,' +
   `"carbs":36,"photos":["${P2}"]}]`;
 const SETTINGS_JSON = '{"goal":57,"kcalGoal":1500,"timezone":"Europe/Kyiv","onboarded":true}';
+
+/** These tests pin the v4 step (the v5 step has migrate-v5.test.ts). */
+const migrateTo = (db: Database, version: number): number => migrate(db, MIGRATIONS.slice(0, version));
 
 const fresh = (): Database => new (sqlite().DatabaseSync)(':memory:', { enableForeignKeyConstraints: true });
 
@@ -123,8 +126,12 @@ describe('migration v3 → v4 (accounts)', () => {
     const before = Object.fromEntries(PER_USER_TABLES.map((t) => [t, rows(db, t)]));
     const kvBefore = kvOf(db);
 
-    expect(migrate(db)).toBe(4);
+    expect(migrateTo(db, 4)).toBe(4);
     expect(schemaVersion(db)).toBe(4);
+    // The full run of this build goes on to v5 without touching these rows.
+    const atV4 = Object.fromEntries(PER_USER_TABLES.map((t) => [t, rows(db, t)]));
+    expect(migrate(db)).toBe(5);
+    for (const t of PER_USER_TABLES) expect(rows(db, t), t).toEqual(atV4[t]);
 
     const users = db.prepare('SELECT * FROM users').all();
     expect(users).toHaveLength(1);
@@ -189,7 +196,7 @@ describe('migration v3 → v4 (accounts)', () => {
 
   it('keeps her sessions (no re-login): they authenticate as anna and are legacy; new ones are not', async () => {
     const { db } = await v3Fixture();
-    migrate(db);
+    migrateTo(db, 4);
     const sessions = createSessionStore(db);
     const check = sessions.check(KEPT_TOKEN, NOW);
     expect(check?.user).toMatchObject({
@@ -213,8 +220,8 @@ describe('migration v3 → v4 (accounts)', () => {
   it('is deterministic: two copies of the same v3 data give the same anna id, and her token works in both', async () => {
     const a = (await v3Fixture()).db;
     const b = (await v3Fixture()).db;
-    migrate(a);
-    migrate(b);
+    migrateTo(a, 4);
+    migrateTo(b, 4);
     const idOf = (db: Database) => db.prepare('SELECT id FROM users WHERE legacy_owner = 1').get()?.id;
     expect(idOf(a)).toBe(LEGACY_OWNER_ID);
     expect(idOf(b)).toBe(idOf(a));
@@ -227,7 +234,7 @@ describe('migration v3 → v4 (accounts)', () => {
     // Without the old weight, the oldest is the first session (2026-10-02 00:00 UTC).
     db.exec("DELETE FROM weights WHERE date = '2026-09-01'");
     db.exec("DELETE FROM measures WHERE date = '2026-10-01'");
-    migrate(db);
+    migrateTo(db, 4);
     expect(db.prepare('SELECT created_at FROM users').get()?.created_at).toBe(Date.UTC(2026, 9, 2));
   });
 
@@ -236,7 +243,7 @@ describe('migration v3 → v4 (accounts)', () => {
     migrate(db, MIGRATIONS.slice(0, 3));
     db.prepare("INSERT INTO kv (key, value) VALUES ('password_hash', 'scrypt$x')").run();
     const before = Date.now();
-    migrate(db);
+    migrateTo(db, 4);
     const created = Number(db.prepare('SELECT created_at FROM users').get()?.created_at);
     expect(created).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
     expect(created).toBeLessThanOrEqual(Date.now());
@@ -244,7 +251,7 @@ describe('migration v3 → v4 (accounts)', () => {
 
   it('matches the §2.1 shapes (columns, keys, indexes)', async () => {
     const { db } = await v3Fixture();
-    migrate(db);
+    migrateTo(db, 4);
     expect(columns(db, 'users')).toEqual([
       'id TEXT NN pk1',
       'username TEXT NN',
@@ -385,23 +392,23 @@ describe('migration v3 → v4 (accounts)', () => {
 
   it('a second migrate is a no-op', async () => {
     const { db } = await v3Fixture();
-    migrate(db);
+    migrateTo(db, 4);
     const snapshot = Object.fromEntries(
       [...PER_USER_TABLES, 'users', 'user_settings', 'ai_usage', 'kv'].map((t) => [t, rows(db, t)]),
     );
-    expect(migrate(db)).toBe(4);
+    expect(migrateTo(db, 4)).toBe(4);
     for (const [table, list] of Object.entries(snapshot)) expect(rows(db, table), table).toEqual(list);
   });
 
   it('a fresh database (v0 → v4) and a v3 database with only VAPID keys get no user', () => {
     const a = fresh();
-    migrate(a);
+    migrateTo(a, 4);
     const b = fresh();
     migrate(b, MIGRATIONS.slice(0, 3));
     b.prepare(
       "INSERT INTO kv (key, value) VALUES ('vapid_public_key', 'x'), ('vapid_private_key', 'y')",
     ).run();
-    migrate(b);
+    migrateTo(b, 4);
     for (const db of [a, b]) {
       expect(schemaVersion(db)).toBe(4);
       for (const table of [
@@ -421,7 +428,7 @@ describe('migration v3 → v4 (accounts)', () => {
     const db = fresh();
     migrate(db, MIGRATIONS.slice(0, 3));
     db.prepare("INSERT INTO kv (key, value) VALUES ('login_failures', '[]')").run();
-    migrate(db);
+    migrateTo(db, 4);
     expect(db.prepare('SELECT COUNT(*) AS n FROM users').get()?.n).toBe(0);
   });
 
@@ -432,7 +439,7 @@ describe('migration v3 → v4 (accounts)', () => {
     db.prepare("INSERT INTO kv (key, value) VALUES ('legacy_user', ?), ('password_hash', 'scrypt$h')").run(
       JSON.stringify({ id, username: 'Anna.K', role: 'admin', createdAt: 1234 }),
     );
-    migrate(db);
+    migrateTo(db, 4);
     expect({
       ...db.prepare('SELECT id, username, username_key, role, created_at, legacy_owner FROM users').get(),
     }).toEqual({
@@ -452,7 +459,7 @@ describe('migration v3 → v4 (accounts)', () => {
       JSON.stringify({ id: 'NOT-AN-ID' }),
     );
     const before = Object.fromEntries([...PER_USER_TABLES, 'kv'].map((t) => [t, rows(db, t)]));
-    expect(() => migrate(db)).toThrow();
+    expect(() => migrateTo(db, 4)).toThrow();
     expect(schemaVersion(db)).toBe(3);
     for (const [table, list] of Object.entries(before)) expect(rows(db, table), table).toEqual(list);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'users'").get()).toBeUndefined();
@@ -463,7 +470,7 @@ describe('migration v3 → v4 (accounts)', () => {
     db.prepare(
       'UPDATE kv SET value = \'{"date":"2026-10-21","count":-1}\' WHERE key = \'food_budget\'',
     ).run();
-    migrate(db);
+    migrateTo(db, 4);
     expect(db.prepare('SELECT COUNT(*) AS n FROM ai_usage').get()?.n).toBe(0);
   });
 });
@@ -486,7 +493,7 @@ describe('migrate(): foreign-key check', () => {
 });
 
 describe('pre-migration snapshot of a v3 file', () => {
-  it('writes backups/legko-pre-v4-<date>.db at user_version 3; a v4 file gets none', async () => {
+  it('writes backups/legko-pre-v<this build>-<date>.db at user_version 3; an up-to-date file gets none', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'legko-v4-snap-'));
     try {
       const file = join(dir, 'legko.db');
@@ -496,10 +503,10 @@ describe('pre-migration snapshot of a v3 file', () => {
 
       const now = () => new Date('2026-10-21T09:00:00Z');
       const db = openDatabase(file, { now });
-      expect(schemaVersion(db)).toBe(4);
+      expect(schemaVersion(db)).toBe(MIGRATIONS.length);
       db.close();
-      const name = preMigrationBackupName(4, '2026-10-21');
-      expect(name).toBe('legko-pre-v4-2026-10-21.db');
+      const name = preMigrationBackupName(MIGRATIONS.length, '2026-10-21');
+      expect(name).toBe('legko-pre-v5-2026-10-21.db');
       expect(readdirSync(join(dir, 'backups'))).toEqual([name]);
       const copy = new (sqlite().DatabaseSync)(join(dir, 'backups', name), { readOnly: true });
       try {
@@ -512,7 +519,7 @@ describe('pre-migration snapshot of a v3 file', () => {
 
       openDatabase(file, { now: () => new Date('2026-10-22T09:00:00Z') }).close();
       expect(readdirSync(join(dir, 'backups'))).toEqual([name]);
-      expect(existsSync(join(dir, 'backups', preMigrationBackupName(4, '2026-10-22')))).toBe(false);
+      expect(existsSync(join(dir, 'backups', preMigrationBackupName(MIGRATIONS.length, '2026-10-22')))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -527,25 +534,27 @@ describe('pre-migration snapshot of a v3 file', () => {
       await v3Fixture(raw);
       raw.close();
       const now = () => new Date('2026-10-22T09:00:00Z');
-      const first = join(backups, 'legko-pre-v4-2026-10-22.db');
+      const first = join(backups, 'legko-pre-v5-2026-10-22.db');
 
-      // Deploy: v3 → v4 writes the pristine pre-deploy copy.
+      // Deploy: v3 → v5 writes the pristine pre-deploy copy.
       const db = openDatabase(file, { now });
       const pristine = readFileSync(first);
       // Something logged after the deploy, then the rollback (downgrade-schema) on the same day.
       db.prepare("INSERT INTO kv (key, value) VALUES ('after_deploy', 'x')").run();
+      downgradeSchemaV5(db, backups, '2026-10-22');
       downgradeSchemaV4(db, backups, '2026-10-22', { keep: 'anna' });
       db.close();
 
-      // Redeploy on the same day: the v3 → v4 migration runs again.
+      // Redeploy on the same day: the v3 → v5 migration runs again.
       const again = openDatabase(file, { now });
-      expect(schemaVersion(again)).toBe(4);
+      expect(schemaVersion(again)).toBe(5);
       again.close();
 
       expect(readdirSync(backups).sort()).toEqual([
         'legko-pre-down-v4-2026-10-22.db',
-        'legko-pre-v4-2026-10-22-2.db',
-        'legko-pre-v4-2026-10-22.db',
+        'legko-pre-down-v5-2026-10-22.db',
+        'legko-pre-v5-2026-10-22-2.db',
+        'legko-pre-v5-2026-10-22.db',
       ]);
       // The first copy is byte-for-byte the pre-deploy database (schema v3, the original rows, nothing later).
       expect(readFileSync(first).equals(pristine)).toBe(true);
@@ -558,7 +567,7 @@ describe('pre-migration snapshot of a v3 file', () => {
         copy.close();
       }
       // The second copy is the post-downgrade database.
-      const second = new (sqlite().DatabaseSync)(join(backups, 'legko-pre-v4-2026-10-22-2.db'), {
+      const second = new (sqlite().DatabaseSync)(join(backups, 'legko-pre-v5-2026-10-22-2.db'), {
         readOnly: true,
       });
       try {

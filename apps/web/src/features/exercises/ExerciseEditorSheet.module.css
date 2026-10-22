@@ -1,0 +1,58 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* 16px: iOS does not zoom into it. */
+.input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--accD);
+}
+
+.segmented {
+  min-width: 0;
+}
+
+.map {
+  padding: 8px 0 4px;
+  border-radius: var(--r20);
+  background: var(--card);
+  border: 1px solid var(--line);
+}
+
+.chipsAnchor {
+  min-width: 0;
+  border-radius: var(--r16);
+}
+
+.error {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--accD);
+  margin: 0;
+}

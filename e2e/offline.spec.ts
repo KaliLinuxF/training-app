@@ -1,5 +1,8 @@
 import type { Page } from '@playwright/test';
+import { API, applyOps, type AppData, type Op } from '../packages/shared/src/index';
+import { e2eSession } from './fixtures/data';
 import { TODAY } from './support/env';
+import { sessionOf } from './support/server';
 import { expect, test } from './support/test';
 
 const OFFLINE_NOTE = 'Офлайн · зміни збережено на телефоні';
@@ -128,5 +131,46 @@ test.describe('offline', () => {
     await expect(
       page.getByText('Немає зʼєднання з сервером. Увійти можна, щойно зʼявиться інтернет.'),
     ).toBeVisible();
+  });
+});
+
+/** The outbox survives a lost answer: replaying an idempotent op is harmless (no service worker: plain routing). */
+test.describe('offline outbox (workouts)', () => {
+  test('a queued session.put whose answer is lost is sent again, and the server keeps exactly one session', async ({
+    app,
+    page,
+    server,
+  }) => {
+    const user = await server.me();
+    const session = e2eSession({ id: 'e2eOffline001' });
+    const ops: Op[] = [
+      { kind: 'session.put', value: session },
+      { kind: 'steps.put', date: TODAY, steps: 4200 },
+    ];
+    // The first ops request reaches the server, but its answer never comes back (connection reset).
+    let posts = 0;
+    await page.route('**/api/ops', async (route) => {
+      posts++;
+      if (posts > 1) return route.continue();
+      await route.fetch();
+      return route.abort('connectionreset');
+    });
+    // Queued on this phone while offline (the session screens belong to their own package).
+    await page.goto(API.health);
+    await app.seedDeviceCopy(user, applyOps(await server.getData(), ops), [
+      { id: 'e2e-session-op-1', op: ops[0] },
+      { id: 'e2e-session-op-2', op: ops[1] },
+    ]);
+    await app.goto('/');
+
+    await expect.poll(async () => (await app.deviceCache()).outbox, { timeout: 15_000 }).toEqual([]);
+    expect(posts).toBeGreaterThanOrEqual(2);
+    const stored = await server.getData();
+    expect(stored.sessions.filter((s) => s.id === session.id)).toHaveLength(1);
+    expect(sessionOf(stored, session.id)).toMatchObject({ status: 'active', rev: 0 });
+    expect(stored.steps.filter((s) => s.date === TODAY)).toEqual([{ date: TODAY, steps: 4200 }]);
+    const device = (await app.deviceCache()).data as AppData;
+    expect(sessionOf(device, session.id)).toMatchObject({ status: 'active' });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
   });
 });

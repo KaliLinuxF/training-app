@@ -1,9 +1,11 @@
 import { Fragment, type ReactNode } from 'react';
 import { NBSP, PART_SEPARATOR } from '@/lib/nutrition';
 import { Button, ListGroup, ListRow, Pill, TrainingToggle, type ListRowProps } from '@/ui';
+import { RecordedMark } from '@/sheets/record/blocks';
 import {
   foodSubTone,
   type HomeFoodRow,
+  type HomeTrainingRow,
   type HomeFoodSub,
   type HomeModel,
   type HomeRowId,
@@ -19,6 +21,8 @@ export interface TodayCardProps {
   onOpenDay: () => void;
   /** Inline «✓ Було» (`true`) / «✕ Не було» (`false`): saves at once. */
   onTrained: (trained: boolean) => void;
+  /** «Почати» (one scheduled workout) / «Продовжити» (the live one); «Почати» with 2+ scheduled opens the sheet. */
+  onWorkoutAction: (action: HomeTrainingRow['action']) => void;
   className?: string;
 }
 
@@ -86,11 +90,45 @@ function scheduleValue(row: HomeScheduleRow): Pick<ListRowProps, 'value' | 'valu
   };
 }
 
+interface WorkoutTrailingProps {
+  workout: HomeTrainingRow;
+  onTrained: (trained: boolean) => void;
+  onAction: (action: HomeTrainingRow['action']) => void;
+}
+
+/** Beside the Тренування row: ✓ / ✕, «Почати» / «Продовжити», or the static «✓ Було» of a recorded session. */
+function WorkoutTrailing({ workout, onTrained, onAction }: WorkoutTrailingProps) {
+  const { action } = workout;
+  switch (action.kind) {
+    case 'toggle':
+      return (
+        <TrainingToggle size="sm" value={workout.trained} onChange={onTrained} aria-label="Тренування сьогодні" />
+      );
+    case 'recorded':
+      return <RecordedMark />;
+    case 'continue':
+    case 'start':
+    case 'choose':
+      return (
+        <Button
+          size="sm"
+          variant={action.kind === 'continue' ? 'accent' : 'solid'}
+          className={s.workoutCta}
+          aria-label={action.label}
+          aria-haspopup={action.kind === 'choose' ? 'dialog' : undefined}
+          onClick={() => onAction(action)}
+        >
+          {action.kind === 'continue' ? 'Продовжити' : 'Почати'}
+        </Button>
+      );
+  }
+}
+
 /**
  * «Сьогодні»: four action rows (Їжа, Тренування with the inline ✓ / ✕, Вага, Заміри), each opening its short sheet,
  * and «Відкрити день →» for the full day. The toggle is a sibling of the row button, never inside it.
  */
-export function TodayCard({ rows, onOpen, onOpenDay, onTrained, className }: TodayCardProps) {
+export function TodayCard({ rows, onOpen, onOpenDay, onTrained, onWorkoutAction, className }: TodayCardProps) {
   const { food, workout, weight, measure } = rows;
   return (
     <ListGroup
@@ -126,14 +164,7 @@ export function TodayCard({ rows, onOpen, onOpenDay, onTrained, className }: Tod
         aria-label={workout.label}
         aria-haspopup="dialog"
         onClick={() => onOpen('workout')}
-        trailing={
-          <TrainingToggle
-            size="sm"
-            value={workout.trained}
-            onChange={onTrained}
-            aria-label="Тренування сьогодні"
-          />
-        }
+        trailing={<WorkoutTrailing workout={workout} onTrained={onTrained} onAction={onWorkoutAction} />}
       />
       <ListRow
         icon="weight"

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { PhotoStrip } from '@/features/food';
 import type { SheetMode } from '@/store/ui';
+import { RecordedMark } from '@/sheets/record/blocks';
 import { Button, ListGroup, ListRow, Pill, TrainingToggle, type IconName, type ListIconTone } from '@/ui';
 import type { DayDetail, DayRowKey, DayRowModel } from './model';
 import s from './DayCard.module.css';
@@ -19,6 +20,7 @@ export interface DayCardProps {
 const ROW_ICON: Readonly<Record<DayRowKey, { icon: IconName; tone: ListIconTone }>> = {
   food: { icon: 'food', tone: 'acc2' },
   training: { icon: 'workout', tone: 'acc' },
+  steps: { icon: 'steps', tone: 'neutral' },
   weight: { icon: 'weight', tone: 'neutral' },
   measures: { icon: 'measure', tone: 'neutral' },
   notes: { icon: 'notes', tone: 'neutral' },
@@ -108,14 +110,16 @@ function DayRow({ row, photos, onOpen, onTrained, className }: DayRowProps) {
       aria-haspopup="dialog"
       chevron={training ? false : undefined}
       trailing={
-        training ? (
+        !training ? undefined : row.recorded ? (
+          <RecordedMark />
+        ) : (
           <TrainingToggle
             size="sm"
             value={row.trained ?? null}
             onChange={onTrained}
             aria-label="Тренування за день"
           />
-        ) : undefined
+        )
       }
     >
       {row.key === 'food' && photos.length > 0 ? <PhotoStrip ids={photos} size="sm" /> : undefined}

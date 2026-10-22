@@ -1,0 +1,118 @@
+/* One column everywhere: the cards read top to bottom; desktop keeps a comfortable width. */
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+  width: 100%;
+  max-width: 720px;
+}
+
+.restored {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.restored > :first-child {
+  align-self: stretch;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r24);
+  background: var(--card);
+}
+
+.input {
+  width: 100%;
+  min-height: 50px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r16);
+  background: var(--card);
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--faint);
+  font-weight: 500;
+}
+
+.input:focus {
+  border-color: var(--focus);
+  box-shadow: 0 0 0 1px var(--focus);
+}
+
+.invalid {
+  border-color: var(--accD);
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.heading {
+  margin: 0;
+  padding: 6px 4px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.muted {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}
+
+.error {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accD);
+}
+
+.danger {
+  color: var(--accD);
+}
+
+/* Sticky «Зберегти»: no tab bar on this page (W15). */
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  margin: 0 -18px;
+  padding: 12px 18px calc(12px + var(--safe-bottom));
+  background: linear-gradient(to bottom, transparent, var(--paper) 14px);
+}
+
+@media (min-width: 900px) and (hover: hover) and (pointer: fine) {
+  .footer {
+    margin: 0;
+    padding: 12px 0 0;
+  }
+}

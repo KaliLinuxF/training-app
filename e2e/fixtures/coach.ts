@@ -13,7 +13,9 @@ import {
   coachItemFromData,
   coachWindow,
   emptyData,
+  findExercise,
   normalizeDay,
+  sessionExerciseFrom,
   weekdayOf,
   type AppData,
   type CoachClient,
@@ -24,7 +26,10 @@ import {
   type ISODate,
   type MacroGoals,
   type MeasureEntry,
+  type SetValues,
   type WeightEntry,
+  type Workout,
+  type WorkoutSession,
 } from '../../packages/shared/src/index';
 import { FIXED_NOW, TIMEZONE, TODAY } from '../support/env';
 
@@ -185,6 +190,88 @@ export function coachMeals(today: ISODate = TODAY): AppData {
   return data;
 }
 
+// ---- workouts and steps (docs/workouts-steps-rebrand.md §3.18) ---------------------------------
+
+const planned = (over: Partial<SetValues>, n = 3): SetValues[] =>
+  Array.from({ length: n }, () => ({ reps: null, kg: null, sec: null, min: null, km: null, ...over }));
+
+/** The two workouts of `coachTraining` (both with days, inside the Mon / Wed / Fri plan). */
+export const COACH_WORKOUTS: readonly Workout[] = Object.freeze([
+  {
+    id: 'coachWorkoutLegs',
+    name: 'Ноги + прес',
+    days: [1, 3],
+    items: [
+      { key: 'legs1', exerciseId: 'lib.back-squat', sets: planned({ reps: 12, kg: 40 }), restSec: 90 },
+      { key: 'legs2', exerciseId: 'lib.crunch', sets: planned({ reps: 20 }), restSec: 60 },
+    ],
+  },
+  {
+    id: 'coachWorkoutUpper',
+    name: 'Верх тіла',
+    days: [5],
+    items: [
+      { key: 'upper1', exerciseId: 'lib.lat-pulldown', sets: planned({ reps: 12, kg: 30 }), restSec: 90 },
+      { key: 'upper2', exerciseId: 'lib.plank', sets: planned({ sec: 45 }), restSec: 45 },
+    ],
+  },
+]);
+
+/** Steps of `coachTraining`: 5 of the 6 days before today (none 3 days ago); steps goal 8 000. */
+export const COACH_STEPS: readonly { back: number; steps: number }[] = Object.freeze([
+  { back: 6, steps: 7200 },
+  { back: 5, steps: 9100 },
+  { back: 2, steps: 6400 },
+  { back: 4, steps: 10_500 },
+  { back: 1, steps: 8300 },
+]);
+
+function coachSession(workout: Workout, date: ISODate, minutes: number): WorkoutSession {
+  const id = `coach${date.replace(/-/g, '')}`;
+  const start = Date.parse(`${date}T18:00:00+03:00`);
+  return {
+    id,
+    date,
+    workoutId: workout.id,
+    name: workout.name,
+    createdAt: start,
+    startedAt: start,
+    finishedAt: start + minutes * 60_000,
+    durationSec: minutes * 60,
+    status: 'done',
+    exercises: workout.items.map((item, i) => {
+      const exercise = findExercise([], item.exerciseId);
+      if (!exercise) throw new Error(`no ${item.exerciseId}`);
+      return sessionExerciseFrom(exercise, item, null, { key: `${id}-${i}`, done: true });
+    }),
+    notes: '',
+    rev: 1,
+    deviceId: null,
+  };
+}
+
+/**
+ * As `coachMeals`, plus training: the two `COACH_WORKOUTS`, 3 done sessions on the last three plan days before today
+ * (for `TODAY`: Ноги + прес 2026-10-12 and 10-07, Верх тіла 10-09; all already marked trained), steps on the
+ * `COACH_STEPS` days and a steps goal of 8 000. No attention flag changes.
+ */
+export function coachTraining(today: ISODate = TODAY): AppData {
+  const data = coachMeals(today);
+  data.settings = { ...data.settings, stepsGoal: 8000 };
+  data.workouts = COACH_WORKOUTS.map((w) => structuredClone(w));
+  const sessions: WorkoutSession[] = [];
+  for (let back = 1; back <= 14 && sessions.length < 3; back++) {
+    const date = addDays(today, -back);
+    const workout = COACH_WORKOUTS.find((w) => w.days.includes(weekdayOf(date)));
+    if (workout && data.days[date]?.trained === true) sessions.unshift(coachSession(workout, date, workout === COACH_WORKOUTS[0] ? 48 : 40));
+  }
+  data.sessions = sessions;
+  data.steps = COACH_STEPS.map(({ back, steps }) => ({ date: addDays(today, -back), steps })).sort((a, b) =>
+    a.date < b.date ? -1 : 1,
+  );
+  return data;
+}
+
 /** Onboarded, nothing recorded. */
 export function coachEmpty(): AppData {
   return baseData();
@@ -218,10 +305,10 @@ const STUBS: Readonly<Record<CoachStubName, StubSpec>> = {
     createdAgo: 10 * DAY,
     lastSeenAgo: DAY,
   },
-  // no flags; meals + photos on 2026-10-13; macro goals set
+  // no flags; meals + photos on 2026-10-13; macro goals set; workouts, 3 sessions and steps (coachTraining)
   sofia: {
     username: 'sofia',
-    data: coachMeals,
+    data: coachTraining,
     status: 'active',
     createdAgo: 40 * DAY,
     lastSeenAgo: 2 * HOUR,

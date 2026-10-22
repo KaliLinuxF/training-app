@@ -16,7 +16,7 @@ import { create } from 'zustand';
  * - `install` — «Встановлення на iPhone» (adding the app to the home screen, needed for push)
  */
 export type SheetMode =
-  'menu' | 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'setup' | 'install';
+  'menu' | 'day' | 'food' | 'meal' | 'workout' | 'weight' | 'measure' | 'steps' | 'setup' | 'install';
 
 /** Pre-filled draft values: `trained` pre-fills the `workout` and `day` sheets (the workout push deep link). */
 export interface SheetPatch {

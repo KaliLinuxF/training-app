@@ -36,7 +36,7 @@ function Both({ short, long, className }: { short: ReactNode; long: string; clas
 }
 
 /**
- * The desktop clients table (docs/coach-cabinet.md §6.1): 8 sortable columns, a sticky header row and a sticky name
+ * The desktop clients table (docs/coach-cabinet.md §6.1): 9 sortable columns, a sticky header row and a sticky name
  * column inside its own scrolling region (both axes), so the page never scrolls sideways. The name is the link; a
  * plain click anywhere else on the row opens the client too («Row clicks», §5.1). When the region is narrower than
  * the table, a fade on the right says more columns follow, and a shadow on the name column says some slid under it.
@@ -179,6 +179,17 @@ function Row({
       </td>
       <td className={s.num}>
         <Both short={cells.workouts.text} long={cells.workouts.long} className={t[cells.workouts.tone]} />
+      </td>
+      <td className={s.num}>
+        <Both
+          short={
+            <>
+              <span className={t[cells.steps.tone]}>{cells.steps.text}</span>
+              {cells.steps.goal && <span className={t.muted}>{cells.steps.goal}</span>}
+            </>
+          }
+          long={cells.steps.long}
+        />
       </td>
       <td className={s.num}>
         <Both short={cells.logged.text} long={cells.logged.long} />

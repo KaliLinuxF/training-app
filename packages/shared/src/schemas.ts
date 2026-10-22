@@ -14,17 +14,26 @@ import {
   type AiLimits,
   type SessionUser,
 } from './users';
+import { EQUIPMENT, EXERCISE_KINDS, MUSCLES } from './exercises';
 import type {
   AppData,
   DayEntry,
   DayMeta,
+  Exercise,
   FoodItem,
   MacroGoals,
   Meal,
   MealItem,
   MeasureValues,
+  SessionExercise,
+  SessionSet,
+  SetValues,
   Settings,
   SettingsPut,
+  StepsEntry,
+  Workout,
+  WorkoutItem,
+  WorkoutSession,
 } from './types';
 
 export const LIMITS = {
@@ -55,6 +64,31 @@ export const LIMITS = {
   mealMacro: { min: 0, max: 3000 },
   /** Daily macro goal, whole grams. */
   macroGoal: { min: 1, max: 1000 },
+  // workouts and steps (docs/workouts-steps-rebrand.md §1.2)
+  exerciseName: 60,
+  workoutName: 40,
+  customExercises: 300,
+  workouts: 50,
+  workoutItems: 30,
+  plannedSets: 20,
+  sessionExercises: 30,
+  sessionSets: 30,
+  sessionsPerDay: 10,
+  sessionNotes: 1000,
+  primaryMuscles: 6,
+  secondaryMuscles: 8,
+  reps: { min: 0, max: 1000 },
+  setKg: { min: 0, max: 1000 },
+  setSec: { min: 0, max: 36000 },
+  cardioMin: { min: 0, max: 1440 },
+  km: { min: 0, max: 500 },
+  restSec: { min: 0, max: 900 },
+  met: { min: 1, max: 25 },
+  steps: { min: 1, max: 100000 },
+  stepsGoal: { min: 1000, max: 50000 },
+  sessionSec: { min: 0, max: 86400 },
+  rev: { min: 0, max: 1e9 },
+  deletedSessions: 10000,
 } as const;
 
 export const isoDateSchema = z.string().refine(isValidISODate, 'Expected a YYYY-MM-DD date');
@@ -156,6 +190,160 @@ export const mealTypesSchema = z
   .max(LIMITS.mealTypes)
   .transform(normalizeTypeNames);
 
+/**
+ * Daily steps goal (null = none). NO default here: zod 4 applies a default nested inside `.optional()`, which would
+ * turn an old client's settings.put (no key) into `stepsGoal: null` and erase her goal. So the default lives in
+ * `settingsSchema` only and `settingsPutSchema` uses `.optional()`.
+ */
+export const stepsGoalSchema = z
+  .number()
+  .int()
+  .min(LIMITS.stepsGoal.min)
+  .max(LIMITS.stepsGoal.max)
+  .nullable();
+
+// ── workouts and steps (docs/workouts-steps-rebrand.md §1.2) ───────────────────────────────────────────────────────
+
+/** Her own exercises, workouts and sessions: 12–40 base64url characters (never contains a dot). */
+export const OWN_ID_RE = /^[A-Za-z0-9_-]{12,40}$/;
+/** Seed library exercises: `lib.<slug>`. */
+export const LIBRARY_ID_RE = /^lib\.[a-z0-9-]{2,40}$/;
+
+export const ownIdSchema = z.string().regex(OWN_ID_RE, 'Invalid id');
+export const libraryExerciseIdSchema = z.string().regex(LIBRARY_ID_RE, 'Invalid library exercise id');
+/** A library or an own exercise id. */
+export const exerciseIdSchema = z
+  .string()
+  .refine((v) => OWN_ID_RE.test(v) || LIBRARY_ID_RE.test(v), 'Invalid exercise id');
+/** Key of a workout item / session exercise (unique within its list). */
+export const itemKeySchema = z.string().regex(/^[A-Za-z0-9_-]{4,40}$/, 'Invalid key');
+
+export const muscleSchema = z.enum(MUSCLES);
+export const equipmentSchema = z.enum(EQUIPMENT);
+export const exerciseKindSchema = z.enum(EXERCISE_KINDS);
+
+const unique = (arr: readonly unknown[]): boolean => new Set(arr).size === arr.length;
+const uniqueBy =
+  <T>(key: (x: T) => unknown) =>
+  (arr: readonly T[]): boolean =>
+    new Set(arr.map(key)).size === arr.length;
+/** `v × factor` is (almost exactly) whole: floating point of 42.5 × 4 or 3.21 × 100. */
+const multipleOf = (factor: number) => (v: number) => Math.abs(v * factor - Math.round(v * factor)) < 1e-6;
+
+const muscleList = (max: number) => z.array(muscleSchema).max(max).refine(unique, 'Duplicate muscles');
+const metSchema = z
+  .number()
+  .min(LIMITS.met.min)
+  .max(LIMITS.met.max)
+  .refine(multipleOf(10), 'Expected one decimal');
+
+const exerciseShape = {
+  name: z.string().trim().min(1).max(LIMITS.exerciseName),
+  kind: exerciseKindSchema,
+  primary: muscleList(LIMITS.primaryMuscles),
+  secondary: muscleList(LIMITS.secondaryMuscles),
+  equipment: equipmentSchema,
+  met: metSchema,
+};
+
+/** Her own exercise (stored, `exercise.put`): an own id — a `lib.*` id is invalid here. */
+export const exerciseSchema = z.object({ id: ownIdSchema, ...exerciseShape }) satisfies z.ZodType<Exercise>;
+/** A seed library row (the library integrity test). */
+export const libraryExerciseSchema = z.object({
+  id: libraryExerciseIdSchema,
+  ...exerciseShape,
+}) satisfies z.ZodType<Exercise>;
+
+const repsSchema = z.number().int().min(LIMITS.reps.min).max(LIMITS.reps.max).nullable().default(null);
+const setKgSchema = z
+  .number()
+  .min(LIMITS.setKg.min)
+  .max(LIMITS.setKg.max)
+  .refine(multipleOf(4), 'Expected a multiple of 0.25 kg')
+  .nullable()
+  .default(null);
+const setSecSchema = z.number().int().min(LIMITS.setSec.min).max(LIMITS.setSec.max).nullable().default(null);
+const cardioMinSchema = z
+  .number()
+  .min(LIMITS.cardioMin.min)
+  .max(LIMITS.cardioMin.max)
+  .refine(multipleOf(2), 'Expected a multiple of 0.5 min')
+  .nullable()
+  .default(null);
+const kmSchema = z
+  .number()
+  .min(LIMITS.km.min)
+  .max(LIMITS.km.max)
+  .refine(multipleOf(100), 'Expected a multiple of 0.01 km')
+  .nullable()
+  .default(null);
+
+export const setValuesSchema = z.object({
+  reps: repsSchema,
+  kg: setKgSchema,
+  sec: setSecSchema,
+  min: cardioMinSchema,
+  km: kmSchema,
+}) satisfies z.ZodType<SetValues>;
+
+export const sessionSetSchema = setValuesSchema.extend({ done: z.boolean() }) satisfies z.ZodType<SessionSet>;
+
+const restSecSchema = z.number().int().min(LIMITS.restSec.min).max(LIMITS.restSec.max);
+
+export const workoutItemSchema = z.object({
+  key: itemKeySchema,
+  exerciseId: exerciseIdSchema,
+  sets: z.array(setValuesSchema).min(1).max(LIMITS.plannedSets),
+  restSec: restSecSchema,
+}) satisfies z.ZodType<WorkoutItem>;
+
+export const workoutSchema = z.object({
+  id: ownIdSchema,
+  name: z.string().trim().min(1).max(LIMITS.workoutName),
+  days: z.array(weekdaySchema).max(7).refine(unique, 'Duplicate days'),
+  items: z
+    .array(workoutItemSchema)
+    .max(LIMITS.workoutItems)
+    .refine(uniqueBy((i: WorkoutItem) => i.key), 'Duplicate item keys'),
+}) satisfies z.ZodType<Workout>;
+
+export const sessionExerciseSchema = z.object({
+  key: itemKeySchema,
+  exerciseId: exerciseIdSchema,
+  ...exerciseShape,
+  restSec: restSecSchema,
+  skipped: z.boolean(),
+  sets: z.array(sessionSetSchema).max(LIMITS.sessionSets),
+}) satisfies z.ZodType<SessionExercise>;
+
+const epochMs = z.number().int().min(0);
+
+export const sessionSchema = z.object({
+  id: ownIdSchema,
+  date: isoDateSchema,
+  workoutId: ownIdSchema.nullable(),
+  name: z.string().trim().min(1).max(LIMITS.workoutName),
+  createdAt: epochMs,
+  startedAt: epochMs.nullable(),
+  finishedAt: epochMs.nullable(),
+  durationSec: z.number().int().min(LIMITS.sessionSec.min).max(LIMITS.sessionSec.max).nullable(),
+  status: z.enum(['active', 'done']),
+  exercises: z
+    .array(sessionExerciseSchema)
+    .max(LIMITS.sessionExercises)
+    .refine(uniqueBy((e: SessionExercise) => e.key), 'Duplicate exercise keys'),
+  notes: z.string().max(LIMITS.sessionNotes),
+  rev: z.number().int().min(LIMITS.rev.min).max(LIMITS.rev.max).default(0),
+  deviceId: ownIdSchema.nullable().default(null),
+}) satisfies z.ZodType<WorkoutSession>;
+
+export const stepsCountSchema = z.number().int().min(LIMITS.steps.min).max(LIMITS.steps.max);
+
+export const stepsEntrySchema = z.object({
+  date: isoDateSchema,
+  steps: stepsCountSchema,
+}) satisfies z.ZodType<StepsEntry>;
+
 export const settingsSchema = z.object({
   goal: kgSchema,
   kcalGoal: z.number().int().min(LIMITS.goalKcal.min).max(LIMITS.goalKcal.max),
@@ -170,12 +358,14 @@ export const settingsSchema = z.object({
   // Defaults keep settings stored before meal types existed (and old backups) valid.
   mealTypes: mealTypesSchema.default(() => [...DEFAULT_MEAL_TYPES]),
   macroGoals: macroGoalsSchema.default(() => emptyMacroGoals()),
+  stepsGoal: stepsGoalSchema.default(null),
 }) satisfies z.ZodType<Settings>;
 
 /** The `settings.put` op value: no defaults — an absent `mealTypes` / `macroGoals` keeps the stored one (old clients). */
 export const settingsPutSchema = settingsSchema.extend({
   mealTypes: mealTypesSchema.optional(),
   macroGoals: macroGoalsSchema.optional(),
+  stepsGoal: stepsGoalSchema.optional(),
 }) satisfies z.ZodType<SettingsPut>;
 
 /** Grams of one macronutrient in a «Часті страви» dish / a use of it; the key is omitted when unknown (never null). */
@@ -225,6 +415,20 @@ export const opSchema = z.discriminatedUnion('kind', [
   /** Not strictly idempotent: a replay bumps `count` once more (harmless for ranking). */
   z.object({ kind: z.literal('food.use'), date: isoDateSchema, value: foodUseSchema }),
   z.object({ kind: z.literal('food.delete'), name: foodName }),
+  // Wire v3 (docs/workouts-steps-rebrand.md §1.3): old clients never send these, old servers answer invalid_op.
+  /** Her own exercise, upsert by id; a NEW one beyond 300 is ignored. */
+  z.object({ kind: z.literal('exercise.put'), value: exerciseSchema }),
+  /** No cascade in the reducer (the client rewrites the workouts that used it). */
+  z.object({ kind: z.literal('exercise.delete'), id: ownIdSchema }),
+  /** Upsert by id keeping its position; a NEW one beyond 50 is ignored. */
+  z.object({ kind: z.literal('workout.put'), value: workoutSchema }),
+  z.object({ kind: z.literal('workout.delete'), id: ownIdSchema }),
+  /** Upsert by id with the monotonic rules of `reduceSessions` (W13). */
+  z.object({ kind: z.literal('session.put'), value: sessionSchema }),
+  /** Removes the session and keeps a tombstone of its id. */
+  z.object({ kind: z.literal('session.delete'), id: ownIdSchema }),
+  z.object({ kind: z.literal('steps.put'), date: isoDateSchema, steps: stepsCountSchema }),
+  z.object({ kind: z.literal('steps.delete'), date: isoDateSchema }),
 ]);
 
 export type Op = z.infer<typeof opSchema>;
@@ -237,6 +441,16 @@ export const opsRequestSchema = z.object({
 });
 
 const uniqueDates = (arr: { date: string }[]) => new Set(arr.map((x) => x.date)).size === arr.length;
+
+function sessionsPerDayOk(arr: readonly { date: string }[]): boolean {
+  const perDay = new Map<string, number>();
+  for (const s of arr) {
+    const n = (perDay.get(s.date) ?? 0) + 1;
+    if (n > LIMITS.sessionsPerDay) return false;
+    perDay.set(s.date, n);
+  }
+  return true;
+}
 
 /** Full data set, as returned by `GET /api/data` and accepted by `POST /api/import`. */
 export const appDataSchema = z.object({
@@ -254,6 +468,28 @@ export const appDataSchema = z.object({
     .refine((arr) => new Set(arr.map((f) => f.name.toLocaleLowerCase('uk'))).size === arr.length, 'Duplicate dish names')
     .default([]),
   settings: settingsSchema,
+  // The workouts / steps keys are optional so that every older backup still imports (§1.4).
+  exercises: z
+    .array(exerciseSchema)
+    .max(LIMITS.customExercises)
+    .refine(uniqueBy((e: Exercise) => e.id), 'Duplicate exercise ids')
+    .default([]),
+  workouts: z
+    .array(workoutSchema)
+    .max(LIMITS.workouts)
+    .refine(uniqueBy((w: Workout) => w.id), 'Duplicate workout ids')
+    .default([]),
+  sessions: z
+    .array(sessionSchema)
+    .refine(uniqueBy((s: WorkoutSession) => s.id), 'Duplicate session ids')
+    .refine(sessionsPerDayOk, 'Too many sessions on one day')
+    .default([]),
+  steps: z.array(stepsEntrySchema).refine(uniqueDates, 'Duplicate steps dates').default([]),
+  deletedSessions: z
+    .array(ownIdSchema)
+    .max(LIMITS.deletedSessions)
+    .refine(unique, 'Duplicate session tombstones')
+    .default([]),
 }) satisfies z.ZodType<AppData>;
 
 export const pushSubscribeRequestSchema = z.object({

@@ -10,16 +10,25 @@ import {
   type AppData,
   type MacroGoals,
   type Meal,
+  type WorkoutSession,
 } from '../../packages/shared/src/index';
-import { TODAY } from '../support/env';
+import { FIXED_NOW, TODAY } from '../support/env';
 
-export type SeedName = 'demo' | 'empty' | 'onboarded' | 'meals';
+export type SeedName = 'demo' | 'empty' | 'onboarded' | 'meals' | 'training';
 
 /**
  * ~10 weeks of realistic records ending today. Today: a legacy day (food text only, no kcal / workout mark yet);
  * the six days before it are logged as 3–4 typed meals with macros; older days are legacy days.
  */
 export const demo = (): AppData => demoData(TODAY);
+
+/**
+ * The demo set plus training (the dev seed's `training: true`): workouts «Ноги + прес» (Пн, Ср) and «Верх тіла» (Пт),
+ * the own exercise «Степ-аеробіка», done sessions on the trained plan days of the 3 weeks before today (the latest
+ * «Ноги + прес» on 2026-10-12 with squat 40 kg, every set done; the one before 37,5 kg), steps on 12 of the 14 days
+ * before today, steps goal 8 000; nothing today.
+ */
+export const training = (): AppData => demoData(TODAY, { training: true });
 
 /** A brand-new account: nothing recorded, not onboarded (the setup sheet opens by itself). */
 export const empty = (): AppData => emptyData();
@@ -93,7 +102,46 @@ export function seedData(name: SeedName): AppData {
       return onboarded();
     case 'meals':
       return meals();
+    case 'training':
+      return training();
   }
 }
 
 export { demoData };
+
+/**
+ * A workout session for API / device-copy specs (the session screens belong to the workouts package): today,
+ * «Вільне тренування» with one squat set of 12 × 40 kg not done yet; `over` replaces any field.
+ */
+export function e2eSession(over: Partial<WorkoutSession> = {}): WorkoutSession {
+  return {
+    id: 'e2eSession0001',
+    date: TODAY,
+    workoutId: null,
+    name: 'Вільне тренування',
+    createdAt: FIXED_NOW.getTime(),
+    startedAt: FIXED_NOW.getTime(),
+    finishedAt: null,
+    durationSec: null,
+    status: 'active',
+    exercises: [
+      {
+        key: 'e2eKey01',
+        exerciseId: 'lib.back-squat',
+        name: 'Присідання зі штангою',
+        kind: 'weight',
+        met: 5,
+        equipment: 'barbell',
+        primary: ['quads', 'glutes'],
+        secondary: ['hamstrings', 'adductors', 'lowerBack'],
+        restSec: 90,
+        skipped: false,
+        sets: [{ reps: 12, kg: 40, sec: null, min: null, km: null, done: false }],
+      },
+    ],
+    notes: '',
+    rev: 0,
+    deviceId: null,
+    ...over,
+  };
+}

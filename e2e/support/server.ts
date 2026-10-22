@@ -28,6 +28,7 @@ import {
   type LinkResponse,
   type SessionUser,
   type UserRole,
+  type WorkoutSession,
 } from '../../packages/shared/src/index';
 import { ADMIN_PASSWORD, ADMIN_USERNAME, BASE_URL, PASSWORD, USERNAME } from './env';
 
@@ -340,3 +341,7 @@ export async function createUser(
     },
   };
 }
+
+/** The stored workout session `id` of `data` (server copy or device copy), or undefined. */
+export const sessionOf = (data: AppData, id: string): WorkoutSession | undefined =>
+  (data.sessions ?? []).find((s) => s.id === id);

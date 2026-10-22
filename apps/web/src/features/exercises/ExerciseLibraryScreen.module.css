@@ -1,0 +1,44 @@
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.empty {
+  margin: 0;
+  padding: 18px 4px 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink2);
+  text-align: center;
+}
+
+/* Desktop: list (320–420px) | the selected exercise, which stays in view while the long list scrolls. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.detail {
+  position: sticky;
+  top: 32px;
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-width: 0;
+  max-width: 640px;
+  padding: 2px;
+}
+
+.placeholder {
+  margin: 0;
+  padding: 24px;
+  border: 1px dashed var(--line3);
+  border-radius: var(--r24);
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ink2);
+}

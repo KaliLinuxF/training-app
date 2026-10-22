@@ -6,7 +6,7 @@ import { useToday } from '@/lib/useToday';
 import { SheetHost } from '@/sheets/SheetHost';
 import { ui, useSheet } from '@/store/ui';
 import { ConfirmHost, cx, Toast } from '@/ui';
-import { isWidePage, navItems } from './nav';
+import { hidesTabBar, isWidePage, navItems } from './nav';
 import { Sidebar } from './Sidebar';
 import { SyncWatcher } from './SyncWatcher';
 import { TabBar } from './TabBar';
@@ -15,7 +15,8 @@ import s from './AppShell.module.css';
 /**
  * Page chrome: mobile column + floating tab bar, or desktop container + sidebar;
  * plus the toast and the sheet host. Screens render inside <main>. An admin also gets «Клієнти» in the navigation
- * (`navItems`), and the coach pages (`/coach`, `/coach/<id>`) use a wider desktop container (up to 1440px).
+ * (`navItems`), and the coach pages (`/coach`, `/coach/<id>`) use a wider desktop container (up to 1440px). The
+ * full-screen workouts pages (`hidesTabBar`) get no tab bar on the phone, nor its bottom padding.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const isDesktop = useIsDesktop();
@@ -45,6 +46,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   // writes into the admin's own diary.
   const coachPage = isWidePage(location);
   const openRecord = coachPage ? undefined : () => ui.openSheet(today, 'menu');
+  // The full-screen workouts pages (session, log, builder) have their own sticky footer instead (W15).
+  const tabBar = !isDesktop && !hidesTabBar(location);
 
   return (
     <div className={cx(s.root, isDesktop ? s.desktop : s.mobile, isDesktop && coachPage && s.wide)}>
@@ -56,8 +59,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           recordOpen={recordOpen}
         />
       )}
-      <main className={s.main}>{children}</main>
-      {!isDesktop && (
+      <main className={cx(s.main, !isDesktop && !tabBar && s.bare)}>{children}</main>
+      {tabBar && (
         <TabBar
           location={location}
           items={navItems(isAdmin, 'tabbar')}

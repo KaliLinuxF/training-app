@@ -1,8 +1,18 @@
-import { useId } from 'react';
+import { Fragment, useId } from 'react';
+import { Link, useLocation } from 'wouter';
 import type { ReminderKind, Reminders, WeeklyReminder } from '@legko/shared';
-import { dataActions } from '@/store/data';
-import { Card, CardHeader, cx, Switch, TimeInput, WeekdayPicker } from '@/ui';
-import { REMINDER_DAYS_LABELS, REMINDER_TITLES, reminderSubtitle, withReminder } from './model';
+import { WORKOUTS_PATH } from '@/lib/workoutRoutes';
+import { dataActions, useAppData } from '@/store/data';
+import { backState, Card, CardHeader, cx, Switch, TimeInput, WeekdayPicker } from '@/ui';
+import {
+  NOT_IN_PLAN,
+  REMINDER_DAYS_LABELS,
+  REMINDER_TITLES,
+  reminderSubtitle,
+  SCHEDULE_SENTENCE,
+  withReminder,
+  workoutSchedule,
+} from './model';
 import s from './ReminderCard.module.css';
 
 export interface ReminderCardProps {
@@ -55,6 +65,7 @@ export function ReminderCard({ kind, rem, headingLevel = 'h2' }: ReminderCardPro
           className={dim}
         />
       )}
+      {kind === 'workout' && <WorkoutSchedule planDays={rem.workout.days} />}
       <div className={cx(s.timeRow, dim)}>
         <label htmlFor={timeId} className={s.timeLabel}>
           Час
@@ -67,5 +78,48 @@ export function ReminderCard({ kind, rem, headingLevel = 'h2' }: ReminderCardPro
         />
       </div>
     </Card>
+  );
+}
+
+/**
+ * Under the workout days (§3.7): which workout is on which day — «За розкладом: Пн, Ср — Ноги + прес · Пт — Верх
+ * тіла» —, a day outside the plan struck with «не в плані» (no reminder comes that day), the one-sentence rule and
+ * «Мої тренування →». Nothing while no workout has days.
+ */
+function WorkoutSchedule({ planDays }: { planDays: Reminders['workout']['days'] }) {
+  const items = workoutSchedule(useAppData().workouts, planDays);
+  const [location] = useLocation();
+  const titleId = useId();
+  if (items.length === 0) return null;
+  return (
+    <div className={s.schedule} role="group" aria-labelledby={titleId}>
+      <p id={titleId} className={s.scheduleTitle}>
+        За розкладом
+      </p>
+      <ul className={s.scheduleList}>
+        {items.map((item) => (
+          <li key={item.workoutId}>
+            {item.days.map((d, i) => (
+              <Fragment key={d.label}>
+                {i > 0 && ', '}
+                {d.inPlan ? (
+                  d.label
+                ) : (
+                  <>
+                    <s className={s.offPlan}>{d.label}</s> <span className={s.offPlanNote}>({NOT_IN_PLAN})</span>
+                  </>
+                )}
+              </Fragment>
+            ))}
+            {' — '}
+            <span className={s.scheduleName}>{item.name}</span>
+          </li>
+        ))}
+      </ul>
+      <p className={s.scheduleNote}>{SCHEDULE_SENTENCE}</p>
+      <Link href={WORKOUTS_PATH} state={backState(location)} className={s.scheduleLink}>
+        Мої тренування →
+      </Link>
+    </div>
   );
 }

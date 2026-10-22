@@ -1,5 +1,5 @@
 /*
- * The desktop clients table (docs/coach-cabinet.md §6.1). 8 columns ≈ 920px fit the 960px content of a 1280px
+ * The desktop clients table (docs/coach-cabinet.md §6.1). 9 columns ≈ 960px fit the 960px content of a 1280px
  * window; narrower, the region scrolls on both axes with a sticky header row and an opaque sticky name column.
  */
 .surface {
@@ -65,7 +65,7 @@
 
 .table {
   width: 100%;
-  min-width: 880px;
+  min-width: 940px;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 15px;
@@ -156,34 +156,39 @@
   visibility: hidden;
 }
 
-/* Column widths (≈ 920px at 15px; the headers wrap to two lines). */
+/* Column widths (≈ 960px at 15px; the headers wrap to two lines). */
 .col_name {
   min-width: 180px;
-  width: 190px;
+  width: 180px;
 }
 
 .col_weight {
-  width: 110px;
+  width: 100px;
   max-width: 120px;
 }
 
 .col_change,
 .col_workouts,
 .col_logged {
-  width: 85px;
+  width: 80px;
   max-width: 95px;
 }
 
 .col_goalPct {
-  width: 110px;
+  width: 100px;
 }
 
 .col_kcal {
-  width: 150px;
+  width: 140px;
+}
+
+/* «10 500 / 8 000» on one line. */
+.col_steps {
+  width: 110px;
 }
 
 .col_activity {
-  width: 105px;
+  width: 95px;
 }
 
 /* ---- rows ---------------------------------------------------------------------------------- */

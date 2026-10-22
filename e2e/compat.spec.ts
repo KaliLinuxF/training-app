@@ -14,7 +14,7 @@ import {
   type DayEntry,
   type LoginResponse,
 } from '../packages/shared/src/index';
-import { demo, MEALS_GOALS, MEALS_TODAY, meals } from './fixtures/data';
+import { demo, MEALS_GOALS, MEALS_TODAY, meals, training } from './fixtures/data';
 import { BASE_URL, PASSWORD, TODAY, USERNAME } from './support/env';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
@@ -172,6 +172,58 @@ test.describe('compatibility with old clients, outboxes and backups (API)', () =
     expect(exported.foods.find((f) => f.name === 'Борщ')).toMatchObject({ protein: 6, fat: 9, carbs: 19 });
     await server.importData(exported);
     expect(await server.getData()).toEqual(exported);
+  });
+});
+
+test.describe('compatibility of the workouts and steps release with old clients and backups (API)', () => {
+  test.skip(({ isMobile }) => !isMobile, 'API level: runs once, in the iphone project');
+
+  test.beforeEach(async ({ server }) => {
+    await server.importData(training());
+  });
+
+  test('raw v2 ops of an old client never erase sessions, workouts, steps or the steps goal', async ({ server }) => {
+    const before = await server.getData();
+    expect(before.sessions.length).toBeGreaterThan(0);
+    const trainedDay = before.sessions.at(-1)?.date ?? '';
+    const { stepsGoal: _goal, ...oldSettings } = { ...before.settings, goal: 59 };
+    await expectOk(
+      await server.sendOps([
+        { kind: 'day.put', date: trainedDay, value: { food: 'Каша', kcal: 300, trained: false, types: [], notes: '' } },
+        { kind: 'day.delete', date: trainedDay },
+        { kind: 'day.meta', date: TODAY, value: { trained: true, types: ['Кардіо'] } },
+        { kind: 'settings.put', value: oldSettings },
+        { kind: 'weight.put', date: TODAY, kg: 64 },
+      ]),
+    );
+    const after = await server.getData();
+    expect(after.sessions).toEqual(before.sessions);
+    expect(after.workouts).toEqual(before.workouts);
+    expect(after.exercises).toEqual(before.exercises);
+    expect(after.steps).toEqual(before.steps);
+    expect(after.settings).toMatchObject({ goal: 59, stepsGoal: 8000 });
+  });
+
+  test('an old AppData (no workouts / steps keys, no stepsGoal) imports, with them empty', async ({ server }) => {
+    const { exercises: _e, workouts: _w, sessions: _s, steps: _t, deletedSessions: _d, ...old } = demo();
+    const { stepsGoal: _g, ...settings } = old.settings;
+    const res = await server.request.post(`${BASE_URL}${API.import}`, {
+      data: { ...old, settings },
+      headers: { ...MUTATION, [USER_HEADER]: (await server.me()).id },
+    });
+    await expectOk(res);
+    const data = await server.getData();
+    expect(data).toMatchObject({ exercises: [], workouts: [], sessions: [], steps: [], deletedSessions: [] });
+    expect(data.settings.stepsGoal).toBeNull();
+    expect(data.days).toEqual(old.days);
+  });
+
+  test('an invalid steps op (0 steps) is refused and nothing is stored', async ({
+    server,
+  }) => {
+    const res = await server.sendOps([{ kind: 'steps.put', date: TODAY, steps: 0 }]);
+    expect(res.status()).toBe(400);
+    expect((await server.getData()).steps.some((s) => s.date === TODAY)).toBe(false);
   });
 });
 

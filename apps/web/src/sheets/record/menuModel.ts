@@ -1,15 +1,15 @@
 /**
- * «Що записати?» — the «+» menu: four rows (Їжа, Тренування, Вага, Заміри) with a light status
+ * «Що записати?» — the «+» menu: five rows (Їжа, Тренування, Кроки, Вага, Заміри) with a light status
  * each, worked out from the stored data of the menu's date (plan D19: own statuses, no dependency
  * on the Home model). Pure: the date and today come in, nothing reads the clock.
  */
 import { dLong, DOW_LONG, f0, f1, ok, weekdayOf, type AppData, type DayEntry, type ISODate } from '@legko/shared';
 import { kcalGoalView } from '@/features/goal';
-import { dueReminders, measuredOn } from '@/lib/stats';
+import { dueReminders, measuredOn, stepsOn } from '@/lib/stats';
 import type { IconName, ListIconTone } from '@/ui';
 
 /** The sheet each row opens: «Їжа» opens a new meal right away (docs/meals-macros.md D8), the others a short sheet. */
-export type CaptureMenuMode = 'meal' | 'workout' | 'weight' | 'measure';
+export type CaptureMenuMode = 'meal' | 'workout' | 'steps' | 'weight' | 'measure';
 
 /**
  * Right-hand status of a row:
@@ -38,6 +38,7 @@ export interface CaptureMenuRow {
 export const MENU_ROW_COPY: Readonly<Record<CaptureMenuMode, { title: string; sub: string }>> = {
   meal: { title: 'Їжа', sub: 'Новий прийом їжі' },
   workout: { title: 'Тренування', sub: 'Було чи ні, тип' },
+  steps: { title: 'Кроки', sub: 'За день, вручну' },
   weight: { title: 'Вага', sub: 'Контрольне зважування' },
   measure: { title: 'Заміри', sub: 'Груди, талія, стегна' },
 };
@@ -64,7 +65,7 @@ const hasFood = (e: DayEntry | undefined): boolean =>
   !!e && (e.food.trim() !== '' || (e.photos?.length ?? 0) > 0);
 
 /**
- * The menu rows for `date`, in order: Їжа, Тренування, Вага, Заміри. Due pills only for today,
+ * The menu rows for `date`, in order: Їжа, Тренування, Кроки, Вага, Заміри. Due pills only for today,
  * and only after the first-run setup (like Home).
  */
 export function captureMenuRows(data: AppData, date: ISODate, today: ISODate): CaptureMenuRow[] {
@@ -93,6 +94,9 @@ export function captureMenuRows(data: AppData, date: ISODate, today: ISODate): C
           ? { kind: 'due', text: MENU_STATUS.planned }
           : null;
 
+  const steps = stepsOn(data, date);
+  const stepsStatus: CaptureMenuStatus | null = steps !== null ? { kind: 'value', text: f0(steps) } : null;
+
   const weighIn = data.weights.find((w) => w.date === date && ok(w.kg));
   const weight: CaptureMenuStatus | null = weighIn
     ? { kind: 'value', text: kgText(weighIn.kg) }
@@ -109,6 +113,7 @@ export function captureMenuRows(data: AppData, date: ISODate, today: ISODate): C
   return [
     { mode: 'meal', ...MENU_ROW_COPY.meal, icon: 'food', iconTone: 'acc2', status: food },
     { mode: 'workout', ...MENU_ROW_COPY.workout, icon: 'workout', iconTone: 'acc', status: workout },
+    { mode: 'steps', ...MENU_ROW_COPY.steps, icon: 'steps', iconTone: 'neutral', status: stepsStatus },
     { mode: 'weight', ...MENU_ROW_COPY.weight, icon: 'weight', iconTone: 'neutral', status: weight },
     { mode: 'measure', ...MENU_ROW_COPY.measure, icon: 'measure', iconTone: 'neutral', status: measure },
   ];

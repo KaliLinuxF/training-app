@@ -9,6 +9,7 @@ export * from './stats/body';
 export * from './stats/range';
 export * from './stats/chart';
 export * from './stats/workouts';
+export * from './stats/activity';
 export * from './stats/kcal';
 export * from './stats/nutrition';
 export * from './stats/calendar';

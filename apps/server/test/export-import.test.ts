@@ -30,7 +30,70 @@ const sample: AppData = {
     { name: 'Вівсянка з бананом', portion: '250 г', kcal: 350, count: 4, lastUsed: '2026-10-09' },
     { name: 'Кава з молоком', portion: '1 чашка (250 мл)', kcal: 60, count: 9, lastUsed: '2026-10-10' },
   ],
-  settings: { ...defaultSettings(), goal: 60, onboarded: true },
+  settings: { ...defaultSettings(), goal: 60, onboarded: true, stepsGoal: 9000 },
+  // Workouts and steps (schema v5).
+  exercises: [
+    {
+      id: 'ownExercise01',
+      name: 'Степ-аеробіка',
+      kind: 'cardio',
+      primary: ['quads', 'calves'],
+      secondary: ['glutes'],
+      equipment: 'other',
+      met: 7,
+    },
+  ],
+  workouts: [
+    {
+      id: 'workout00001',
+      name: 'Ноги + прес',
+      days: [1, 3],
+      items: [
+        {
+          key: 'item1',
+          exerciseId: 'lib.back-squat',
+          sets: [{ reps: 12, kg: 40, sec: null, min: null, km: null }],
+          restSec: 90,
+        },
+      ],
+    },
+  ],
+  sessions: [
+    {
+      id: 'session00001',
+      date: '2026-10-09',
+      workoutId: 'workout00001',
+      name: 'Ноги + прес',
+      createdAt: 1_760_000_000_000,
+      startedAt: 1_760_000_000_000,
+      finishedAt: 1_760_002_880_000,
+      durationSec: 2880,
+      status: 'done',
+      exercises: [
+        {
+          key: 'item1',
+          exerciseId: 'lib.back-squat',
+          name: 'Присідання зі штангою',
+          kind: 'weight',
+          met: 5,
+          equipment: 'barbell',
+          primary: ['quads', 'glutes'],
+          secondary: ['hamstrings'],
+          restSec: 90,
+          skipped: false,
+          sets: [{ reps: 12, kg: 40, sec: null, min: null, km: null, done: true }],
+        },
+      ],
+      notes: '',
+      rev: 3,
+      deviceId: null,
+    },
+  ],
+  steps: [
+    { date: '2026-10-09', steps: 8400 },
+    { date: '2026-10-10', steps: 11000 },
+  ],
+  deletedSessions: ['goneSession01'],
 };
 
 describe('export / import', () => {
@@ -103,6 +166,38 @@ describe('export / import', () => {
     const data = await json<AppData>(await s.call('/api/data', { cookie }));
     expect(data.weights).toEqual(sample.weights);
     expect(data.foods).toEqual(sample.foods);
+  });
+
+  it('an older backup (no workouts or steps) clears them: that is what restoring means', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    await s.call('/api/import', { cookie, body: sample });
+    const { exercises: _e, workouts: _w, sessions: _s, steps: _t, deletedSessions: _d, ...old } = sample;
+    const { stepsGoal: _g, ...oldSettings } = old.settings;
+    expect((await s.call('/api/import', { cookie, body: { ...old, settings: oldSettings } })).status).toBe(200);
+    const data = await json<AppData>(await s.call('/api/data', { cookie }));
+    expect(data).toEqual({
+      ...sample,
+      settings: { ...sample.settings, stepsGoal: null },
+      exercises: [],
+      workouts: [],
+      sessions: [],
+      steps: [],
+      deletedSessions: [],
+    });
+  });
+
+  it('rejects a backup with an invalid session or a lib.* own exercise', async () => {
+    const s = await createTestServer();
+    const cookie = await s.login();
+    for (const body of [
+      { ...sample, exercises: [{ ...sample.exercises[0], id: 'lib.plank' }] },
+      { ...sample, sessions: [{ ...sample.sessions[0], durationSec: -5 }] },
+      { ...sample, steps: [...sample.steps, { date: '2026-10-09', steps: 5 }] },
+    ]) {
+      const res = await s.call('/api/import', { cookie, body });
+      expect(res.status).toBe(400);
+    }
   });
 
   it('imports a backup made before «Часті страви» existed (no foods → none)', async () => {

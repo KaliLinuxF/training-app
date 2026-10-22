@@ -95,6 +95,9 @@ const makeItem = (now: Date, over: Partial<CoachClientItem> = {}): CoachClientIt
   days: [],
   firstRecord: null,
   lastRecord: null,
+  steps: [],
+  sessions: [],
+  schedule: [],
   ...over,
 });
 
@@ -994,6 +997,9 @@ describe('coachItemFromData', () => {
       ],
       firstRecord: '2026-07-01',
       lastRecord: '2026-10-15',
+      steps: [],
+      sessions: [],
+      schedule: [],
     };
     expect(coachItemFromData(client, data, window)).toEqual(expected);
   });

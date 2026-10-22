@@ -2,7 +2,7 @@
  * Sheet deep links, opened for today (plan §3.3). Push notifications use `DEEP_LINKS` in
  * @legko/shared, which stay as they are: `/?sheet=day&trained=1` (the workout push, a legacy alias
  * of «Тренування» with ✓), `/?sheet=weight`, `/?sheet=measure`. The app also understands
- * `/?sheet=day` (the full «Запис дня»), `/?sheet=food` (the day's meal list «Їжа») and
+ * `/?sheet=day` (the full «Запис дня»), `/?sheet=food` (the day’s meal list «Їжа»), `/?sheet=steps` («Кроки») and
  * `/?sheet=workout[&trained=1]`. The menu, the new-meal editor («Прийом їжі» opens from a tap, with the
  * keyboard), setup and install sheets are not linkable: such links are ignored and cleaned.
  */
@@ -15,7 +15,7 @@ const TRAINED_PARAM = 'trained';
 /** The record sheets a link may open. */
 export type LinkMode = Exclude<RecordMode, 'meal'>;
 
-const LINK_MODES: readonly LinkMode[] = ['day', 'food', 'workout', 'weight', 'measure'];
+const LINK_MODES: readonly LinkMode[] = ['day', 'food', 'workout', 'weight', 'measure', 'steps'];
 
 export interface SheetDeepLink {
   mode: LinkMode;

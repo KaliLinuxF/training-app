@@ -1,13 +1,17 @@
 import { addDays, type MeasureKey } from '@legko/shared';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
+import { useLocation } from 'wouter';
 import { MealEditorBody, MealSheet, useMealEditor, type MealTarget } from '@/features/food';
 import { useToday } from '@/lib/useToday';
+import { logPath, sessionPath, WORKOUT_NEW_PATH, WORKOUTS_PATH } from '@/lib/workoutRoutes';
 import { commit, useAppData } from '@/store/data';
 import { ui, type SheetState } from '@/store/ui';
 import { cx, Sheet } from '@/ui';
-import { MeasureField, SAVE_FAILED, SaveFooter, WeightField } from '../fields/fields';
-import { measurePlaceholders, sheetDateLabels, stepBaseWeight, weightHint } from '../helpers';
+import { MeasureField, SAVE_FAILED, SaveFooter, StepsField, WeightField } from '../fields/fields';
+import { measurePlaceholders, sheetDateLabels, stepBaseWeight, stepsHint, weightHint } from '../helpers';
+import { startWorkout } from '../startWorkout';
+import { useClock } from '../useClock';
 import { useDraft } from '../useDraft';
 import { useSheetGuard } from '../useSheetGuard';
 import { NotesBlock, WorkoutBlock } from './blocks';
@@ -28,6 +32,8 @@ import {
   type RecordDraft,
   type RecordMode,
 } from './model';
+import { WorkoutLink, WorkoutPlan } from './WorkoutPlan';
+import { buildWorkoutSheet, type WorkoutStartRow } from './workoutSheetModel';
 import s from './RecordSheet.module.css';
 
 export interface RecordSheetProps {
@@ -140,6 +146,32 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
 
   const food = show.food ? foodDayModel(data, date) : null;
 
+  // «Тренування» / «Запис дня»: her workouts, the live session and the day's done sessions (§3.8).
+  const [, navigate] = useLocation();
+  const live = show.workout && data.sessions.some((x) => x.status === 'active');
+  const now = useClock(open && live);
+  const plan = show.workout ? buildWorkoutSheet(data, date, today, now) : null;
+  const leaveTo = (path: string) =>
+    guard(() => {
+      ui.closeSheet();
+      navigate(path);
+    });
+  const startRow = (row: WorkoutStartRow) => {
+    if (date !== today) {
+      leaveTo(logPath(date, row.workoutId));
+      return;
+    }
+    guard(() => {
+      void startWorkout(date, row.workoutId).then((id) => {
+        if (id === null) return;
+        ui.closeSheet();
+        navigate(sessionPath(id));
+      });
+    });
+  };
+  const marking = plan?.hasDone ? 'recorded' : plan && (plan.start || plan.live) ? 'labelled' : 'toggle';
+  const stepsLine = show.steps ? stepsHint(data, date, draft.steps) : null;
+
   let footer: ReactNode;
   if (isMenu) footer = undefined;
   else if (isMeal)
@@ -186,6 +218,9 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
           <MealEditorBody editor={meal} onShowDay={() => replace(() => ui.openSheet(date, 'food'))} />
         ) : (
           <>
+            {plan && formMode === 'workout' && (
+              <WorkoutPlan model={plan} onStart={startRow} onOpenSession={(id) => leaveTo(sessionPath(id))} />
+            )}
             {show.workout && (
               <WorkoutBlock
                 mode={formMode}
@@ -193,6 +228,20 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
                 errors={errors}
                 set={set}
                 customTypes={data.settings.customTypes}
+                marking={formMode === 'day' && marking === 'labelled' ? 'toggle' : marking}
+              />
+            )}
+            {show.steps && (
+              <StepsField
+                variant={formMode === 'steps' ? 'sheet' : 'day'}
+                value={draft.steps}
+                onChange={(steps) => set({ steps })}
+                hint={
+                  stepsLine ? (
+                    <span className={stepsLine.reached ? s.reached : undefined}>{stepsLine.text}</span>
+                  ) : undefined
+                }
+                error={errors.steps}
               />
             )}
             {food && (
@@ -230,6 +279,12 @@ export function RecordSheet({ state, open }: RecordSheetProps) {
                 foldable={formMode === 'workout'}
                 hadNotes={baseline.notes !== ''}
                 sheetKey={key}
+              />
+            )}
+            {plan && formMode === 'workout' && (
+              <WorkoutLink
+                text={plan.link.text}
+                onClick={() => leaveTo(plan.link.to === 'new' ? WORKOUT_NEW_PATH : WORKOUTS_PATH)}
               />
             )}
           </>

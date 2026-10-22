@@ -1,0 +1,34 @@
+.group {
+  gap: 8px;
+}
+
+.chip {
+  white-space: nowrap;
+  transition:
+    transform 120ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+/* A secondary muscle: lighter than a primary one (the suffix says it in words too). */
+.secondary[aria-pressed='true'] {
+  background: var(--card);
+  border-color: var(--accLine);
+  color: var(--accD);
+}
+
+.suffix {
+  font-weight: 500;
+}
+
+/* Its region was just tapped on the map. */
+.highlight {
+  box-shadow: 0 0 0 3px var(--accLine);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip {
+    transition: none;
+  }
+}

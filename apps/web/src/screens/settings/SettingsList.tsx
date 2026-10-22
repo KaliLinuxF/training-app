@@ -1,7 +1,7 @@
 import type { ReactNode, Ref } from 'react';
 import { useCurrentUser } from '@/auth/auth';
 import type { ThemePref } from '@/lib/theme';
-import { useSettings, useSyncState } from '@/store/data';
+import { useAppData, useSettings, useSyncState } from '@/store/data';
 import { cx, fullRowClass, ListGroup, ListRow, Pill, ScreenHeader } from '@/ui';
 import {
   accountSummary,
@@ -18,6 +18,7 @@ import {
   themeSummary,
   typesSummary,
   usersSummary,
+  workoutsRowSummary,
   type SettingsSectionId,
 } from './listModel';
 import { SyncDot } from './SyncDot';
@@ -50,6 +51,7 @@ export const SETTINGS_CAPTION = 'Home Fit · трекер схуднення';
  */
 export function SettingsList({ current, push, themePref, showHeader, ref }: SettingsListProps) {
   const settings = useSettings();
+  const workoutCount = useAppData().workouts.length;
   const sync = syncShort(useSyncState());
   const badge = notifBadge(push.status);
   const user = useCurrentUser();
@@ -60,7 +62,7 @@ export function SettingsList({ current, push, themePref, showHeader, ref }: Sett
   const values: Record<SettingsSectionId, ReactNode> = {
     reminders: remindersSummary(settings.rem),
     goals: goalsSummary(settings),
-    workouts: typesSummary(settings.customTypes),
+    workouts: workoutsRowSummary(workoutCount, typesSummary(settings.customTypes)),
     meals: mealTypesSummary(settings.mealTypes),
     appearance: themeSummary(themePref),
     data: (

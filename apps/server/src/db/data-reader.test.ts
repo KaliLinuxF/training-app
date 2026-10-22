@@ -162,8 +162,17 @@ describe('DataReader.read', () => {
     expect(full.foods.map((f) => f.name)).toEqual(['Борщ']);
     const copy = readers.readerFor(client(anna)).read();
     expect('foods' in copy).toBe(false);
-    expect(Object.keys(copy).sort()).toEqual(['days', 'measures', 'settings', 'weights']);
-    const { foods: _foods, ...rest } = full;
+    expect(Object.keys(copy).sort()).toEqual([
+      'days',
+      'exercises',
+      'measures',
+      'sessions',
+      'settings',
+      'steps',
+      'weights',
+      'workouts',
+    ]);
+    const { foods: _foods, deletedSessions: _tombstones, ...rest } = full;
     expect(copy).toEqual(rest);
   });
 
@@ -188,7 +197,66 @@ describe('DataReader.read', () => {
       weights: [],
       measures: [],
       settings: emptyData().settings,
+      exercises: [],
+      workouts: [],
+      sessions: [],
+      steps: [],
     });
+  });
+});
+
+describe('DataReader workouts and steps', () => {
+  const session = (id: string, date: string, status: 'active' | 'done'): Op => ({
+    kind: 'session.put',
+    value: {
+      id,
+      date,
+      workoutId: null,
+      name: 'Вільне тренування',
+      createdAt: 1,
+      startedAt: status === 'active' ? 1 : null,
+      finishedAt: null,
+      durationSec: null,
+      status,
+      exercises: [],
+      notes: '',
+      rev: 0,
+      deviceId: null,
+    },
+  });
+  const ops: Op[] = [
+    { kind: 'steps.put', date: '2026-10-01', steps: 5000 },
+    { kind: 'steps.put', date: '2026-10-05', steps: 9000 },
+    { kind: 'steps.put', date: '2026-10-20', steps: 7000 },
+    session('sessionDone01', '2026-10-05', 'done'),
+    session('sessionLive01', '2026-10-06', 'active'),
+    session('sessionGone01', '2026-10-07', 'done'),
+    { kind: 'session.delete', id: 'sessionGone01' },
+    session('sessionLate01', '2026-10-25', 'done'),
+    { kind: 'workout.put', value: { id: 'workout00001', name: 'Ноги', days: [1, 3], items: [] } },
+  ];
+
+  it('stepsBetween and sessionsBetween are inclusive windows; only done sessions; workouts in order', () => {
+    repos.forUser(anna).apply(ops);
+    repos.forUser(olya).apply([{ kind: 'steps.put', date: '2026-10-05', steps: 1234 }]);
+    const reader = readers.readerFor(client(anna));
+    expect(reader.stepsBetween('2026-10-01', '2026-10-05')).toEqual([
+      { date: '2026-10-01', steps: 5000 },
+      { date: '2026-10-05', steps: 9000 },
+    ]);
+    expect(reader.sessionsBetween('2026-10-01', '2026-10-31').map((s) => s.id)).toEqual([
+      'sessionDone01',
+      'sessionLate01',
+    ]);
+    expect(reader.sessionsBetween('2026-10-06', '2026-10-24')).toEqual([]);
+    expect(reader.workouts().map((w) => w.name)).toEqual(['Ноги']);
+    expect(readers.readerFor(client(olya)).stepsBetween('2026-01-01', '2026-12-31')).toEqual([
+      { date: '2026-10-05', steps: 1234 },
+    ]);
+    // read() has the live sessions (active included) but never the tombstones.
+    const copy = reader.read();
+    expect(copy.sessions.map((s) => s.id)).toEqual(['sessionDone01', 'sessionLive01', 'sessionLate01']);
+    expect('deletedSessions' in copy).toBe(false);
   });
 });
 
@@ -200,8 +268,11 @@ describe('DataReader shape', () => {
       'measures',
       'read',
       'recordSpan',
+      'sessionsBetween',
       'settings',
+      'stepsBetween',
       'weights',
+      'workouts',
     ]);
     expect(Object.isFrozen(reader)).toBe(true);
     expect(() => {
@@ -212,7 +283,17 @@ describe('DataReader shape', () => {
   it('reads leave every row as it was', () => {
     repos.forUser(anna).apply(annaOps);
     const snapshot = () =>
-      ['days', 'weights', 'measures', 'foods', 'user_settings'].map((t) =>
+      [
+        'days',
+        'weights',
+        'measures',
+        'foods',
+        'user_settings',
+        'exercises',
+        'workouts',
+        'workout_sessions',
+        'steps',
+      ].map((t) =>
         db.prepare(`SELECT * FROM ${t} ORDER BY 1, 2`).all(),
       );
     const before = snapshot();
@@ -220,6 +301,9 @@ describe('DataReader shape', () => {
     reader.read();
     reader.daysBetween('2026-01-01', '2026-12-31');
     reader.recordSpan('2026-12-31');
+    reader.stepsBetween('2026-01-01', '2026-12-31');
+    reader.sessionsBetween('2026-01-01', '2026-12-31');
+    reader.workouts();
     expect(snapshot()).toEqual(before);
   });
 });

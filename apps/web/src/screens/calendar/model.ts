@@ -3,6 +3,9 @@
  * `model.test.ts`). The screen only renders what these return.
  */
 import {
+  bodyWeightOn,
+  dayBurned,
+  doneSessionsOn,
   DOW_LONG,
   dLong,
   dLongYear,
@@ -13,6 +16,7 @@ import {
   mealContent,
   ok,
   parse,
+  stepsKcal,
   type AppData,
   type DayEntry,
   type ISODate,
@@ -24,10 +28,12 @@ import {
   calendarMonth,
   dayStatus,
   shiftMonth,
+  stepsOn,
   type CalendarCell,
   type CalendarMonth,
   type DayStatus,
 } from '@/lib/stats';
+import { sessionLine } from '@/sheets/record/workoutSheetModel';
 import type { SheetMode } from '@/store/ui';
 
 // ---------------------------------------------------------------------------
@@ -137,7 +143,7 @@ const STATUS_TONE: Readonly<Record<DayStatus, StatusTone>> = {
   empty: 'neutral',
 };
 
-export type DayRowKey = 'food' | 'training' | 'weight' | 'measures' | 'notes';
+export type DayRowKey = 'food' | 'training' | 'steps' | 'weight' | 'measures' | 'notes';
 
 /**
  * The sheet each row opens for the selected date (the notes row opens the full «Запис дня»). An empty Їжа row
@@ -146,6 +152,7 @@ export type DayRowKey = 'food' | 'training' | 'weight' | 'measures' | 'notes';
 export const ROW_SHEET: Readonly<Record<DayRowKey, SheetMode>> = {
   food: 'food',
   training: 'workout',
+  steps: 'steps',
   weight: 'weight',
   measures: 'measure',
   notes: 'day',
@@ -176,6 +183,8 @@ export interface DayRowModel {
   action?: 'Додати';
   /** Тренування only: the day's mark for the inline ✓ / ✕ (`null` = not marked). */
   trained?: boolean | null;
+  /** Тренування only: the day has a done session, so the ✓ / ✕ is the static «Було» mark (W5). */
+  recorded?: boolean;
   /** The sheet the row opens (`ROW_SHEET`; an empty Їжа row opens the new-meal editor `'meal'`). */
   mode: SheetMode;
   /** Short accessible name of the row button: «Їжа: 1 880 ккал», «Їжа: 1 740 ккал, 3 прийоми», «Вага: додати». */
@@ -193,7 +202,7 @@ export interface DayDetail {
   status: DayStatus;
   statusLabel: string;
   statusTone: StatusTone;
-  /** Їжа, Тренування, Вага, Заміри — plus Нотатки when the day has notes. */
+  /** Їжа, Тренування, Кроки, Вага, Заміри — plus Нотатки when the day has notes. */
   rows: DayRowModel[];
   /** Food photo ids of the day (thumbnails under the Їжа row; on a meal day the union derived from its meals). */
   photos: string[];
@@ -265,6 +274,63 @@ function foodRow(e: DayEntry | undefined, goal: number): DayRowModel {
   };
   if (lines) row.lines = lines;
   return row;
+}
+
+/** The steps of the day: «8 400» with «з 10 000 · ≈ 280 ккал» (the goal part only with a goal), or «Додати». */
+function stepsRow(data: AppData, date: ISODate): DayRowModel {
+  const steps = stepsOn(data, date);
+  if (steps === null) {
+    return {
+      key: 'steps',
+      title: 'Кроки',
+      filled: false,
+      valueTone: 'ink',
+      action: ADD,
+      mode: ROW_SHEET.steps,
+      label: 'Кроки: додати',
+      describe: false,
+    };
+  }
+  const kcal = f0(stepsKcal(steps, bodyWeightOn(data.weights, date)));
+  const goal = data.settings.stepsGoal ?? null;
+  const parts = goal !== null ? [`з ${f0(goal)}`, `≈${NBSP}${kcal}${NBSP}ккал`] : [`≈${NBSP}${kcal}${NBSP}ккал`];
+  return {
+    key: 'steps',
+    title: 'Кроки',
+    filled: true,
+    value: f0(steps),
+    valueTone: 'ink',
+    text: parts.join(' · '),
+    mode: ROW_SHEET.steps,
+    label: `Кроки: ${f0(steps)}, спалено близько ${kcal} ккал`.replace(/\s/g, ' '),
+    describe: false,
+  };
+}
+
+/**
+ * Тренування on a day with done sessions: one line per session («Ноги + прес · 48 хв · 310 ккал»), the types line,
+ * and «Разом спалено ≈ 590 ккал» (`dayBurned.total`: a logged walk is not counted twice) when the day also has steps.
+ */
+function sessionsTrainingRow(data: AppData, date: ISODate, types: readonly string[]): DayRowModel | null {
+  const sessions = doneSessionsOn(data, date);
+  if (!sessions.length) return null;
+  const lines = sessions.map((x) => sessionLine(data, x));
+  if (types.length) lines.push(types.join(', '));
+  const burned = stepsOn(data, date) !== null ? dayBurned(data, date) : null;
+  if (burned) lines.push(`Разом спалено ≈${NBSP}${f0(burned.total)}${NBSP}ккал`);
+  return {
+    key: 'training',
+    title: 'Тренування',
+    filled: true,
+    valueTone: 'ink',
+    text: lines.join('\n'),
+    lines,
+    trained: true,
+    recorded: true,
+    mode: ROW_SHEET.training,
+    label: `Тренування: було, ${sessions.map((x) => x.name).join(', ')}`,
+    describe: true,
+  };
 }
 
 function trainingRow(trained: boolean | null, types: readonly string[]): DayRowModel {
@@ -342,8 +408,9 @@ function notesRow(notes: string): DayRowModel {
 
 /**
  * The selected day as a check-list: Їжа (one line per meal — or a legacy day's text —, kcal against
- * `settings.kcalGoal`, photos), Тренування (the mark and its types), Вага, Заміри, and Нотатки only when there are
- * notes. Empty Їжа / Вага / Заміри rows offer «Додати».
+ * `settings.kcalGoal`, photos), Тренування (the mark and its types, or one line per done session), Кроки, Вага,
+ * Заміри, and Нотатки only when there are notes. Empty Їжа / Кроки / Вага / Заміри rows offer «Додати». The day's
+ * status (`dayStatus`: food, kcal and the mark) never looks at steps or sessions.
  */
 export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): DayDetail {
   const e = data.days[date];
@@ -353,9 +420,11 @@ export function buildDayDetail(data: AppData, date: ISODate, today: ISODate): Da
   const photos = e?.photos ?? [];
   const notes = e?.notes.trim() ?? '';
 
+  const types = e?.trained === true ? e.types : [];
   const rows: DayRowModel[] = [
     foodRow(e, data.settings.kcalGoal),
-    trainingRow(e?.trained ?? null, e?.trained === true ? e.types : []),
+    sessionsTrainingRow(data, date, types) ?? trainingRow(e?.trained ?? null, types),
+    stepsRow(data, date),
     weightRow(w && ok(w.kg) ? w.kg : null),
     measuresRow(m),
   ];

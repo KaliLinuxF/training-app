@@ -1,6 +1,6 @@
 import type { DataRepo } from '../db/data';
 import { silentLogger, type Logger } from '../logger';
-import { REMINDER_MESSAGES } from '../push/messages';
+import { REMINDER_MESSAGES, workoutReminder } from '../push/messages';
 import type { UserPush } from '../push/service';
 import type { ReminderLog } from './log';
 import { planReminders, type PlannedReminder } from './schedule';
@@ -10,7 +10,7 @@ import { planReminders, type PlannedReminder } from './schedule';
  * their devices — the scheduler builds these with `forUser(id)` for each recipient.
  */
 export interface ReminderRunnerDeps {
-  data: Pick<DataRepo, 'settings' | 'isDone'>;
+  data: Pick<DataRepo, 'settings' | 'isDone' | 'workoutNamesOn'>;
   log: ReminderLog;
   push: Pick<UserPush, 'send'>;
   logger?: Logger;
@@ -95,7 +95,9 @@ export async function runReminderTick(deps: ReminderRunnerDeps, now: Date): Prom
       outcomes.push({ ...item, result: 'skipped', delivered: 0 });
       continue;
     }
-    const summary = await push.send(REMINDER_MESSAGES[item.kind]);
+    const message =
+      item.kind === 'workout' ? workoutReminder(data.workoutNamesOn(item.date)) : REMINDER_MESSAGES[item.kind];
+    const summary = await push.send(message);
     if (
       summary.attempted > 0 &&
       summary.sent === 0 &&

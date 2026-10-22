@@ -16,7 +16,7 @@ import {
   type CoachClientResponse,
   type CoachClientsResponse,
 } from '../packages/shared/src/index';
-import { coachSteady } from './fixtures/coach';
+import { COACH_STEPS, COACH_WORKOUTS, coachSteady, coachTraining } from './fixtures/coach';
 import {
   coachWindowAt,
   getCoachClient,
@@ -117,11 +117,71 @@ test.describe('coach API', () => {
     await expectStatus(res, 200);
     expect(res.headers()['cache-control']).toBe(NO_STORE);
     const body = (await res.json()) as CoachClientResponse;
-    expect(body.data).toEqual({ ...own, foods: [] });
+    expect(body.data).toEqual({ ...own, foods: [], deletedSessions: [] });
     expect(Object.keys(body.client).sort()).toEqual(['createdAt', 'id', 'lastSeenAt', 'status', 'username']);
     expect(body.client.id).toBe(server.id);
     expect(body.client.username).toBe(server.creds.username);
     expect(secretKeysIn(body)).toEqual([]);
+  });
+
+  test('a client item carries steps, done session digests and the schedule; the detail the full sessions', async ({
+    playwright,
+    admin,
+    server,
+  }) => {
+    let client: TestUser | null = null;
+    try {
+      const data = coachTraining();
+      client = await seedClient(playwright, admin, data, 'coach');
+      // A live (active) session is not in the list item.
+      expect(
+        (
+          await client.api.sendOps([
+            {
+              kind: 'session.put',
+              value: { ...data.sessions[0]!, id: 'coachLiveSess1', status: 'active', finishedAt: null, date: data.sessions.at(-1)!.date },
+            },
+          ])
+        ).status(),
+      ).toBe(200);
+      const before = await client.api.getData();
+
+      const body = (await (await getCoachClients(admin)).json()) as CoachClientsResponse;
+      const item = body.clients.find((c) => c.client.id === client?.id);
+      expect(item?.steps).toEqual(data.steps);
+      expect(item?.steps).toHaveLength(COACH_STEPS.length);
+      expect(item?.sessions.map((s) => s.id)).toEqual(data.sessions.map((s) => s.id));
+      expect(item?.sessions[0]).toEqual({
+        id: data.sessions[0]!.id,
+        date: data.sessions[0]!.date,
+        name: data.sessions[0]!.name,
+        durationSec: data.sessions[0]!.durationSec,
+        setsDone: expect.any(Number),
+        volumeKg: expect.any(Number),
+        kcal: expect.any(Number),
+      });
+      expect(item?.sessions.every((s) => s.kcal > 0 && s.setsDone > 0)).toBe(true);
+      expect(item?.schedule).toEqual(COACH_WORKOUTS.map(({ id, name, days }) => ({ id, name, days })));
+      // No exercise names, sets or notes in the list.
+      expect(JSON.stringify(item)).not.toContain('Присідання зі штангою');
+      expect(secretKeysIn(body)).toEqual([]);
+
+      const detail = (await (await getCoachClient(admin, client.id)).json()) as CoachClientResponse;
+      expect(detail.data.sessions).toEqual(before.sessions);
+      expect(detail.data.workouts).toEqual(before.workouts);
+      expect(detail.data.steps).toEqual(before.steps);
+      expect(detail.data.settings.stepsGoal).toBe(8000);
+      expect(detail.data.deletedSessions).toEqual([]);
+
+      // Still read-only: no write method on any coach path, and the client data is unchanged.
+      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+        await expectStatus(await sendToCoach(admin, method, coachClientPath(client.id)), 404, 'not_found');
+      }
+      expect(await client.api.getData()).toEqual(before);
+      expect(server.id).not.toBe(client.id);
+    } finally {
+      if (client) await client.dispose();
+    }
   });
 
   test('404 for the admin’s own id, malformed and unknown ids', async ({ admin }) => {

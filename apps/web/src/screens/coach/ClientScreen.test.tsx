@@ -4,12 +4,15 @@ import { Route, Switch } from 'wouter';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api } from '@/lib/api';
 import { cssValue, readCss } from '@/ui/internal/cssSource';
-import { client, empty, meals, NOW, overKcal, PHOTO_IDS } from './coach.fixtures';
+import { client, empty, meals, NOW, overKcal, PHOTO_IDS, training } from './coach.fixtures';
 import { at, desktop, freezeClock, location, mockClient, renderPage, settle, signIn } from './coach.testing';
 import { ClientScreen } from './ClientScreen';
 
 const SOFIA = client(4, 'sofia', { lastSeenAt: NOW.getTime() - 2 * 3_600_000 });
 const sofia = (): CoachClientResponse => ({ client: SOFIA, data: { ...meals(), foods: [] } });
+const sofiaTraining = (): CoachClientResponse => ({ client: SOFIA, data: { ...training(), foods: [] } });
+/** NO-BREAK SPACEs (digit groups, units) as plain spaces. */
+const unbreak = (text: string | null | undefined): string => (text ?? '').replace(/\u00a0/g, ' ');
 
 beforeEach(() => {
   freezeClock();
@@ -77,6 +80,7 @@ describe('ClientScreen header', () => {
       ['Прогрес', `/coach/${SOFIA.id}?tab=progress`, null],
       ['Календар', `/coach/${SOFIA.id}?tab=calendar`, null],
       ['Харчування', `/coach/${SOFIA.id}?tab=nutrition`, null],
+      ['Тренування', `/coach/${SOFIA.id}?tab=workouts`, null],
     ]);
   });
 
@@ -206,6 +210,67 @@ describe('ClientScreen panels', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Показати ще' }));
     expect(screen.getAllByRole('link', { name: 'Відкрити день →' })).toHaveLength(14);
     expectReadOnly();
+  });
+
+  it('«Тренування»: the schedule, the strip and the sessions with their sets, with the 7 / 30 switch — read-only', async () => {
+    const { view } = await open(`/coach/${SOFIA.id}?tab=workouts`, sofiaTraining());
+    expect(screen.getByRole('heading', { level: 2, name: 'Тренування' })).toBeTruthy();
+    const period = screen.getByRole('region', { name: 'За тиждень' });
+    expect(period.textContent).toContain('Розклад: Пн, Ср — Ноги + прес · Пт — Верх тіла');
+    expect(unbreak(period.textContent)).toContain('Кроки, сер.8 300/ 8 000');
+    const session = screen.getByRole('region', { name: '12 жовтня · Ноги + прес' });
+    expect(unbreak(session.textContent)).toContain('48 хв · ≈ 50 ккал');
+    expect(unbreak(session.textContent)).toContain('Присідання зі штангою 3 × 12 · 40 кг');
+    expect(screen.queryByRole('region', { name: '9 жовтня · Верх тіла' })).toBeNull();
+    // Static rows only: no links into her pages, no buttons at all in the panel.
+    expect(view.container.querySelectorAll('main a, [class*="grid"] a')).toHaveLength(0);
+    expect(within(session).queryAllByRole('button')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href^="/workouts"]')).toHaveLength(0);
+    expectReadOnly();
+
+    fireEvent.click(screen.getByRole('radio', { name: '30 днів' }));
+    expect(location()).toBe(`/coach/${SOFIA.id}?tab=workouts&days=30`);
+    expect(screen.getByRole('region', { name: 'За 30 днів' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '9 жовтня · Верх тіла' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: '7 жовтня · Ноги + прес' })).toBeTruthy();
+  });
+
+  it('«Тренування» of a client without sessions or workouts says so calmly', async () => {
+    await open(`/coach/${SOFIA.id}?tab=workouts`);
+    expect(screen.getByText('Розкладу немає')).toBeTruthy();
+    expect(screen.getByText('За цей період тренувань не записано')).toBeTruthy();
+    expectReadOnly();
+  });
+
+  it('«Календар»: a day with a session shows the steps row and the session’s exercises, without toggles', async () => {
+    await open(`/coach/${SOFIA.id}?tab=calendar&date=2026-10-12`, sofiaTraining());
+    const day = screen.getByRole('region', { name: '12 жовтня 2026' });
+    expect(unbreak(day.textContent)).toMatch(/Кроки з 8 000 · ≈ 223 ккал 6 400/);
+    const session = screen.getByRole('region', { name: 'Ноги + прес' });
+    expect(unbreak(session.textContent)).toContain('Скручування 3 × 20 повт.');
+    expect(within(session).queryAllByRole('button')).toHaveLength(0);
+    expect(within(session).queryAllByRole('link')).toHaveLength(0);
+    expectReadOnlyExceptPhotos();
+  });
+
+  it('«Прогрес» never links to her exercise pages', async () => {
+    await open(`/coach/${SOFIA.id}?tab=progress&period=month`, sofiaTraining());
+    expect(document.querySelectorAll('a[href^="/workouts"]')).toHaveLength(0);
+    expectReadOnly();
+  });
+
+  it('an answer of an older server (no new keys, no stepsGoal) renders every tab', async () => {
+    const { exercises: _e, workouts: _w, sessions: _s, steps: _st, deletedSessions: _d, ...v4 } = meals();
+    const { stepsGoal: _g, ...settings } = v4.settings;
+    const payload = { client: SOFIA, data: { ...v4, settings, foods: [] } } as unknown as CoachClientResponse;
+    await open(`/coach/${SOFIA.id}`, payload);
+    expect(screen.getByRole('region', { name: 'Зараз' }).textContent).toContain('Кроки, сер.—');
+    for (const tab of ['Тренування', 'Календар', 'Прогрес', 'Харчування'] as const) {
+      fireEvent.click(screen.getByRole('link', { name: tab }));
+      expect(screen.getByRole('heading', { level: 2, name: tab })).toBeTruthy();
+    }
+    fireEvent.click(screen.getByRole('link', { name: 'Тренування' }));
+    expect(screen.getByText('За цей період тренувань не записано')).toBeTruthy();
   });
 
   it('the phone scrolls the tab strip (only the strip, never the page) to bring the active tab into view', async () => {

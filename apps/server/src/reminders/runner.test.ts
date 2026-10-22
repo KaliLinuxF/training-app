@@ -322,3 +322,68 @@ describe('createReminderRound (the scheduler’s per-user loop)', () => {
     await scheduler.stop();
   });
 });
+
+describe('workout reminder with workouts (schema v5)', () => {
+  // Monday 2026-10-12 18:00 in Kyiv.
+  const WORKOUT_AT = new Date(Date.UTC(2026, 9, 12, 15, 0));
+  const workout = (id: string, name: string, days: (0 | 1 | 2 | 3 | 4 | 5 | 6)[]) => ({
+    kind: 'workout.put' as const,
+    value: { id, name, days, items: [] },
+  });
+  const sessionOn = (date: string, status: 'active' | 'done') => ({
+    kind: 'session.put' as const,
+    value: {
+      id: 'session00001',
+      date,
+      workoutId: null,
+      name: 'Вільне тренування',
+      createdAt: 1,
+      startedAt: 1,
+      finishedAt: null,
+      durationSec: null,
+      status,
+      exercises: [],
+      notes: '',
+      rev: 0,
+      deviceId: null,
+    },
+  });
+
+  beforeEach(() => {
+    saveSettings(data, { workout: { on: true, days: [1, 3], time: '18:00' } });
+  });
+
+  it('names today’s scheduled workouts (two, then «і ще N»); the url stays the old deep link', async () => {
+    data.apply([workout('workout00001', 'Ноги + прес', [1, 3]), workout('workout00002', 'Кардіо', [1])]);
+    await runReminderTick(deps, WORKOUT_AT);
+    expect(transport.sent[0]?.payload).toEqual({
+      title: 'Час тренування 💪',
+      body: 'Сьогодні: Ноги + прес, Кардіо',
+      url: '/?sheet=day&trained=1',
+      tag: 'workout',
+    });
+    expect(data.workoutNamesOn('2026-10-14')).toEqual(['Ноги + прес']);
+    expect(data.workoutNamesOn('2026-10-13')).toEqual([]);
+  });
+
+  it('without a scheduled workout the text is the usual one', async () => {
+    data.apply([workout('workout00001', 'Верх тіла', [5])]);
+    await runReminderTick(deps, WORKOUT_AT);
+    expect(transport.sent[0]?.payload).toMatchObject({ body: 'Не забудь відмітити, як пройшло' });
+  });
+
+  it('no push while a session of that day exists (active or done); a deleted one does not count', async () => {
+    data.apply([sessionOn(TODAY, 'active')]);
+    expect(await runReminderTick(deps, WORKOUT_AT)).toEqual([
+      { kind: 'workout', date: TODAY, action: 'skip', result: 'skipped', delivered: 0 },
+    ]);
+    expect(transport.sent).toHaveLength(0);
+    expect(data.isDone('workout', TODAY)).toBe(true);
+    data.apply([{ kind: 'session.delete', id: 'session00001' }]);
+    expect(data.isDone('workout', TODAY)).toBe(false);
+    // Another user's session never counts for anna.
+    const olya = users.create({ username: 'olya', role: 'user', passwordHash: null, now: 0 }).id;
+    repos.forUser(olya).apply([{ ...sessionOn(TODAY, 'done'), value: { ...sessionOn(TODAY, 'done').value, id: 'session00009' } }]);
+    expect(data.isDone('workout', TODAY)).toBe(false);
+  });
+});

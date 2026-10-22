@@ -20,6 +20,14 @@ import { DEFAULT_TIMEZONE } from './defaults';
 import { ok } from './format';
 import { dayMacroComplete, dayMacros, emptyMacros, MACRO_KEYS, mealsOf } from './meals';
 import { isoDateSchema } from './schemas';
+import {
+  bodyWeightOn,
+  compareSessions,
+  sessionKcal,
+  sessionVolume,
+  setsDone,
+  stepsStats,
+} from './workouts';
 import type {
   AppData,
   DayEntry,
@@ -29,7 +37,10 @@ import type {
   MacroKey,
   MeasureEntry,
   Settings,
+  StepsEntry,
+  Weekday,
   WeightEntry,
+  WorkoutSession,
 } from './types';
 
 /** Longest window `GET /api/coach/clients` accepts, days inclusive. */
@@ -106,6 +117,31 @@ export interface CoachClientItem {
   /** Earliest / latest date ≤ `to` with a day, weigh-in or measurement (all time, not only the window). */
   firstRecord: ISODate | null;
   lastRecord: ISODate | null;
+  /** Steps of the dates in [from, to], oldest first. (An older server sends none: read with `?? []`.) */
+  steps: StepsEntry[];
+  /** Digests of the DONE sessions in [from, to], in session order. */
+  sessions: CoachSessionDigest[];
+  /** Her workouts that have days: what is planned when. */
+  schedule: CoachScheduleItem[];
+}
+
+/** One done session reduced to what the table and the detail need (no exercises, no notes). */
+export interface CoachSessionDigest {
+  id: string;
+  date: ISODate;
+  name: string;
+  durationSec: number | null;
+  setsDone: number;
+  /** Σ kg × reps (kg). */
+  volumeKg: number;
+  /** Estimated kcal with the body weight of that date. */
+  kcal: number;
+}
+
+export interface CoachScheduleItem {
+  id: string;
+  name: string;
+  days: Weekday[];
 }
 
 /** `GET /api/coach/clients?from=&to=`. */
@@ -171,6 +207,23 @@ export function coachWindow(now: Date): CoachWindow {
 const byDate = (a: { date: ISODate }, b: { date: ISODate }): number =>
   a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
 
+/** The digest of one done session; kcal with the body weight of its date (`bodyWeightOn`). */
+export function digestSession(s: WorkoutSession, weights: readonly WeightEntry[]): CoachSessionDigest {
+  return {
+    id: s.id,
+    date: s.date,
+    name: s.name,
+    durationSec: s.durationSec,
+    setsDone: setsDone(s),
+    volumeKg: sessionVolume(s),
+    kcal: sessionKcal(s, bodyWeightOn(weights, s.date)),
+  };
+}
+
+/** Workouts with at least one day, in her order. */
+export const scheduleOf = (workouts: readonly { id: string; name: string; days: Weekday[] }[]): CoachScheduleItem[] =>
+  workouts.filter((w) => w.days.length > 0).map((w) => ({ id: w.id, name: w.name, days: [...w.days] }));
+
 /** The list item the server would send, built from a full copy (detail page): same digests, same span rule. */
 export function coachItemFromData(client: CoachClient, data: AppData, window: CoachWindow): CoachClientItem {
   const weights = [...data.weights].sort(byDate);
@@ -188,7 +241,26 @@ export function coachItemFromData(client: CoachClient, data: AppData, window: Co
     if (firstRecord === null || date < firstRecord) firstRecord = date;
     if (lastRecord === null || date > lastRecord) lastRecord = date;
   }
-  return { client, settings: data.settings, weights, measures, days, firstRecord, lastRecord };
+  const steps = (data.steps ?? [])
+    .filter((s) => s.date >= window.from && s.date <= window.to)
+    .sort(byDate)
+    .map((s) => ({ date: s.date, steps: s.steps }));
+  const sessions = (data.sessions ?? [])
+    .filter((s) => s.status === 'done' && s.date >= window.from && s.date <= window.to)
+    .sort(compareSessions)
+    .map((s) => digestSession(s, weights));
+  return {
+    client,
+    settings: data.settings,
+    weights,
+    measures,
+    days,
+    firstRecord,
+    lastRecord,
+    steps,
+    sessions,
+    schedule: scheduleOf(data.workouts ?? []),
+  };
 }
 
 // ---- summary (§4) ----------------------------------------------------------------------------
@@ -232,6 +304,10 @@ export interface CoachSummary {
   macros: { avg: MacroGrams; days: number; goals: MacroGoals };
   /** plannedSoFar = plan days already behind us in the range (tone «behind» only when done < plannedSoFar). */
   workouts: { done: number; planned: number; plannedSoFar: number };
+  /** Steps over the full days [T − P, T − 1] (`stepsStats`): avg of the logged days; goal = settings.stepsGoal. */
+  steps: { avg: number | null; days: number; goal: number | null; goalDays: number };
+  /** Done sessions in the workouts range and their kcal. */
+  sessions: { count: number; kcal: number };
   logged: { days: number; of: number };
   lastRecord: ISODate | null;
   lastSeenAt: number | null;
@@ -357,6 +433,13 @@ export function coachSummary(item: CoachClientItem, now: Date, period: CoachPeri
   if (item.lastRecord !== null && item.lastRecord <= T) candidates.push(item.lastRecord);
   for (const date of candidates) if (lastRecord === null || date > lastRecord) lastRecord = date;
 
+  // steps and sessions (an older server sends neither)
+  const itemSteps: readonly StepsEntry[] = (item.steps as StepsEntry[] | undefined) ?? [];
+  const stepsGoal = settings.stepsGoal ?? null;
+  const rangeSessions = ((item.sessions as CoachSessionDigest[] | undefined) ?? []).filter((s) =>
+    inRange(s.date, rangeFrom, T),
+  );
+
   const summary: CoachSummary = {
     today: T,
     period,
@@ -366,6 +449,8 @@ export function coachSummary(item: CoachClientItem, now: Date, period: CoachPeri
     kcal: { avg: mean(kcalValues), days: kcalValues.length, goal: settings.kcalGoal },
     macros: { avg: macroAvg, days: macroDays, goals: settings.macroGoals },
     workouts,
+    steps: { ...stepsStats(itemSteps, fullFrom, yesterday, stepsGoal), goal: stepsGoal },
+    sessions: { count: rangeSessions.length, kcal: rangeSessions.reduce((sum, s) => sum + s.kcal, 0) },
     logged: { days: loggedDates.size, of: period },
     lastRecord,
     lastSeenAt: client.lastSeenAt,

@@ -1,4 +1,15 @@
-import { emptyData, f0, normalizeDay, type AppData, type DayEntry, type Meal } from '@legko/shared';
+import {
+  bodyWeightOn,
+  dayBurned,
+  emptyData,
+  f0,
+  normalizeDay,
+  sessionKcal,
+  stepsKcal,
+  type AppData,
+  type DayEntry,
+  type Meal,
+} from '@legko/shared';
 import { describe, expect, it } from 'vitest';
 import {
   buildDayDetail,
@@ -14,6 +25,7 @@ import {
   type DayRowModel,
   type MonthCell,
 } from './model';
+import { session, walk } from '@/lib/stats/workouts.testing';
 import { swipeDirection } from './useSwipe';
 
 const TODAY = '2026-10-10'; // Saturday
@@ -187,6 +199,7 @@ describe('buildDayDetail', () => {
     expect(ROW_SHEET).toEqual({
       food: 'food',
       training: 'workout',
+      steps: 'steps',
       weight: 'weight',
       measures: 'measure',
       notes: 'day',
@@ -204,8 +217,8 @@ describe('buildDayDetail', () => {
     expect(d.statusTone).toBe('acc2');
     expect(d.actionLabel).toBe('Редагувати день');
     expect(d.photos).toEqual([]);
-    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'weight', 'measures', 'notes']);
-    expect(d.rows.map((r) => r.title)).toEqual(['Їжа', 'Тренування', 'Вага', 'Заміри', 'Нотатки']);
+    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'steps', 'weight', 'measures', 'notes']);
+    expect(d.rows.map((r) => r.title)).toEqual(['Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри', 'Нотатки']);
     expect(d.rows.map((r) => r.mode)).toEqual(d.rows.map((r) => ROW_SHEET[r.key]));
 
     expect(row(d, 'food')).toEqual({
@@ -261,21 +274,22 @@ describe('buildDayDetail', () => {
     expectNoDash(d);
   });
 
-  it('describes an empty day: four rows with «Додати», the workout not marked yet', () => {
+  it('describes an empty day: five rows with «Додати», the workout not marked yet', () => {
     const d = buildDayDetail(fixture(), '2026-10-09', TODAY);
     expect(d.status).toBe('empty');
     expect(d.statusLabel).toBe('Порожньо');
     expect(d.statusTone).toBe('neutral');
     expect(d.actionLabel).toBe('Заповнити день');
     expect(d.weekday).toBe('пʼятниця');
-    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'weight', 'measures']);
+    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'steps', 'weight', 'measures']);
     expect(d.rows.map((r) => r.label)).toEqual([
       'Їжа: додати',
       'Тренування: не відмічено',
+      'Кроки: додати',
       'Вага: додати',
       'Заміри: додати',
     ]);
-    for (const key of ['food', 'weight', 'measures'] as const) {
+    for (const key of ['food', 'steps', 'weight', 'measures'] as const) {
       expect(row(d, key)).toMatchObject({
         filled: false,
         action: 'Додати',
@@ -285,7 +299,7 @@ describe('buildDayDetail', () => {
     }
     // «Додати» on Їжа opens the new-meal editor right away (an empty list would be one more tap); the other rows
     // open their usual sheets.
-    expect(d.rows.map((r) => r.mode)).toEqual(['meal', 'workout', 'weight', 'measure']);
+    expect(d.rows.map((r) => r.mode)).toEqual(['meal', 'workout', 'steps', 'weight', 'measure']);
     expect(d.rows.filter((r) => r.key !== 'food').map((r) => r.mode)).toEqual(
       d.rows.filter((r) => r.key !== 'food').map((r) => ROW_SHEET[r.key]),
     );
@@ -366,7 +380,7 @@ describe('buildDayDetail', () => {
   it('a notes-only day with a weigh-in and measurements', () => {
     const d = buildDayDetail(fixture(), '2026-10-05', TODAY);
     expect(d.status).toBe('partial');
-    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'weight', 'measures', 'notes']);
+    expect(d.rows.map((r) => r.key)).toEqual(['food', 'training', 'steps', 'weight', 'measures', 'notes']);
     expect(row(d, 'food').action).toBe('Додати');
     expect(row(d, 'weight')).toMatchObject({ value: '65,4 кг', label: 'Вага: 65,4 кг' });
     expect(row(d, 'measures')).toMatchObject({
@@ -623,5 +637,68 @@ describe('swipeDirection', () => {
     expect(swipeDirection(60, -20)).toBe('right');
     expect(swipeDirection(30, 0)).toBeNull(); // too short
     expect(swipeDirection(-80, 70)).toBeNull(); // mostly vertical (scrolling)
+  });
+});
+
+describe('buildDayDetail: workout sessions and steps (§3.14)', () => {
+  const DATE = '2026-10-08';
+  const flat = (text: string | undefined) => (text ?? '').replace(/\s/g, ' ');
+  const row = (d: DayDetail, key: DayRowKey): DayRowModel => {
+    const found = d.rows.find((r) => r.key === key);
+    if (!found) throw new Error(`no ${key} row`);
+    return found;
+  };
+
+  it('a day with steps: «8 400», the kcal (and «з 10 000» with a goal), opening the steps sheet', () => {
+    const data = fixture();
+    data.steps = [{ date: DATE, steps: 8400 }];
+    const kcal = f0(stepsKcal(8400, bodyWeightOn(data.weights, DATE)));
+    const r = row(buildDayDetail(data, DATE, TODAY), 'steps');
+    expect(r).toMatchObject({ title: 'Кроки', filled: true, mode: 'steps', valueTone: 'ink' });
+    expect(r.action).toBeUndefined();
+    expect(flat(r.value)).toBe('8 400');
+    expect(flat(r.text)).toBe(`≈ ${flat(kcal)} ккал`);
+    expect(flat(r.label)).toBe(`Кроки: 8 400, спалено близько ${flat(kcal)} ккал`);
+
+    data.settings.stepsGoal = 10000;
+    expect(flat(row(buildDayDetail(data, DATE, TODAY), 'steps').text)).toBe(`з 10 000 · ≈ ${flat(kcal)} ккал`);
+  });
+
+  it('steps never change the day status', () => {
+    const data = fixture();
+    const before = buildDayDetail(data, '2026-10-09', TODAY).status;
+    data.steps = [{ date: '2026-10-09', steps: 12000 }];
+    expect(buildDayDetail(data, '2026-10-09', TODAY).status).toBe(before);
+  });
+
+  it('done sessions: one line each, the types, a static mark instead of ✓ / ✕', () => {
+    const data = fixture();
+    const s = session({ date: DATE });
+    data.sessions = [s];
+    const r = row(buildDayDetail(data, DATE, TODAY), 'training');
+    const kcal = f0(sessionKcal(s, bodyWeightOn(data.weights, DATE)));
+    expect(r.lines?.map(flat)).toEqual([`Ноги + прес · 48 хв · ${flat(kcal)} ккал`, 'Верх тіла, Прес']);
+    expect(r).toMatchObject({ recorded: true, trained: true, filled: true, describe: true, mode: 'workout' });
+    expect(r.label).toBe('Тренування: було, Ноги + прес');
+    // The coach reuses `text`: the same lines.
+    expect(r.text?.split('\n')).toEqual(r.lines);
+  });
+
+  it('with steps too: «Разом спалено» from dayBurned, a logged walk not counted twice', () => {
+    const data = fixture();
+    data.sessions = [session({ date: DATE, name: 'Прогулянка', exercises: [walk()], durationSec: 40 * 60 })];
+    data.steps = [{ date: DATE, steps: 4500 }];
+    const lines = row(buildDayDetail(data, DATE, TODAY), 'training').lines ?? [];
+    const burned = dayBurned(data, DATE);
+    expect(burned && burned.total < burned.sessions + burned.steps).toBe(true);
+    expect(flat(lines[lines.length - 1])).toBe(`Разом спалено ≈ ${flat(f0(burned?.total))} ккал`);
+  });
+
+  it('an active or deleted session does not count; the mark stays as before', () => {
+    const data = fixture();
+    data.sessions = [session({ date: DATE, status: 'active', startedAt: Date.UTC(2026, 9, 8, 7), durationSec: null })];
+    const r = row(buildDayDetail(data, DATE, TODAY), 'training');
+    expect(r.recorded).toBeUndefined();
+    expect(r.text).toBe('Верх тіла, Прес');
   });
 });

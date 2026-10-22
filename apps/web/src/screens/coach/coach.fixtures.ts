@@ -8,7 +8,9 @@ import {
   coachItemFromData,
   coachWindow,
   emptyData,
+  findExercise,
   normalizeDay,
+  sessionExerciseFrom,
   weekdayOf,
   type AppData,
   type CoachClient,
@@ -17,7 +19,10 @@ import {
   type DayEntry,
   type ISODate,
   type MeasureEntry,
+  type SetValues,
   type WeightEntry,
+  type Workout,
+  type WorkoutSession,
 } from '@legko/shared';
 
 /** 12:00 in Kyiv on Wednesday 2026-10-14 (the same date in every device zone from UTC−9 to UTC+14). */
@@ -127,6 +132,89 @@ export function meals(today: ISODate = TODAY): AppData {
   return data;
 }
 
+// ---- workouts and steps (mirror `coachTraining` of e2e/fixtures/coach.ts) ------------------------
+
+const planned = (over: Partial<SetValues>, n = 3): SetValues[] =>
+  Array.from({ length: n }, () => ({ reps: null, kg: null, sec: null, min: null, km: null, ...over }));
+
+/** «Ноги + прес» (Пн, Ср) and «Верх тіла» (Пт), inside the Mon / Wed / Fri plan. */
+export const WORKOUTS: readonly Workout[] = Object.freeze([
+  {
+    id: 'coachWorkoutLegs',
+    name: 'Ноги + прес',
+    days: [1, 3],
+    items: [
+      { key: 'legs1', exerciseId: 'lib.back-squat', sets: planned({ reps: 12, kg: 40 }), restSec: 90 },
+      { key: 'legs2', exerciseId: 'lib.crunch', sets: planned({ reps: 20 }), restSec: 60 },
+    ],
+  },
+  {
+    id: 'coachWorkoutUpper',
+    name: 'Верх тіла',
+    days: [5],
+    items: [
+      { key: 'upper1', exerciseId: 'lib.lat-pulldown', sets: planned({ reps: 12, kg: 30 }), restSec: 90 },
+      { key: 'upper2', exerciseId: 'lib.plank', sets: planned({ sec: 45 }), restSec: 45 },
+    ],
+  },
+]);
+
+/** Steps on 5 of the 6 days before today (none 3 days ago); the steps goal is 8 000. */
+export const STEPS: readonly { back: number; steps: number }[] = Object.freeze([
+  { back: 6, steps: 7200 },
+  { back: 5, steps: 9100 },
+  { back: 2, steps: 6400 },
+  { back: 4, steps: 10_500 },
+  { back: 1, steps: 8300 },
+]);
+
+/** A done session of `workout` on `date` at 18:00 Kyiv, every planned set done. */
+export function doneSession(workout: Workout, date: ISODate, minutes: number): WorkoutSession {
+  const id = `coach${date.replace(/-/g, '')}`;
+  const start = Date.parse(`${date}T18:00:00+03:00`);
+  return {
+    id,
+    date,
+    workoutId: workout.id,
+    name: workout.name,
+    createdAt: start,
+    startedAt: start,
+    finishedAt: start + minutes * 60_000,
+    durationSec: minutes * 60,
+    status: 'done',
+    exercises: workout.items.map((it, i) => {
+      const exercise = findExercise([], it.exerciseId);
+      if (!exercise) throw new Error(`no ${it.exerciseId}`);
+      return sessionExerciseFrom(exercise, it, null, { key: `${id}-${i}`, done: true });
+    }),
+    notes: '',
+    rev: 1,
+    deviceId: null,
+  };
+}
+
+/**
+ * As `meals`, plus training: the two `WORKOUTS`, 3 done sessions on the last three plan days before today
+ * (Ноги + прес 2026-10-12 and 10-07, 48 min; Верх тіла 10-09, 40 min), the `STEPS` days and a steps goal of 8 000.
+ */
+export function training(today: ISODate = TODAY): AppData {
+  const data = meals(today);
+  data.settings = { ...data.settings, stepsGoal: 8000 };
+  data.workouts = WORKOUTS.map((w) => structuredClone(w));
+  const sessions: WorkoutSession[] = [];
+  for (let back = 1; back <= 14 && sessions.length < 3; back++) {
+    const date = addDays(today, -back);
+    const workout = WORKOUTS.find((w) => w.days.includes(weekdayOf(date)));
+    if (workout && data.days[date]?.trained === true)
+      sessions.unshift(doneSession(workout, date, workout === WORKOUTS[0] ? 48 : 40));
+  }
+  data.sessions = sessions;
+  data.steps = STEPS.map(({ back, steps }) => ({ date: addDays(today, -back), steps })).sort((a, b) =>
+    a.date < b.date ? -1 : 1,
+  );
+  return data;
+}
+
 /** Onboarded, nothing recorded. */
 export const empty = (): AppData => base();
 
@@ -152,7 +240,7 @@ export function stubClients(now: Date = NOW): CoachClientItem[] {
     item(client(1, 'olya', { lastSeenAt: t - HOUR }), overKcal(), now),
     item(client(2, 'marta', { lastSeenAt: t - 5 * DAY }), quiet(), now),
     item(client(3, 'ivan', { createdAt: t - 10 * DAY, lastSeenAt: t - DAY }), empty(), now),
-    item(client(4, 'sofia', { lastSeenAt: t - 2 * HOUR }), meals(), now),
+    item(client(4, 'sofia', { lastSeenAt: t - 2 * HOUR }), training(), now),
     item(client(5, 'taras', { status: 'disabled', lastSeenAt: t - 3 * DAY }), steady(), now),
     item(client(6, 'petro', { createdAt: t - 10 * DAY, lastSeenAt: null }), empty(), now),
   ];

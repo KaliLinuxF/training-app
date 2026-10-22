@@ -18,3 +18,66 @@
   font-size: 14px;
   color: var(--muted);
 }
+
+/* «За розкладом»: which workout falls on which plan day (muted, under the weekday picker). */
+.schedule {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.scheduleTitle,
+.scheduleNote {
+  margin: 0;
+}
+
+.scheduleTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scheduleNote {
+  font-size: 13px;
+}
+
+.scheduleList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink2);
+}
+
+.scheduleName {
+  font-weight: 600;
+}
+
+/* A workout day the plan no longer has: struck, and said in words (colour is never the only signal). */
+.offPlan {
+  color: var(--faint);
+}
+
+.offPlanNote {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* «Мої тренування →»: a text link with a 44px tap height. */
+.scheduleLink {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink2);
+  text-decoration: none;
+}
+
+.scheduleLink:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r12);
+}

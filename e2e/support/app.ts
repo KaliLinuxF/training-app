@@ -37,17 +37,19 @@ export type SheetName =
   | 'Запис дня'
   | 'Контрольне зважування'
   | 'Заміри тіла'
+  | 'Кроки'
   | 'Перші кроки'
   | 'Встановлення на iPhone'
   | 'Налаштування';
 
 /** Rows of the «Що записати?» menu (opened by «+»), and «Повний запис дня →» under them. */
-export type RecordItem = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри' | 'Повний запис дня';
+export type RecordItem = 'Їжа' | 'Тренування' | 'Кроки' | 'Вага' | 'Заміри' | 'Повний запис дня';
 
 /** The sheet each «Що записати?» item swaps the menu to («Їжа» opens a new meal right away). */
 const RECORD_SHEETS: Record<RecordItem, SheetName> = {
   Їжа: 'Прийом їжі',
   Тренування: 'Тренування',
+  Кроки: 'Кроки',
   Вага: 'Контрольне зважування',
   Заміри: 'Заміри тіла',
   'Повний запис дня': 'Запис дня',
@@ -56,10 +58,15 @@ const RECORD_SHEETS: Record<RecordItem, SheetName> = {
 /** Action rows of the Home «Сьогодні» list. */
 export type HomeRow = 'Їжа' | 'Тренування' | 'Вага' | 'Заміри';
 
-/** Rows of the «Налаштування» list («Користувачі» is shown to admins only). */
+/**
+ * Rows of the «Налаштування» list («Користувачі» is shown to admins only). The row «Типи тренувань» becomes
+ * «Тренування» (same slug) with the workouts release; 'Типи тренувань' is a TEMPORARY alias (same slug) so specs keep
+ * type-checking until integration and the e2e gate switch over — then it is removed.
+ */
 export type SettingsSection =
   | 'Нагадування'
   | 'Цілі'
+  | 'Тренування'
   | 'Типи тренувань'
   | 'Прийоми їжі'
   | 'Вигляд'
@@ -71,6 +78,7 @@ export type SettingsSection =
 export const SETTINGS_SLUGS: Record<SettingsSection, string> = {
   Нагадування: 'reminders',
   Цілі: 'goals',
+  Тренування: 'workouts',
   'Типи тренувань': 'workouts',
   'Прийоми їжі': 'meals',
   Вигляд: 'appearance',
@@ -342,6 +350,42 @@ export class App {
       data: id === undefined ? undefined : entries[`legko.data.${id}`],
       outbox: id === undefined ? undefined : entries[`legko.outbox.${id}`],
     };
+  }
+
+  /**
+   * Writes a device copy for `user` before the app runs (call on a same-origin page that is not the app, e.g.
+   * `/api/health`): `legko.user`, `legko.data.<id>` and `legko.outbox.<id>` (items `{ id, op }`). The next app load
+   * starts from it and flushes the outbox — a way to queue ops (workout sessions, steps) without their screens.
+   */
+  async seedDeviceCopy(user: SessionUser, data: unknown, outbox: readonly { id: string; op: unknown }[]): Promise<void> {
+    const entries: Record<string, unknown> = {
+      'legko.user': user,
+      [`legko.data.${user.id}`]: data,
+      [`legko.outbox.${user.id}`]: outbox,
+    };
+    await this.page.evaluate(
+      (values) =>
+        new Promise<void>((resolve, reject) => {
+          const open = indexedDB.open('keyval-store');
+          open.onupgradeneeded = () => open.result.createObjectStore('keyval');
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const db = open.result;
+            const tx = db.transaction('keyval', 'readwrite');
+            const store = tx.objectStore('keyval');
+            for (const [key, value] of Object.entries(values)) store.put(value, key);
+            tx.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            tx.onerror = () => {
+              db.close();
+              reject(tx.error);
+            };
+          };
+        }),
+      entries,
+    );
   }
 
   /** Every key of the idb-keyval store, sorted (`[]` when there is no database; never creates it). */

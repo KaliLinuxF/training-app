@@ -1,0 +1,4 @@
+/* «Мої тренування →»: a left-aligned text link (the kit ghost keeps its 45px tap area). */
+.link {
+  align-self: flex-start;
+}

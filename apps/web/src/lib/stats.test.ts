@@ -85,6 +85,7 @@ interface DataInput {
 function makeData(input: DataInput = {}): AppData {
   const base = emptyData();
   return {
+    ...base,
     days: input.days ?? {},
     weights: input.weights ?? [],
     measures: input.measures ?? [],

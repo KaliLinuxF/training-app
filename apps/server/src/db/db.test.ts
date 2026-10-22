@@ -392,7 +392,7 @@ describe('pre-migration snapshot', () => {
       openDatabase(file, { now, logger: createLogger('info', (line) => lines.push(line)) }).close();
       const backups = join(dir, 'backups');
       expect(readdirSync(backups)).toEqual([snapshotName]);
-      expect(snapshotName).toBe('legko-pre-v4-2026-10-15.db');
+      expect(snapshotName).toBe('legko-pre-v5-2026-10-15.db');
       const copy = new (sqlite().DatabaseSync)(join(backups, snapshotName), { readOnly: true });
       try {
         expect(schemaVersion(copy)).toBe(2);

@@ -6,7 +6,7 @@ import { addCustomType, removeCustomType } from './model';
 import s from './WorkoutTypesCard.module.css';
 
 /**
- * «Мої тренування» (Налаштування → Типи тренувань): built-in types (fixed) and her own ones (removable), plus an
+ * «Мої типи» (Налаштування → Тренування): built-in types (fixed) and her own ones (removable), plus an
  * «add» form at the bottom. No card header: the intro line names the list of types.
  */
 export function WorkoutTypesCard({ customTypes }: { customTypes: readonly string[] }) {
@@ -34,7 +34,7 @@ export function WorkoutTypesCard({ customTypes }: { customTypes: readonly string
   };
 
   return (
-    <Card as="section" aria-label="Мої тренування">
+    <Card>
       <p id={introId} className={s.intro}>
         Типи, які можна вибрати в записі дня
       </p>

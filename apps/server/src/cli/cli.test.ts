@@ -89,6 +89,17 @@ async function addUser(
 
 const tokenOf = (out: string): string => TOKEN_IN.exec(out)?.[1] ?? '';
 
+/** A schema v4 file (the build before workouts and steps), seeded by `fn`: what the v4 → v3 tests start from. */
+async function withV4Db<T>(fn: (repos: Repos) => Promise<T> | T): Promise<T> {
+  const db = new (sqlite().DatabaseSync)(databasePath(dir), { enableForeignKeyConstraints: true });
+  try {
+    migrate(db, MIGRATIONS.slice(0, 4));
+    return await fn({ db, users: createUserRepo(db), tokens: createTokenRepo(db) });
+  } finally {
+    db.close();
+  }
+}
+
 /** The real app on the CLI's database file, as the server would run it. */
 function appOn(db: Database) {
   const app = createApp({
@@ -564,7 +575,7 @@ describe('cli downgrade-schema', () => {
     existsSync(join(dir, 'backups')) ? readdirSync(join(dir, 'backups')).sort() : [];
 
   it('one account: v4 → v3 keeps it, v3 → v2 drops the meals; a re-upgrade brings anna back with the same id', async () => {
-    const { annaId, before } = await withDb(async ({ db, users }) => {
+    const { annaId, before } = await withV4Db(async ({ db, users }) => {
       const id = await addUser(users, 'anna');
       const repo = createDataRepos(db).forUser(id);
       repo.apply([
@@ -643,7 +654,7 @@ describe('cli downgrade-schema', () => {
   });
 
   it('several accounts: refuses with per-user counts until --keep and --drop-others, then prints what was dropped', async () => {
-    await withDb(async ({ db, users }) => {
+    await withV4Db(async ({ db, users }) => {
       const data = createDataRepos(db);
       const anna = await addUser(users, 'anna');
       const olya = await addUser(users, 'olya');
@@ -697,6 +708,96 @@ describe('cli downgrade-schema', () => {
     expect((await run(['downgrade-schema'])).out).toContain('Schema downgraded to v2');
   });
 
+  it('v5 → v4 keeps every account, drops the workouts and steps and prints what each account had', async () => {
+    const ids = await withDb(async ({ db, users }) => {
+      const data = createDataRepos(db);
+      const anna = await addUser(users, 'anna');
+      const olya = await addUser(users, 'olya');
+      await addUser(users, 'admin', 'admin');
+      data.forUser(anna).apply([
+        { kind: 'day.meta', date: D, value: { trained: true, types: ['Низ тіла'] } },
+        {
+          kind: 'exercise.put',
+          value: {
+            id: 'ownExercise01',
+            name: 'Степ',
+            kind: 'cardio',
+            primary: ['quads'],
+            secondary: [],
+            equipment: 'other',
+            met: 7,
+          },
+        },
+        { kind: 'workout.put', value: { id: 'workout00001', name: 'Ноги', days: [1], items: [] } },
+        {
+          kind: 'session.put',
+          value: {
+            id: 'session00001',
+            date: D,
+            workoutId: null,
+            name: 'Вільне тренування',
+            createdAt: 1,
+            startedAt: null,
+            finishedAt: null,
+            durationSec: null,
+            status: 'done',
+            exercises: [],
+            notes: '',
+            rev: 0,
+            deviceId: null,
+          },
+        },
+        { kind: 'session.delete', id: 'session00002' },
+        { kind: 'steps.put', date: D, steps: 8000 },
+        { kind: 'steps.put', date: '2026-10-11', steps: 9000 },
+      ]);
+      data.forUser(olya).apply([{ kind: 'steps.put', date: D, steps: 3000 }]);
+      return { anna, olya };
+    });
+
+    const refused = await run(['downgrade-schema', '--keep', 'anna']);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain('--keep and --drop-others only apply to a schema v4 database; this one is v5.');
+    expect(backups()).toEqual([]);
+    withRaw((db) => expect(schemaVersion(db)).toBe(5));
+
+    const down = await run(['downgrade-schema']);
+    expect(down.code).toBe(0);
+    expect(down.out).toContain('Schema downgraded to v4');
+    expect(down.out).toContain('  anna: exercises 1, workouts 1, sessions 1, steps 2');
+    expect(down.out).toContain('  olya: exercises 0, workouts 0, sessions 0, steps 1');
+    expect(down.out).toContain('  admin: exercises 0, workouts 0, sessions 0, steps 0');
+    expect(down.out).toContain('Next: deploy/deploy.sh rollback.');
+    expect(backups()).toEqual(['legko-pre-down-v5-2026-10-22.db']);
+    withRaw((db) => {
+      expect(schemaVersion(db)).toBe(4);
+      const tables = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .all()
+        .map((r) => r.name);
+      for (const t of ['exercises', 'workouts', 'workout_sessions', 'steps']) expect(tables).not.toContain(t);
+      expect(db.prepare('SELECT trained, types FROM days WHERE user_id = ?').get(ids.anna)).toEqual({
+        trained: 1,
+        types: '["Низ тіла"]',
+      });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM users').get()).toEqual({ n: 3 });
+    });
+
+    // The next step is the v4 → v3 one (it needs --keep with several accounts).
+    const next = await run(['downgrade-schema']);
+    expect(next.code).toBe(1);
+    expect(next.err).toMatch(/There are 3 accounts/);
+
+    // Re-opened by this build: migrated to v5 again, empty workouts, a new pre-v5 snapshot.
+    await withDb(({ db }) => {
+      expect(schemaVersion(db)).toBe(5);
+      const anna = createDataRepos(db).forUser(ids.anna).read();
+      expect(anna).toMatchObject({ exercises: [], workouts: [], sessions: [], steps: [], deletedSessions: [] });
+      expect(anna.days[D]).toMatchObject({ trained: true, types: ['Низ тіла'] });
+    });
+    expect(backups()).toEqual(['legko-pre-down-v5-2026-10-22.db', 'legko-pre-v5-2026-10-22.db']);
+  });
+
   it('refuses a database that is neither v4 nor v3, changing nothing', async () => {
     const v2 = openRaw(databasePath(dir));
     migrate(v2, MIGRATIONS.slice(0, 2));
@@ -739,8 +840,9 @@ describe('cli usage', () => {
       expect(help.out).toContain(command);
     }
     expect(USAGE).toContain(
-      'Run it only when deploy.sh status shows a previous image from before the users release.',
+      'Run it only when deploy.sh status shows a previous image from before that release (one step per run).',
     );
+    expect(USAGE).toContain('v5 → v4 (the build before workouts and steps)');
     expect((await run(['--help'])).code).toBe(0);
     expect((await run([])).out).toBe(USAGE);
     const unknown = await run(['nope']);
@@ -761,7 +863,9 @@ describe('cli usage', () => {
       const result = await run(argv);
       expect(result.code, argv.join(' ')).toBe(1);
       expect(result.out).toBe('');
-      expect(result.err).toContain('Database is at schema v3; this CLI needs v4. Nothing was changed.');
+      expect(result.err).toContain(
+        `Database is at schema v3; this CLI needs v${MIGRATIONS.length}. Nothing was changed.`,
+      );
       expect(result.err).toContain('Start the server of this build once to migrate it');
       expect(result.err).toContain('deploy/deploy.sh rollback');
     }
@@ -796,36 +900,33 @@ describe('cli usage', () => {
   });
 
   it('between downgrade-schema and the rollback, other commands of this build change nothing', async () => {
-    // A v3 installation the server of this build migrated (with its pre-v4 snapshot).
-    const v3 = new (sqlite().DatabaseSync)(databasePath(dir));
-    migrate(v3, MIGRATIONS.slice(0, 3));
-    v3.prepare('INSERT INTO kv (key, value) VALUES (?, ?)').run('password_hash', await hash(PASSWORD));
-    v3.close();
+    // A v4 installation the server of this build migrated (with its pre-v5 snapshot).
+    await withV4Db(({ users }) => addUser(users, 'anna'));
     openDatabase(databasePath(dir), { now: () => AT }).close();
-    const snapshot = join(dir, 'backups', 'legko-pre-v4-2026-10-22.db');
+    const snapshot = join(dir, 'backups', 'legko-pre-v5-2026-10-22.db');
     const snapshotBytes = readFileSync(snapshot);
     const snapshotMtime = statSync(snapshot).mtimeMs;
 
-    const down = await run(['downgrade-schema', '--keep', 'anna']);
+    const down = await run(['downgrade-schema']);
     expect(down.code).toBe(0);
     const after = readFileSync(databasePath(dir));
 
     for (const argv of [['list-users'], ['list-links'], ['reset-password-link', 'anna']]) {
       const result = await run(argv);
       expect(result.code, argv.join(' ')).toBe(1);
-      expect(result.err).toContain('Database is at schema v3');
-      expect(result.err).not.toContain('saved legko-pre-v4');
+      expect(result.err).toContain('Database is at schema v4');
+      expect(result.err).not.toContain('saved legko-pre-v5');
     }
     const raw = new (sqlite().DatabaseSync)(databasePath(dir));
     try {
-      expect(schemaVersion(raw)).toBe(3);
+      expect(schemaVersion(raw)).toBe(4);
     } finally {
       raw.close();
     }
     expect(readFileSync(databasePath(dir)).equals(after)).toBe(true);
     expect(readdirSync(join(dir, 'backups')).sort()).toEqual([
-      'legko-pre-down-v4-2026-10-22.db',
-      'legko-pre-v4-2026-10-22.db',
+      'legko-pre-down-v5-2026-10-22.db',
+      'legko-pre-v5-2026-10-22.db',
     ]);
     // The rollback's fallback file still holds the state from before the release.
     expect(readFileSync(snapshot).equals(snapshotBytes)).toBe(true);

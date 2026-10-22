@@ -1,19 +1,32 @@
 import {
+  compareSessions,
+  exerciseSchema,
   foodKey,
   isDayOp,
   isEmptyDay,
   isEmptyMeasure,
+  LIMITS,
   MACRO_KEYS,
   mealSchema,
   mergeSettingsPut,
   normalizeDay,
+  normalizeExercise,
+  normalizeSession,
   normalizeSettings,
+  normalizeWorkout,
   reduceDay,
+  reduceExercises,
+  reduceWorkouts,
+  sessionPutBlocked,
+  sessionSchema,
   settingsSchema,
   useFood,
+  workoutSchema,
+  workoutsOn,
   type AppData,
   type DayEntry,
   type DayOp,
+  type Exercise,
   type FoodItem,
   type ISODate,
   type Meal,
@@ -22,7 +35,10 @@ import {
   type Op,
   type ReminderKind,
   type Settings,
+  type StepsEntry,
   type WeightEntry,
+  type Workout,
+  type WorkoutSession,
 } from '@legko/shared';
 import { z } from 'zod';
 import { silentLogger, type Logger } from '../logger';
@@ -58,8 +74,13 @@ export interface DataRepo {
    * id, or null when nothing was written.
    */
   setTimezone(timeZone: string): string | null;
-  /** Whether the action a reminder asks for was already recorded for `date`. */
+  /**
+   * Whether the action a reminder asks for was already recorded for `date`. A workout counts as done when the day
+   * has a mark, or a (not deleted) session exists that date — active or done: no push mid-workout.
+   */
   isDone(kind: ReminderKind, date: ISODate): boolean;
+  /** Names of the workouts scheduled on the weekday of `date` (her order), for the workout reminder. */
+  workoutNamesOn(date: ISODate): string[];
 }
 
 /** The only way to a `DataRepo`: `forUser(currentUser(c).id)`. */
@@ -75,8 +96,11 @@ export type ClientId = UserId & { readonly __coachClient: true };
 
 /** Read-only view of one client's records. There is no write method on it (the coach tests pin the key list). */
 export interface DataReader {
-  /** Days, weights, measures and settings — never foods (the foods statement is not run). */
-  read(): Omit<AppData, 'foods'>;
+  /**
+   * Days, weights, measures, settings, exercises, workouts, sessions and steps — never foods (the foods statement is
+   * not run) nor the session tombstones.
+   */
+  read(): Omit<AppData, 'foods' | 'deletedSessions'>;
   /** Same as `DataRepo.settings()`. */
   settings(): Settings;
   /** All weigh-ins, oldest first. */
@@ -87,6 +111,12 @@ export interface DataReader {
   daysBetween(from: ISODate, to: ISODate): { date: ISODate; entry: DayEntry }[];
   /** Earliest / latest date <= `to` that has a day, a weigh-in or a measurement; null when none. */
   recordSpan(to: ISODate): { first: ISODate | null; last: ISODate | null };
+  /** Steps with from <= date <= to, oldest first. */
+  stepsBetween(from: ISODate, to: ISODate): StepsEntry[];
+  /** DONE sessions with from <= date <= to, in session order. */
+  sessionsBetween(from: ISODate, to: ISODate): WorkoutSession[];
+  /** Her workouts, in her order. */
+  workouts(): Workout[];
 }
 
 /** Not part of `RouteDeps`: `createApp` hands it only to `createCoachAccess`. */
@@ -164,6 +194,35 @@ function foodFromRow(row: Row): FoodItem {
     if (v !== null) food[key] = v;
   }
   return food;
+}
+
+/** A JSON column through its schema; null and a content-free warning when it is unusable (the row is skipped). */
+function parseStored<T>(raw: string, schema: z.ZodType<T>, what: string, logger: Logger): T | null {
+  try {
+    const parsed = schema.safeParse(JSON.parse(raw));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // fall through
+  }
+  logger.warn(`A stored ${what} is not valid: skipping it`);
+  return null;
+}
+
+const notNull = <T>(v: T | null): v is T => v !== null;
+
+type Statement = ReturnType<Database['prepare']>;
+
+/** Statements prepared on first use (each key once). */
+function lazyStatements<K extends string>(db: Database, sqls: Record<K, string>): Readonly<Record<K, Statement>> {
+  const out = {} as Record<K, Statement>;
+  for (const key of Object.keys(sqls) as K[]) {
+    let statement: Statement | undefined;
+    Object.defineProperty(out, key, {
+      enumerable: true,
+      get: () => (statement ??= db.prepare(sqls[key])),
+    });
+  }
+  return out;
 }
 
 /** `createDataAccess(...).repos`: unchanged signature and behaviour (backup, CLI, reminders, tests). */
@@ -256,7 +315,65 @@ export function createDataAccess(
     clearWeights: db.prepare('DELETE FROM weights WHERE user_id = ?'),
     clearMeasures: db.prepare('DELETE FROM measures WHERE user_id = ?'),
     clearFoods: db.prepare('DELETE FROM foods WHERE user_id = ?'),
+    hasV5Tables: db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = 'workout_sessions'"),
   };
+
+  // Schema v5 tables: prepared on first use, so the repo still opens a v4 file (downgrade tests, maintenance).
+  const v5 = lazyStatements(db, {
+    // Exercises / workouts: ≤ 350 small rows rewritten per batch (the foods
+    // pattern) so `position` keeps the array order of applyOp().
+    allExercises: 'SELECT value FROM exercises WHERE user_id = ? ORDER BY position',
+    insertExercise: 'INSERT INTO exercises (user_id, id, position, value, updated_at) VALUES (?, ?, ?, ?, ?)',
+    clearExercises: 'DELETE FROM exercises WHERE user_id = ?',
+    allWorkouts: 'SELECT value FROM workouts WHERE user_id = ? ORDER BY position',
+    insertWorkout: 'INSERT INTO workouts (user_id, id, position, value, updated_at) VALUES (?, ?, ?, ?, ?)',
+    clearWorkouts: 'DELETE FROM workouts WHERE user_id = ?',
+    // Sessions: one row each; a deleted one stays as a tombstone (status 'deleted', value '{}').
+    liveSessions: "SELECT value FROM workout_sessions WHERE user_id = ? AND status <> 'deleted'",
+    doneSessionsBetween: `SELECT value FROM workout_sessions
+       WHERE user_id = ? AND date >= ? AND date <= ? AND status = 'done'`,
+    tombstones: "SELECT id FROM workout_sessions WHERE user_id = ? AND status = 'deleted' ORDER BY id",
+    countTombstones: "SELECT COUNT(*) AS n FROM workout_sessions WHERE user_id = ? AND status = 'deleted'",
+    getSession: 'SELECT date, status, value FROM workout_sessions WHERE user_id = ? AND id = ?',
+    countSessionsOn: `SELECT COUNT(*) AS n FROM workout_sessions
+       WHERE user_id = ? AND date = ? AND status <> 'deleted' AND id <> ?`,
+    putSession: `INSERT INTO workout_sessions (user_id, id, date, status, value, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (user_id, id) DO UPDATE SET date = excluded.date, status = excluded.status,
+         value = excluded.value, updated_at = excluded.updated_at`,
+    deleteSessionRow: 'DELETE FROM workout_sessions WHERE user_id = ? AND id = ?',
+    hasSessionOn: "SELECT 1 AS found FROM workout_sessions WHERE user_id = ? AND date = ? AND status <> 'deleted' LIMIT 1",
+    clearSessions: 'DELETE FROM workout_sessions WHERE user_id = ?',
+    allSteps: 'SELECT date, steps FROM steps WHERE user_id = ? ORDER BY date',
+    stepsBetween: 'SELECT date, steps FROM steps WHERE user_id = ? AND date >= ? AND date <= ? ORDER BY date',
+    putSteps: `INSERT INTO steps (user_id, date, steps, updated_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (user_id, date) DO UPDATE SET steps = excluded.steps, updated_at = excluded.updated_at`,
+    deleteSteps: 'DELETE FROM steps WHERE user_id = ? AND date = ?',
+    clearSteps: 'DELETE FROM steps WHERE user_id = ?',
+  });
+
+  const stepsFromRows = (rows: readonly Row[]): StepsEntry[] =>
+    rows.map((row) => ({ date: text(row, 'date'), steps: num(row, 'steps') }));
+
+  const readExercises = (id: UserId): Exercise[] =>
+    v5.allExercises
+      .all(id)
+      .map((row) => parseStored(text(row, 'value'), exerciseSchema, 'exercise', logger))
+      .filter(notNull);
+
+  const readWorkouts = (id: UserId): Workout[] =>
+    v5.allWorkouts
+      .all(id)
+      .map((row) => parseStored(text(row, 'value'), workoutSchema, 'workout', logger))
+      .filter(notNull);
+
+  const sessionsFromRows = (rows: readonly Row[]): WorkoutSession[] =>
+    rows
+      .map((row) => parseStored(text(row, 'value'), sessionSchema, 'workout session', logger))
+      .filter(notNull)
+      .sort(compareSessions);
+
+  const readSessions = (id: UserId): WorkoutSession[] => sessionsFromRows(v5.liveSessions.all(id));
+  const readSteps = (id: UserId): StepsEntry[] => stepsFromRows(v5.allSteps.all(id));
 
   function readSettings(id: UserId): Settings {
     const row = q.getSettings.get(id);
@@ -280,10 +397,21 @@ export function createDataAccess(
   const readMeasures = (id: UserId): MeasureEntry[] => q.allMeasures.all(id).map(measureFromRow);
 
   /** Everything of `AppData` but «Часті страви»: what both `forUser().read()` and `reader.read()` start from. */
-  function readCore(id: UserId): Omit<AppData, 'foods'> {
+  function readCore(id: UserId): Omit<AppData, 'foods' | 'deletedSessions'> {
     const days: Record<ISODate, DayEntry> = {};
     for (const row of q.allDays.all(id)) days[text(row, 'date')] = dayFromRow(row, logger);
-    return { days, weights: readWeights(id), measures: readMeasures(id), settings: readSettings(id) };
+    // A v4 file (maintenance before the server migrates it, downgrade tests) has no workouts or steps yet.
+    const v5Tables = q.hasV5Tables.get() !== undefined;
+    return {
+      days,
+      weights: readWeights(id),
+      measures: readMeasures(id),
+      settings: readSettings(id),
+      exercises: v5Tables ? readExercises(id) : [],
+      workouts: v5Tables ? readWorkouts(id) : [],
+      sessions: v5Tables ? readSessions(id) : [],
+      steps: v5Tables ? readSteps(id) : [],
+    };
   }
 
   function forUser(id: UserId): DataRepo {
@@ -313,6 +441,45 @@ export function createDataAccess(
           f.carbs ?? null,
         ),
       );
+    }
+
+    function writeExercises(list: readonly Exercise[], at: number): void {
+      v5.clearExercises.run(id);
+      list.forEach((e, position) => v5.insertExercise.run(id, e.id, position, JSON.stringify(e), at));
+    }
+
+    function writeWorkouts(list: readonly Workout[], at: number): void {
+      v5.clearWorkouts.run(id);
+      list.forEach((w, position) => v5.insertWorkout.run(id, w.id, position, JSON.stringify(w), at));
+    }
+
+    /** Keeps the newest LIMITS.deletedSessions tombstones by id, as the shared reducer does. */
+    function pruneTombstones(): void {
+      const count = num(v5.countTombstones.get(id) ?? { n: 0 }, 'n');
+      if (count <= LIMITS.deletedSessions) return;
+      const ids = v5.tombstones.all(id).map((row) => text(row, 'id'));
+      for (const old of ids.slice(0, count - LIMITS.deletedSessions)) v5.deleteSessionRow.run(id, old);
+    }
+
+    /** `session.put` on its row, with the W13 rules of the shared `reduceSessions` (sessionPutBlocked). */
+    function putSession(raw: WorkoutSession, at: number): void {
+      const value = normalizeSession(raw);
+      const row = v5.getSession.get(id, value.id);
+      const tombstoned = row !== undefined && text(row, 'status') === 'deleted';
+      const stored =
+        row && !tombstoned
+          ? (parseStored(text(row, 'value'), sessionSchema, 'workout session', logger) ?? undefined)
+          : undefined;
+      const onDate = num(v5.countSessionsOn.get(id, value.date, value.id) ?? { n: 0 }, 'n');
+      if (sessionPutBlocked(value, stored, tombstoned, onDate)) return;
+      v5.putSession.run(id, value.id, value.date, value.status, JSON.stringify(value), at);
+    }
+
+    /** `session.delete`: the row becomes a tombstone (date kept, '' when the id was never stored). */
+    function deleteSession(sessionId: string, at: number): void {
+      const row = v5.getSession.get(id, sessionId);
+      v5.putSession.run(id, sessionId, row ? text(row, 'date') : '', 'deleted', '{}', at);
+      pruneTombstones();
     }
 
     function readDay(date: ISODate): DayEntry | undefined {
@@ -348,10 +515,25 @@ export function createDataAccess(
       else q.putMeasure.run(id, date, value.chest, value.waist, value.hips, at);
     }
 
-    type RowOp = Exclude<Op, DayOp | { kind: 'food.use' | 'food.delete' }>;
+    type RowOp = Exclude<
+      Op,
+      | DayOp
+      | { kind: 'food.use' | 'food.delete' }
+      | { kind: 'exercise.put' | 'exercise.delete' | 'workout.put' | 'workout.delete' }
+    >;
 
     function applyRowOp(op: RowOp, at: number): void {
       switch (op.kind) {
+        case 'session.put':
+          return putSession(op.value, at);
+        case 'session.delete':
+          return deleteSession(op.id, at);
+        case 'steps.put':
+          v5.putSteps.run(id, op.date, op.steps, at);
+          return;
+        case 'steps.delete':
+          v5.deleteSteps.run(id, op.date);
+          return;
         case 'weight.put':
           q.putWeight.run(id, op.date, op.kg, at);
           return;
@@ -371,8 +553,19 @@ export function createDataAccess(
 
     return {
       read(): AppData {
-        const { days, weights, measures, settings } = readCore(id);
-        return { days, weights, measures, foods: readFoods(), settings };
+        const core = readCore(id);
+        return {
+          days: core.days,
+          weights: core.weights,
+          measures: core.measures,
+          foods: readFoods(),
+          settings: core.settings,
+          exercises: core.exercises,
+          workouts: core.workouts,
+          sessions: core.sessions,
+          steps: core.steps,
+          deletedSessions: q.hasV5Tables.get() !== undefined ? v5.tombstones.all(id).map((row) => text(row, 'id')) : [],
+        };
       },
 
       settings: ownSettings,
@@ -382,12 +575,19 @@ export function createDataAccess(
         transaction(db, () => {
           // Food ops reuse the shared reducer: read once, fold the batch's food ops, write once.
           let foods: FoodItem[] | null = null;
+          // Exercises and workouts likewise: the shared reducers fold the batch, then the rows are rewritten.
+          let exercises: Exercise[] | null = null;
+          let workouts: Workout[] | null = null;
           for (const op of ops) {
             if (op.kind === 'food.use') {
               foods = useFood(foods ?? readFoods(), op.value, op.date);
             } else if (op.kind === 'food.delete') {
               const key = foodKey(op.name);
               foods = (foods ?? readFoods()).filter((f) => foodKey(f.name) !== key);
+            } else if (op.kind === 'exercise.put' || op.kind === 'exercise.delete') {
+              exercises = reduceExercises(exercises ?? readExercises(id), op);
+            } else if (op.kind === 'workout.put' || op.kind === 'workout.delete') {
+              workouts = reduceWorkouts(workouts ?? readWorkouts(id), op);
             } else if (isDayOp(op)) {
               applyDayOp(op, at);
             } else {
@@ -395,6 +595,8 @@ export function createDataAccess(
             }
           }
           if (foods) writeFoods(foods);
+          if (exercises) writeExercises(exercises, at);
+          if (workouts) writeWorkouts(workouts, at);
         });
       },
 
@@ -413,6 +615,18 @@ export function createDataAccess(
           for (const m of data.measures) putMeasure(m.date, m, at);
           writeFoods(data.foods);
           writeSettings(data.settings);
+          // Workouts and steps: an older backup has none, so restoring it clears them («відновити копію»).
+          v5.clearSessions.run(id);
+          v5.clearSteps.run(id);
+          writeExercises((data.exercises ?? []).map(normalizeExercise), at);
+          writeWorkouts((data.workouts ?? []).map(normalizeWorkout), at);
+          const sessions = (data.sessions ?? []).map(normalizeSession).sort(compareSessions);
+          const live = new Set(sessions.map((s) => s.id));
+          for (const s of sessions) v5.putSession.run(id, s.id, s.date, s.status, JSON.stringify(s), at);
+          for (const dead of data.deletedSessions ?? [])
+            if (!live.has(dead)) v5.putSession.run(id, dead, '', 'deleted', '{}', at);
+          pruneTombstones();
+          for (const s of data.steps ?? []) v5.putSteps.run(id, s.date, s.steps, at);
         });
       },
 
@@ -434,9 +648,14 @@ export function createDataAccess(
             return q.hasMeasure.get(id, date) !== undefined;
           case 'workout': {
             const row = q.dayTrained.get(id, date);
-            return row !== undefined && numOrNull(row, 'trained') !== null;
+            if (row !== undefined && numOrNull(row, 'trained') !== null) return true;
+            return v5.hasSessionOn.get(id, date) !== undefined;
           }
         }
+      },
+
+      workoutNamesOn(date) {
+        return workoutsOn(readWorkouts(id), date).map((w) => w.name);
       },
     };
   }
@@ -455,7 +674,7 @@ export function createDataAccess(
       return { first, last };
     }
     return Object.freeze({
-      read: (): Omit<AppData, 'foods'> => readCore(id),
+      read: (): Omit<AppData, 'foods' | 'deletedSessions'> => readCore(id),
       settings: (): Settings => readSettings(id),
       weights: (): WeightEntry[] => readWeights(id),
       measures: (): MeasureEntry[] => readMeasures(id),
@@ -464,6 +683,10 @@ export function createDataAccess(
           .all(id, from, to)
           .map((row) => ({ date: text(row, 'date'), entry: dayFromRow(row, logger) })),
       recordSpan,
+      stepsBetween: (from: ISODate, to: ISODate): StepsEntry[] => stepsFromRows(v5.stepsBetween.all(id, from, to)),
+      sessionsBetween: (from: ISODate, to: ISODate): WorkoutSession[] =>
+        sessionsFromRows(v5.doneSessionsBetween.all(id, from, to)),
+      workouts: (): Workout[] => readWorkouts(id),
     });
   }
 

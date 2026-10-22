@@ -2,7 +2,19 @@
  * Defensive shaping of data that comes from outside this page: the server copy and the
  * device cache (which may have been written by an older app version).
  */
-import { normalizeSettings, opSchema, type AppData, type Op } from '@legko/shared';
+import {
+  compareSessions,
+  exerciseSchema,
+  normalizeSettings,
+  opSchema,
+  OWN_ID_RE,
+  sessionSchema,
+  stepsEntrySchema,
+  withDataDefaults,
+  workoutSchema,
+  type AppData,
+  type Op,
+} from '@legko/shared';
 
 /** An op waiting for the server. The id is local only: it identifies what a request carried. */
 export interface OutboxItem {
@@ -16,16 +28,44 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 const byDate = <T extends { date: string }>(a: T, b: T): number =>
   a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
 
-/** Fills in missing parts and restores the sort order the stats rely on. */
+interface Parser<T> {
+  safeParse(value: unknown): { success: true; data: T } | { success: false };
+}
+
+/** The valid elements of a stored list (invalid ones dropped, as the server read does), first of duplicate keys. */
+function validList<T>(value: unknown, schema: Parser<T>, key: (item: T) => string): T[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const raw of value) {
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success || seen.has(key(parsed.data))) continue;
+    seen.add(key(parsed.data));
+    out.push(parsed.data);
+  }
+  return out;
+}
+
+/**
+ * Fills in missing parts and restores the sort order the stats rely on. A WHITELIST of AppData keys: the workouts and
+ * steps keys (schema v5) are kept and validated element by element; missing → [] (`withDataDefaults`).
+ */
 export function normalizeAppData(input: Partial<AppData> | null | undefined): AppData {
   const src = input ?? {};
-  return {
+  return withDataDefaults({
     days: isRecord(src.days) ? { ...src.days } : {},
     weights: Array.isArray(src.weights) ? [...src.weights].sort(byDate) : [],
     measures: Array.isArray(src.measures) ? [...src.measures].sort(byDate) : [],
     foods: Array.isArray(src.foods) ? [...src.foods] : [],
     settings: normalizeSettings(isRecord(src.settings) ? src.settings : undefined),
-  };
+    exercises: validList(src.exercises, exerciseSchema, (e) => e.id),
+    workouts: validList(src.workouts, workoutSchema, (w) => w.id),
+    sessions: validList(src.sessions, sessionSchema, (s) => s.id).sort(compareSessions),
+    steps: validList(src.steps, stepsEntrySchema, (s) => s.date).sort(byDate),
+    deletedSessions: Array.isArray(src.deletedSessions)
+      ? [...new Set(src.deletedSessions.filter((id): id is string => typeof id === 'string' && OWN_ID_RE.test(id)))]
+      : [],
+  });
 }
 
 /** Cached `legko.data` → AppData, or `null` when nothing usable is stored. */

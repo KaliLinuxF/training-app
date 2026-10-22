@@ -315,6 +315,45 @@ export const MIGRATIONS: readonly string[] = [
 
   DELETE FROM kv WHERE key IN ('password_hash', 'settings', 'legacy_user');
   `,
+  // v5: workouts and steps (docs/workouts-steps-rebrand.md §1.8). Additive: no existing row changes.
+  `
+  CREATE TABLE exercises (
+    user_id    TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id         TEXT NOT NULL,
+    position   INTEGER NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
+  ) STRICT;
+
+  CREATE TABLE workouts (
+    user_id    TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id         TEXT NOT NULL,
+    position   INTEGER NOT NULL,
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
+  ) STRICT;
+
+  CREATE TABLE workout_sessions (
+    user_id    TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id         TEXT NOT NULL,
+    date       TEXT NOT NULL,
+    status     TEXT NOT NULL CHECK (status IN ('active', 'done', 'deleted')),
+    value      TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
+  ) STRICT;
+  CREATE INDEX workout_sessions_by_date ON workout_sessions (user_id, date);
+
+  CREATE TABLE steps (
+    user_id    TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    date       TEXT NOT NULL,
+    steps      INTEGER NOT NULL CHECK (steps BETWEEN 1 AND 100000),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, date)
+  ) STRICT;
+  `,
 ];
 
 export function schemaVersion(db: Database): number {

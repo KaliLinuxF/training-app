@@ -10,7 +10,7 @@ import {
   type SessionUser,
 } from '../packages/shared/src/index';
 import { COACH_STUB_IDS, COACH_STUB_NAMES, coachClientPayload, coachClientsPayload } from './fixtures/coach';
-import { meals as mealsSeed } from './fixtures/data';
+import { e2eSession, meals as mealsSeed, training as trainingSeed } from './fixtures/data';
 import { USERNAME_LABEL, type App } from './support/app';
 import { stubCoachClient, stubCoachClients, stubCoachPhotos } from './support/coachApi';
 import {
@@ -22,9 +22,11 @@ import {
   type ClientTab,
 } from './support/coachUi';
 import { BASE_URL, FIXED_NOW, TODAY } from './support/env';
+import { exerciseList, groupChip, openExercise, openLibrary, openNewExercise } from './support/exercises';
 import { FOOD_JPEG, mockFood, PHOTO_ESTIMATE } from './support/food';
 import type { ServerApi } from './support/server';
 import { expect, test } from './support/test';
+import { builderCards, footerConfirm, pageTitle, restBar, sessionCard, setCheck } from './support/workouts';
 
 // ── Accounts: fixed answers relative to FIXED_NOW (the browser clock is fixed, the server's is real) ──────────────
 
@@ -637,7 +639,7 @@ test.describe('iPhone ergonomics', () => {
     await app.recordButton().click();
     const menu = app.sheet('Що записати?');
     const sizes: Record<string, string> = {};
-    for (const name of ['Їжа', 'Тренування', 'Вага', 'Заміри']) {
+    for (const name of ['Їжа', 'Тренування', 'Кроки', 'Вага', 'Заміри']) {
       const row = menu.getByRole('button', { name: new RegExp(`^${name}`) });
       expect((await box(row, name)).height, `menu «${name}» height`).toBeGreaterThanOrEqual(64);
       sizes[`menu «${name}»`] = await hitArea(row);
@@ -648,7 +650,7 @@ test.describe('iPhone ergonomics', () => {
     for (const title of [
       'Нагадування',
       'Цілі',
-      'Типи тренувань',
+      'Тренування',
       'Прийоми їжі',
       'Вигляд',
       'Дані і копія',
@@ -1089,7 +1091,7 @@ test.describe('accounts on the phone: 390 and 320 wide (no side scroll, 44px tar
   test.skip(({ isMobile }) => !isMobile, 'phone widths');
 
   // FIXME(app bug, ui/layout/ScreenHeader): the back link is 44px tall, but on every sub-page whose title has no
-  // action beside it (Нагадування, Типи тренувань, Прийоми їжі, Вигляд, Дані і копія, Акаунт, Користувачі) the <h1>
+  // action beside it (Нагадування, Тренування, Прийоми їжі, Вигляд, Дані і копія, Акаунт, Користувачі) the <h1>
   // box overlaps its bottom 2px, so a finger reaches 42px (on «Цілі» it is 44px). Remove the .fixme once fixed.
   test.fixme('the «‹ Налаштування» back link reaches 44px on every settings sub-page', async ({ app }) => {
     const sizes: Record<string, string> = {};
@@ -1290,7 +1292,7 @@ test.describe('accounts on the phone: 390 and 320 wide (no side scroll, 44px tar
 
 // ── «Клієнти» — the admin as a read-only coach (docs/coach-cabinet.md §6, §8.2): stubbed API ─────────────────────
 
-const CLIENT_TABS: readonly ClientTab[] = ['Огляд', 'Прогрес', 'Календар', 'Харчування'];
+const CLIENT_TABS: readonly ClientTab[] = ['Огляд', 'Прогрес', 'Календар', 'Харчування', 'Тренування'];
 
 /** The day cells of a month grid (MonthCard: a `role="group"` named by the month title). */
 const MONTH_DAY_CELLS = '[role="group"][aria-labelledby] button';
@@ -1387,10 +1389,10 @@ test.describe('«Клієнти» (the admin as a coach, stubbed)', () => {
 
       // th scope=col on every header; in every body row one th scope=row, the first cell; aria-sort on each column.
       const { head, rows } = await tableSemantics(region);
-      expect(head.map((h) => h.scope)).toEqual(Array(8).fill('col'));
+      expect(head.map((h) => h.scope)).toEqual(Array(9).fill('col'));
       expect(rows).toEqual(Array(COACH_STUB_NAMES.length).fill({ scopes: ['row'], first: 'TH' }));
       // Default order (attention): no column is sorted, every sortable header says so.
-      expect(head.map((h) => h.sort)).toEqual(Array(8).fill('none'));
+      expect(head.map((h) => h.sort)).toEqual(Array(9).fill('none'));
 
       // The region is a named, focusable scroller that does not scroll sideways at 1280×800 with the stub roster.
       await expect(region).toHaveAttribute('tabindex', '0');
@@ -1412,7 +1414,7 @@ test.describe('«Клієнти» (the admin as a coach, stubbed)', () => {
 
       await page.keyboard.press('Enter');
       await expect(clientHeader).toHaveAttribute('aria-sort', 'ascending');
-      expect((await ariaSorts(region)).slice(1)).toEqual(Array(7).fill('none'));
+      expect((await ariaSorts(region)).slice(1)).toEqual(Array(8).fill('none'));
       expect(await rowNames(region)).toEqual(['ivan', 'marta', 'olya', 'petro', 'sofia', 'taras']);
       await expect(clientButton).toBeFocused();
       await page.keyboard.press('Enter');
@@ -1420,7 +1422,7 @@ test.describe('«Клієнти» (the admin as a coach, stubbed)', () => {
       expect(await rowNames(region)).toEqual(['taras', 'sofia', 'petro', 'olya', 'marta', 'ivan']);
       await page.keyboard.press('Enter');
       await expect(clientHeader).toHaveAttribute('aria-sort', 'none');
-      expect(await ariaSorts(region)).toEqual(Array(8).fill('none'));
+      expect(await ariaSorts(region)).toEqual(Array(9).fill('none'));
       await expectFocusRing(clientButton, '«Клієнт» header button after sorting');
 
       // A short window: the region scrolls vertically; at its last row the header row is still on top.
@@ -1548,3 +1550,494 @@ test.describe('«Клієнти» (the admin as a coach, stubbed)', () => {
     });
   });
 });
+
+// ── Workouts and steps (docs/workouts-steps-rebrand.md §3.19): names, roles, states, light + dark, reduced motion ──
+
+/**
+ * WCAG contrast ratio of the element's text against what is painted behind it. The tokens are OKLCH, so colours are
+ * converted to sRGB through a canvas; translucent tints (a banner, the rest bar) are composited over the layers under
+ * them, down to the first opaque one.
+ */
+const contrastOf = (locator: Locator): Promise<number> =>
+  locator.evaluate((el) => {
+    const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    if (!ctx) throw new Error('no canvas');
+    const toRgba = (css: string): [number, number, number, number] => {
+      ctx.clearRect(0, 0, 1, 1);
+      ctx.fillStyle = '#000';
+      ctx.fillStyle = css;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0, a = 0] = ctx.getImageData(0, 0, 1, 1).data;
+      return [r, g, b, a / 255];
+    };
+    const over = (top: [number, number, number, number], under: number[]): number[] =>
+      under.slice(0, 3).map((u, i) => (top[i] ?? 0) * top[3] + u * (1 - top[3]));
+    const lum = ([r = 0, g = 0, b = 0]: number[]) => {
+      const lin = (v: number) => {
+        const x = v / 255;
+        return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    const layers: [number, number, number, number][] = [];
+    for (let n: Element | null = el; n; n = n.parentElement) {
+      const layer = toRgba(getComputedStyle(n).backgroundColor);
+      if (layer[3] > 0) layers.push(layer);
+      if (layer[3] >= 0.999) break;
+    }
+    const base = layers.at(-1);
+    let bg: number[] = base && base[3] >= 0.999 ? (layers.pop() ?? base).slice(0, 3) : [255, 255, 255];
+    for (const layer of layers.reverse()) bg = over(layer, bg);
+    const fg = over(toRgba(getComputedStyle(el).color), bg);
+    const [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x) as [number, number];
+    return (a + 0.05) / (b + 0.05);
+  });
+
+/**
+ * Nothing under `scope` moves: every `transition-duration` / `animation-duration` is at most 1 ms (reduced motion; the
+ * global rule of styles/global.css sets 0.01 ms, the components' own rules set none).
+ */
+async function expectStill(scope: Locator, what: string): Promise<void> {
+  const moving = await scope.evaluate((root) =>
+    [root, ...root.querySelectorAll('*')]
+      .map((el) => {
+        const cs = getComputedStyle(el);
+        const dur = (v: string) => Math.max(...v.split(',').map((x) => parseFloat(x) || 0));
+        return dur(cs.transitionDuration) > 0.001 ||
+          (cs.animationName !== 'none' && dur(cs.animationDuration) > 0.001)
+          ? `${el.tagName.toLowerCase()}.${String(el.getAttribute('class') ?? '').slice(0, 40)}`
+          : null;
+      })
+      .filter((x): x is string => x !== null),
+  );
+  expect(moving, `${what}: no transition or animation under reduced motion`).toEqual([]);
+}
+
+/** The back link of a workouts page header («‹ Мої тренування», «‹ Згорнути»…): see the .fixme below. */
+const WORKOUTS_BACK_LINK = 'a[aria-label="Згорнути тренування"], a[aria-label^="Назад: "]';
+
+/** The library's group chips: one line that scrolls sideways on the phone (measured by `chipRowAreas`). */
+const GROUP_CHIPS = '[role="group"][aria-label="Групи вправ"] button';
+
+/**
+ * The hit area of every chip of a sideways-scrolling row, each one scrolled to the middle of its row first (with the
+ * row's scroll snapping paused, so the chip stays where a finger would have scrolled it).
+ */
+async function chipRowAreas(row: Locator): Promise<Record<string, string>> {
+  const chips = row.getByRole('button');
+  const sizes: Record<string, string> = {};
+  for (let i = 0; i < (await chips.count()); i++) {
+    const chip = chips.nth(i);
+    await chip.evaluate((el: HTMLElement) => {
+      el.scrollIntoView({ block: 'center', inline: 'nearest' });
+      let scroller = el.parentElement;
+      while (scroller && getComputedStyle(scroller).overflowX !== 'auto') scroller = scroller.parentElement;
+      if (!scroller) return;
+      scroller.style.scrollSnapType = 'none';
+      const chipBox = el.getBoundingClientRect();
+      const rowBox = scroller.getBoundingClientRect();
+      scroller.scrollLeft += chipBox.left + chipBox.width / 2 - (rowBox.left + rowBox.width / 2);
+    });
+    sizes[`chip «${(await chip.textContent())?.trim()}»`] = await hitArea(chip);
+  }
+  return sizes;
+}
+
+/** No control is nested in another control inside `scope`. */
+async function expectNoNestedControls(scope: Locator, what: string): Promise<void> {
+  expect(await scope.locator(NESTED_CONTROL).count(), `${what}: nested controls`).toBe(0);
+}
+
+/** The training seed's latest «Ноги + прес» (12 October, every set done, squat 40 kg — a record). */
+async function latestLegs(server: ServerApi): Promise<string> {
+  const session = (await server.getData()).sessions.find(
+    (s) => s.date === '2026-10-12' && s.name === 'Ноги + прес' && s.status === 'done',
+  );
+  if (!session) throw new Error('the training seed has «Ноги + прес» on 12 October');
+  return session.id;
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test.describe(`workouts and steps — ${colorScheme}, reduced motion`, () => {
+    test.use({ seed: 'training', colorScheme, reducedMotion: 'reduce' });
+
+    test('«Вправи», an exercise, «Нова вправа» and the picker: roles, names, pressed states, colour + text', async ({
+      page,
+      isMobile,
+    }) => {
+      await openLibrary(page);
+      await expect(page.getByRole('searchbox', { name: 'Пошук вправи', exact: true })).toBeVisible();
+      const groups = page.getByRole('group', { name: 'Групи вправ', exact: true });
+      await expect(groups.getByRole('button')).toHaveCount(10);
+      for (const chip of [
+        'Усі',
+        'Груди',
+        'Спина',
+        'Плечі',
+        'Руки',
+        'Прес',
+        'Ноги',
+        'Сідниці',
+        'Кардіо',
+        'Мої',
+      ] as const)
+        await expect(groupChip(page, chip)).toHaveAttribute(
+          'aria-pressed',
+          chip === 'Усі' ? 'true' : 'false',
+        );
+      // Rows are links named by the exercise; their body-map thumbs are decorative.
+      const list = exerciseList(page);
+      await expect(list.getByRole('link', { name: /^Присідання зі штангою\s/ })).toBeVisible();
+      await expect(list.getByRole('img')).toHaveCount(0);
+      await expectNoNestedControls(page.getByRole('main'), '«Вправи»');
+      if (isMobile) {
+        await expectTouchFriendly(page.getByRole('main'), '«Вправи»', GROUP_CHIPS);
+        expect(below44(await chipRowAreas(groups))).toEqual([]);
+      }
+
+      // The exercise: the body map is an image named by its muscles; the colour key repeats them as text.
+      const detail = await openExercise(page, 'Присідання зі штангою');
+      const map = detail.getByRole('img', { name: /^Основні мʼязи: квадрицепс, сідниці\. Допоміжні: / });
+      await expect(map).toBeVisible();
+      const fills = await map.evaluate((svg) => [
+        ...new Set([...svg.querySelectorAll('path')].map((p) => getComputedStyle(p).fill)),
+      ]);
+      expect(fills, 'primary muscles are filled with --acc').toContain(await tokenColor(page, '--acc'));
+      expect(fills, 'secondary muscles are filled with --accLine').toContain(
+        await tokenColor(page, '--accLine'),
+      );
+      await expectStill(map, 'body map');
+      await expect(detail.getByText('Задня поверхня стегна', { exact: false }).first()).toBeVisible();
+      const progress = detail.getByRole('region', { name: 'Прогрес', exact: true });
+      await expect(progress.getByRole('img', { name: /^Найкращий підхід, кг: з / })).toBeVisible();
+      await expect(detail.getByRole('region', { name: 'Рекорди', exact: true })).toBeVisible();
+      await expect(
+        detail.getByRole('region', { name: 'Останні тренування', exact: true }).getByRole('link').first(),
+      ).toHaveAccessibleName(/^12 жовтня · Ноги \+ прес/);
+      const hint = progress.getByText('Минулого разу всі підходи виконано — спробуй +2,5 кг');
+      await expect(hint).toBeVisible();
+      expect(await hint.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(
+        13,
+      );
+      expect(await contrastOf(hint), 'hint contrast').toBeGreaterThanOrEqual(4.5);
+
+      // «Нова вправа»: a named modal; the map is decorative there (the chips are the input), errors are described.
+      await openLibrary(page);
+      const editor = await openNewExercise(page, page);
+      await expect(editor).toHaveAttribute('aria-modal', 'true');
+      await settled(editor);
+      await expect(editor.getByRole('img')).toHaveCount(0);
+      await expect(
+        editor.getByRole('radiogroup', { name: 'Тип', exact: true }).getByRole('radio'),
+      ).toHaveCount(4);
+      await expect(editor.getByRole('radio', { name: 'З вагою', exact: true })).toHaveAttribute(
+        'aria-checked',
+        'true',
+      );
+      await expect(editor.getByRole('radiogroup', { name: 'Інтенсивність', exact: true })).toBeVisible();
+      const muscles = editor.getByRole('group', { name: 'Мʼязи' });
+      await expect(muscles.locator('button[aria-pressed]')).toHaveCount(15);
+      await expect(muscles.locator('button[aria-pressed="true"]')).toHaveCount(0);
+      await muscles.getByRole('button', { name: 'Груди', exact: true }).click();
+      const chest = muscles.getByRole('button', { name: 'Груди · основний', exact: true });
+      await expect(chest).toHaveAttribute('aria-pressed', 'true');
+      await chest.click();
+      await expect(muscles.getByRole('button', { name: 'Груди · допоміжний', exact: true })).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      await expectStill(muscles, 'muscle chips');
+      await editor.getByRole('button', { name: 'Зберегти', exact: true }).click();
+      const name = editor.getByRole('textbox', { name: 'Назва', exact: true });
+      await expect(name).toHaveAttribute('aria-invalid', 'true');
+      await expect(name).toHaveAccessibleDescription('Дай вправі назву');
+      await expect(
+        editor.getByRole('alert').filter({ hasText: 'Обери хоча б один основний мʼяз' }),
+      ).toBeVisible();
+      expect(
+        await contrastOf(editor.getByText('Дай вправі назву')),
+        'error text contrast',
+      ).toBeGreaterThanOrEqual(4.5);
+      await expectNoNestedControls(editor, '«Нова вправа»');
+      if (isMobile) await expectTouchFriendly(editor, '«Нова вправа»');
+      await editor.getByRole('button', { name: 'Закрити' }).click();
+      await expect(editor).toBeHidden();
+
+      // The picker (multi): rows are toggles, «Додати (N)» names the count and is disabled at 0.
+      await page.goto('/workouts/new');
+      await expect(pageTitle(page, 'Нове тренування')).toBeVisible();
+      await page.getByRole('button', { name: '+ Додати вправи', exact: true }).click();
+      const picker = page.getByRole('dialog', { name: 'Додати вправи', exact: true });
+      await expect(picker).toHaveAttribute('aria-modal', 'true');
+      await settled(picker);
+      await expect(picker.getByRole('button', { name: 'Додати (0)', exact: true })).toBeDisabled();
+      const rows = picker.getByRole('region', { name: 'Вправи', exact: true });
+      await picker.getByRole('searchbox', { name: 'Пошук вправи', exact: true }).fill('Планка');
+      const plank = rows.getByRole('button', { name: /^Планка\s/ });
+      await expect(plank).toHaveAttribute('aria-pressed', 'false');
+      await plank.click();
+      await expect(plank).toHaveAttribute('aria-pressed', 'true');
+      await expect(picker.getByRole('button', { name: 'Додати (1)', exact: true })).toBeEnabled();
+      await expectNoNestedControls(picker, 'picker');
+      if (isMobile) await expectTouchFriendly(picker, 'picker');
+    });
+
+    test('the builder: named ↑ / ↓ (disabled at the ends), focus stays, a polite live region, the «⋯» menu', async ({
+      page,
+      isMobile,
+    }) => {
+      await page.goto('/workouts/edit/demoWorkoutLegs');
+      await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+      await expect(builderCards(page)).toHaveCount(4);
+      await expect(
+        page.getByRole('button', { name: 'Вгору: Присідання зі штангою', exact: true }),
+      ).toBeDisabled();
+      await expect(page.getByRole('button', { name: 'Вниз: Планка', exact: true })).toBeDisabled();
+      // The drag handle is pointer-only and hidden from assistive tech; the arrows are the accessible way.
+      const handles = await builderCards(page).evaluateAll((cards) =>
+        cards.map((card) => card.querySelector('[aria-hidden="true"] svg') !== null),
+      );
+      expect(handles).toEqual([true, true, true, true]);
+
+      const down = page.getByRole('button', { name: 'Вниз: Присідання зі штангою', exact: true });
+      await down.click();
+      await expect(down).toBeFocused();
+      const live = page.locator('[aria-live="polite"]').filter({ hasText: 'Присідання зі штангою — 2 з 4' });
+      await expect(live).toHaveCount(1);
+      await expect(live).toHaveClass(/visually-hidden/);
+
+      const more = page.getByRole('button', { name: 'Дії: Скручування', exact: true });
+      await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      await more.click();
+      await expect(more).toHaveAttribute('aria-expanded', 'true');
+      const menu = page.getByRole('menu', { name: 'Дії: Скручування', exact: true });
+      await expect(menu.getByRole('menuitem')).toHaveText(['Дублювати', 'Видалити']);
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+
+      // The weekday picker names the days in full; «Змінити» opens one named stepper per line.
+      await expect(
+        page.getByRole('group', { name: 'Дні тренувань' }).getByRole('button', { name: 'Середа' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await page.getByRole('button', { name: 'Змінити: Присідання зі штангою', exact: true }).click();
+      for (const label of ['Вага', 'Відпочинок'])
+        for (const dir of ['менше', 'більше'])
+          await expect(page.getByRole('button', { name: `${label}: ${dir}`, exact: true })).toBeVisible();
+      await expectNoNestedControls(page.getByRole('main'), 'builder');
+      if (isMobile) {
+        await expect(page.getByRole('navigation', { name: 'Основна навігація' })).toHaveCount(0);
+        await expectTouchFriendly(page.getByRole('main'), 'builder');
+      }
+    });
+
+    test('the session: a timer that is not live, aria-pressed sets, the footer names the set, the rest is announced once', async ({
+      app,
+      page,
+      isMobile,
+    }) => {
+      await app.goto('/');
+      await app
+        .region('Сьогодні')
+        .getByRole('button', { name: 'Почати тренування «Ноги + прес»', exact: true })
+        .click();
+      await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+
+      const timer = page.getByRole('timer', { name: /^Тривалість \d+:\d\d$/ });
+      await expect(timer).toBeVisible();
+      await expect(timer).not.toHaveAttribute('aria-live', /polite|assertive/);
+      const squat = sessionCard(page, 'Присідання зі штангою');
+      await expect(squat).toHaveAttribute('aria-current', 'step');
+      await expect(page.locator('li[aria-current="step"]')).toHaveCount(1);
+      await expect(setCheck(squat, 1)).toHaveAttribute('aria-pressed', 'false');
+      await expect(squat.getByRole('list', { name: 'Підходи: Присідання зі штангою' })).toBeVisible();
+
+      const footer = footerConfirm(page);
+      await expectLabelInName(footer, 'footer confirm');
+      await expect(footer).toHaveAccessibleName(/^✓ Підхід 1 · 12 × 40\sкг$/);
+      expect((await box(footer, 'footer')).height, 'footer button height').toBeGreaterThanOrEqual(44);
+      expect(await contrastOf(footer), 'footer text contrast').toBeGreaterThanOrEqual(4.5);
+      await footer.click();
+      await expect(setCheck(squat, 1)).toHaveAttribute('aria-pressed', 'true');
+      await expect(footer).toHaveAccessibleName(/^✓ Підхід 2 · /);
+
+      // The rest bar: a named group; its time is a timer; the end is said once, politely.
+      const rest = restBar(page);
+      await expect(rest.getByRole('timer')).toBeVisible();
+      for (const name of ['Відпочинок: мінус 15 секунд', 'Відпочинок: плюс 15 секунд', 'Пропустити'])
+        await expectLabelInName(rest.getByRole('button', { name, exact: true }), name);
+      const announce = page.locator('[aria-live="polite"]').filter({ hasText: 'Час! Наступний підхід' });
+      await expect(announce).toHaveCount(0);
+      await page.clock.fastForward(95_000);
+      await expect(rest.getByRole('timer')).toHaveText(/^Відпочинок завершено/);
+      await expect(announce).toHaveCount(1);
+      await expect(announce).toHaveText('Час! Наступний підхід');
+      expect(await contrastOf(rest.getByRole('timer')), 'rest text contrast').toBeGreaterThanOrEqual(4.5);
+      await expectStill(rest, 'rest bar');
+      if (isMobile) {
+        await expect(page.getByRole('navigation', { name: 'Основна навігація' })).toHaveCount(0);
+        // The bar never covers the footer button.
+        const bar = await box(rest, 'rest bar');
+        const btn = await box(footer, 'footer');
+        expect(bar.y + bar.height, 'the rest bar sits above the footer button').toBeLessThanOrEqual(
+          btn.y + 0.5,
+        );
+        // «‹ Згорнути» is the known 42px back link (the .fixme «the back links of the workouts pages» below).
+        await expectTouchFriendly(page.getByRole('main'), 'session', WORKOUTS_BACK_LINK);
+      }
+
+      // The card menu is a real menu button.
+      const more = squat.getByRole('button', { name: 'Дії: Присідання зі штангою', exact: true });
+      await expect(more).toHaveAttribute('aria-haspopup', 'menu');
+      await more.click();
+      await expect(page.getByRole('menuitem', { name: 'Пропустити вправу', exact: true })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expectNoNestedControls(page.getByRole('main'), 'session');
+    });
+
+    test('the session on another device is read-only: the banner, «Продовжити тут», no toggles', async ({
+      page,
+      server,
+    }) => {
+      const data = trainingSeed();
+      data.sessions = [
+        ...data.sessions,
+        e2eSession({
+          id: 'e2eOtherDevice01',
+          workoutId: 'demoWorkoutLegs',
+          name: 'Ноги + прес',
+          deviceId: 'e2eOtherPhone001',
+          createdAt: NOW - 10 * 60_000,
+          startedAt: NOW - 10 * 60_000,
+        }),
+      ];
+      await server.importData(data);
+      await page.goto('/workouts/session/e2eOtherDevice01');
+      await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+      const banner = page.getByText('Тренування триває на іншому пристрої', { exact: true });
+      await expect(banner).toBeVisible();
+      expect(await contrastOf(banner), 'banner text contrast').toBeGreaterThanOrEqual(4.5);
+      const takeOver = page.getByRole('button', { name: 'Продовжити тут', exact: true });
+      await expect(takeOver).toBeVisible();
+      expect((await box(takeOver, '«Продовжити тут»')).height).toBeGreaterThanOrEqual(32);
+      await expect(page.locator('button[aria-pressed]')).toHaveCount(0);
+      await expect(footerConfirm(page)).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Завершити', exact: true })).toHaveCount(0);
+      // Read-only sets still say whether they are done.
+      await expect(page.getByText('не виконано', { exact: true }).first()).toBeAttached();
+      await takeOver.click();
+      await expect(banner).toHaveCount(0);
+      await expect(footerConfirm(page)).toBeVisible();
+    });
+
+    test('the summary and the steps sheet: a status line, the strip, records; a labelled big input with named steppers', async ({
+      app,
+      page,
+      server,
+      isMobile,
+    }) => {
+      await page.goto(`/workouts/session/${await latestLegs(server)}`);
+      await expect(pageTitle(page, 'Ноги + прес')).toBeVisible();
+      // «✓ Тренування збережено» is only said right after finishing.
+      await expect(page.getByRole('status').filter({ hasText: 'Тренування збережено' })).toHaveCount(0);
+      const strip = page.getByLabel('Підсумок тренування', { exact: true });
+      await expect(strip).toBeVisible();
+      await expect(strip.getByRole('term')).toHaveText(['Тривалість', 'Обʼєм', 'Підходів', 'Спалено']);
+      const records = page.getByRole('region', { name: 'Нові рекорди', exact: true });
+      await expect(records).toContainText(/Присідання зі штангою\s*40\sкг \(було 37,5\)/);
+      const exerciseLink = page.getByRole('link', { name: /^Присідання зі штангою/ }).first();
+      await expect(exerciseLink).toHaveAttribute('href', '/workouts/library/lib.back-squat');
+      await expect(page.getByRole('button', { name: 'Змінити', exact: true })).toBeVisible();
+      await expectNoNestedControls(page.getByRole('main'), 'summary');
+      if (isMobile) await expectTouchFriendly(page.getByRole('main'), 'summary');
+
+      await app.goto('/?sheet=steps');
+      const sheet = app.sheet('Кроки');
+      await expect(sheet).toHaveAttribute('aria-modal', 'true');
+      await settled(sheet);
+      const input = sheet.getByRole('textbox', { name: 'Кроки за день', exact: true });
+      await expect(input).toHaveAttribute('inputmode', 'numeric');
+      expect(await input.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(
+        28,
+      );
+      for (const name of ['Мінус 1000 кроків', 'Мінус 500 кроків', 'Плюс 500 кроків', 'Плюс 1000 кроків'])
+        await expectLabelInName(sheet.getByRole('button', { name, exact: true }), name);
+      await sheet.getByRole('button', { name: 'Плюс 1000 кроків', exact: true }).click();
+      await expect(input).toHaveValue('1 000');
+      await expect(sheet.getByText('Ціль 8 000 — ще 7 000', { exact: true })).toBeVisible();
+      expect(await contrastOf(input), 'the count contrast').toBeGreaterThanOrEqual(4.5);
+      for (const name of ['Попередній день', 'Наступний день'])
+        await expect(sheet.getByRole('button', { name, exact: true })).toBeVisible();
+      await expectNoNestedControls(sheet, 'steps sheet');
+      await expectStill(sheet, 'steps sheet');
+      if (isMobile) await expectTouchFriendly(sheet, 'steps sheet');
+    });
+
+    // FIXME(app bug, features/workouts/PageHeader): like ScreenHeader's «‹ Налаштування» (the .fixme above), the back
+    // link of the workouts pages is 44px tall but the <h1> below overlaps its bottom 2px, so a finger reaches 42px
+    // (measured: 61×42 on «Мої тренування», the builder, the summary and the live session). Remove the .fixme (and
+    // WORKOUTS_BACK_LINK) once the header leaves the link its 44px.
+    test.fixme('the back links of the workouts pages reach 44px', async ({ app, page, server }) => {
+      const sizes: Record<string, string> = {};
+      for (const path of [
+        '/workouts',
+        '/workouts/edit/demoWorkoutLegs',
+        `/workouts/session/${await latestLegs(server)}`,
+      ]) {
+        await page.goto(path);
+        await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+        sizes[path] = await hitArea(page.locator(WORKOUTS_BACK_LINK).first());
+      }
+      await app.goto('/');
+      await app.region('Сьогодні').getByRole('button', { name: 'Почати тренування «Ноги + прес»' }).click();
+      sizes['live session'] = await hitArea(page.locator(WORKOUTS_BACK_LINK).first());
+      expect(below44(sizes)).toEqual([]);
+    });
+
+    test.describe('the coach (stubbed)', () => {
+      test.use({ account: 'admin' });
+
+      test('«Тренування» of a client: a named period card, session groups of static rows; the «Кроки» column', async ({
+        page,
+        admin,
+        isMobile,
+      }) => {
+        await stubCoach(page, admin);
+        if (!isMobile) {
+          await openClients(page);
+          const steps = columnHeader(page, 'Кроки');
+          await expect(steps).toHaveAttribute('scope', 'col');
+          await expect(steps).toHaveAttribute('aria-sort', 'none');
+          await expect(steps.getByRole('button')).toBeVisible();
+          // The cell is read as a sentence, not as «8 300 / 8 000».
+          await expect(clientRow(page, 'sofia')).toContainText(
+            /кроків у середньому [\d\s]+ на день за 7 днів, ціль 8\s000/,
+          );
+        }
+
+        await page.goto(`/coach/${COACH_STUB_IDS.sofia}?tab=workouts&days=30`);
+        await expect(page.getByRole('heading', { level: 1, name: 'sofia', exact: true })).toBeVisible();
+        await expectCurrentTab(page, 'Тренування');
+        await expect(page.getByRole('heading', { level: 2, name: 'Тренування', exact: true })).toBeAttached();
+        const period = page.getByRole('region', { name: 'За 30 днів', exact: true });
+        await expect(period).toContainText('Розклад: ');
+        expect(
+          await contrastOf(period.getByText(/^Розклад: /)),
+          'schedule line contrast',
+        ).toBeGreaterThanOrEqual(4.5);
+        const group = page.getByRole('region', { name: '12 жовтня · Ноги + прес', exact: true });
+        await expect(group).toContainText('Присідання зі штангою');
+        const main = page.getByRole('main');
+        await expect(group.getByRole('button')).toHaveCount(0);
+        await expect(period.getByRole('button')).toHaveCount(0);
+        await expect(group.getByRole('link')).toHaveCount(0);
+        await expect(main.locator('a[href^="/workouts"]')).toHaveCount(0);
+        for (const role of ['checkbox', 'switch', 'textbox', 'spinbutton'] as const)
+          await expect(main.getByRole(role)).toHaveCount(0);
+        await expectNoSideScroll(page, 'coach «Тренування»');
+        expect(await inputsBelow16px(page), 'coach «Тренування» inputs').toEqual([]);
+        if (isMobile) await expectTouchFriendly(main, 'coach «Тренування»');
+      });
+    });
+  });
+}
